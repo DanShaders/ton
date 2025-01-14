@@ -490,6 +490,20 @@ bool ContestValidateQuery::extract_collated_data() {
   return true;
 }
 
+td::Result<Ref<ShardState>> ContestValidateQuery::fetch_block_state(BlockIdExt block_id) {
+  Ref<vm::Cell> state_root = get_virt_state_root(block_id.root_hash);
+  if (state_root.is_null()) {
+    return td::Status::Error(PSTRING() << "cannot get hash of state root: " << block_id.to_str());
+  }
+  td::Bits256 state_root_hash = state_root->get_hash().bits();
+  auto it = virt_roots_.find(state_root_hash);
+  if (it == virt_roots_.end()) {
+    return td::Status::Error(PSTRING() << "cannot get state root from collated data: " << block_id.to_str());
+  }
+  TRY_RESULT(res, ShardStateQ::fetch(block_id, {}, it->second));
+  return Ref<ShardState>(res);
+}
+
 /**
  * Callback function called after retrieving the masterchain state referenced int the block.
  *
@@ -745,6 +759,11 @@ bool ContestValidateQuery::fetch_config_params() {
     action_phase_cfg_.message_skip_enabled = config_->get_global_version() >= 8;
     action_phase_cfg_.disable_custom_fess = config_->get_global_version() >= 8;
     action_phase_cfg_.mc_blackhole_addr = config_->get_burning_config().blackhole_addr;
+    action_phase_cfg_.extra_currency_v2 = config_->get_global_version() >= 10;
+  }
+  {
+    serialize_cfg_.extra_currency_v2 = config_->get_global_version() >= 10;
+    serialize_cfg_.store_storage_dict_hash = config_->get_global_version() >= 11;
   }
   {
     // fetch block_grams_created
@@ -4873,7 +4892,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     return reject_query(PSTRING() << "cannot re-create bounce phase of  transaction " << lt << " for smart contract "
                                   << addr.to_hex());
   }
-  if (!trs->serialize()) {
+  if (!trs->serialize(serialize_cfg_)) {
     return reject_query(PSTRING() << "cannot re-create the serialization of  transaction " << lt
                                   << " for smart contract " << addr.to_hex());
   }
@@ -4909,7 +4928,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   }
   // now compare the re-created transaction with the one we have
   if (trans_root2->get_hash() != trans_root->get_hash()) {
-    if (verbosity >= 3 * 0) {
+    if (verbosity >= 3) {
       std::cerr << "original transaction " << lt << " of " << addr.to_hex() << ": ";
       block::gen::t_Transaction.print_ref(std::cerr, trans_root);
       std::cerr << "re-created transaction " << lt << " of " << addr.to_hex() << ": ";
