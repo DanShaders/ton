@@ -1,6 +1,5 @@
 #pragma once
 
-#include "interfaces/validator-manager.h"
 #include "vm/cells.h"
 #include "vm/dict.h"
 #include "block/mc-config.h"
@@ -87,7 +86,7 @@ class ContestValidateQuery : public td::actor::Actor {
   }
   static constexpr long long supported_capabilities() {
     return ton::capCreateStatsEnabled | ton::capBounceMsgBody | ton::capReportVersion | ton::capShortDequeue |
-           ton::capStoreOutMsgQueueSize | ton::capMsgMetadata | ton::capDeferMessages | ton::capFullCollatedData;
+           ton::capStoreOutMsgQueueSize | ton::capMsgMetadata | ton::capDeferMessages;
   }
 
  public:
@@ -167,6 +166,7 @@ class ContestValidateQuery : public td::actor::Actor {
   block::StoragePhaseConfig storage_phase_cfg_{&storage_prices_};
   block::ComputePhaseConfig compute_phase_cfg_;
   block::ActionPhaseConfig action_phase_cfg_;
+  block::SerializeConfig serialize_cfg_;
   td::RefInt256 masterchain_create_fee_, basechain_create_fee_;
 
   std::vector<block::McShardDescr> neighbors_;
@@ -236,19 +236,7 @@ class ContestValidateQuery : public td::actor::Actor {
     return actor_id(this);
   }
 
-  td::Result<Ref<ShardState>> fetch_block_state(BlockIdExt block_id) {
-    Ref<vm::Cell> state_root = get_virt_state_root(block_id.root_hash);
-    if (state_root.is_null()) {
-      return td::Status::Error(PSTRING() << "cannot get hash of state root: " << block_id.to_str());
-    }
-    td::Bits256 state_root_hash = state_root->get_hash().bits();
-    auto it = virt_roots_.find(state_root_hash);
-    if (it == virt_roots_.end()) {
-      return td::Status::Error(PSTRING() << "cannot get state root from collated data: " << block_id.to_str());
-    }
-    TRY_RESULT(res, ShardStateQ::fetch(block_id, {}, it->second));
-    return Ref<ShardState>(res);
-  }
+  td::Result<Ref<ShardState>> fetch_block_state(BlockIdExt block_id);
 
   void after_get_mc_state(td::Result<Ref<ShardState>> res);
   void after_get_shard_state(int idx, td::Result<Ref<ShardState>> res);
