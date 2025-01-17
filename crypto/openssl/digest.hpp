@@ -23,6 +23,7 @@
 #include <openssl/opensslv.h>
 
 #include "td/utils/Slice.h"
+#include "openssl/serenity/sha2.hpp"
 
 namespace digest {
 struct OpensslEVP_SHA1 {
@@ -44,6 +45,10 @@ struct OpensslEVP_SHA512 {
   static const EVP_MD *get_evp() {
     return EVP_sha512();
   }
+};
+
+struct Serenity_SHA256 {
+  enum { digest_bytes = 32 };
 };
 
 template <typename H>
@@ -123,8 +128,51 @@ std::string HashCtx<H>::extract() {
   return std::string((char *)buffer, olen);
 }
 
+template <>
+class HashCtx<Serenity_SHA256> {
+ public:
+  enum { digest_bytes = Serenity_SHA256::digest_bytes };
+
+  HashCtx() = default;
+  HashCtx(const void *data, std::size_t len) {
+    feed(data, len);
+  }
+
+  void reset() {
+    hasher.reset();
+  }
+
+  void feed(const void *data, std::size_t len) {
+    hasher.update(reinterpret_cast<char const *>(data), len);
+  }
+
+  void feed(td::Slice slice) {
+    hasher.update(slice.begin(), slice.size());
+  }
+
+  std::size_t extract(unsigned char buffer[digest_bytes]) {
+    hasher.digest({buffer, digest_bytes});
+    return digest_bytes;
+  }
+
+  std::size_t extract(td::MutableSlice slice) {
+    hasher.digest(slice);
+    return digest_bytes;
+  }
+
+  std::string extract() {
+    std::string result;
+    result.resize(digest_bytes);
+    extract({result.data(), digest_bytes});
+    return result;
+  }
+
+ private:
+  serenity::SHA256 hasher;
+};
+
 typedef HashCtx<OpensslEVP_SHA1> SHA1;
-typedef HashCtx<OpensslEVP_SHA256> SHA256;
+typedef HashCtx<Serenity_SHA256> SHA256;
 typedef HashCtx<OpensslEVP_SHA512> SHA512;
 
 template <typename T>

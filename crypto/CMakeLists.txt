@@ -37,6 +37,8 @@ set(TON_CRYPTO_CORE_SOURCE
   ellcurve/Montgomery.h
   ellcurve/TwEdwards.h
 
+  openssl/serenity/sha2.cpp
+  openssl/serenity/sha2.hpp
   openssl/bignum.h
   openssl/digest.hpp
   openssl/rand.hpp
