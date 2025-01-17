@@ -34,7 +34,8 @@ static td::uint64 get_cpu_usage() {
 
 class ContestGrader : public td::actor::Actor {
  public:
-  explicit ContestGrader(std::string tests_dir) : tests_dir_(tests_dir) {
+  explicit ContestGrader(std::string tests_dir, bool skip_verification)
+      : tests_dir_(tests_dir), skip_verification_(skip_verification) {
   }
 
   void start_up() override {
@@ -142,35 +143,37 @@ class ContestGrader : public td::actor::Actor {
 
   void got_solution_result(td::Result<td::BufferSlice> res, bool valid, td::Ref<vm::Cell> original_merkle_update,
                            double elapsed, double cpu_time) {
-    bool got_valid = res.is_ok();
-    if (got_valid != valid) {
-      printf("%*lu  %-*s %8.5f %8.5f  ERROR  expected %s, found %s\n", (int)test_idx_column_width_, test_idx_ + 1,
-             (int)test_name_column_width_, test_files_[test_idx_].c_str(), elapsed, cpu_time,
-             (valid ? "VALID" : "INVALID"), (got_valid ? "VALID" : "INVALID"));
-      fflush(stdout);
-      ++cnt_fail_;
-      ++test_idx_;
-      run_next_test();
-      return;
-    }
-    if (!valid) {
-      printf("%*lu  %-*s %8.5f %8.5f  OK     block is INVALID\n", (int)test_idx_column_width_, test_idx_ + 1,
-             (int)test_name_column_width_, test_files_[test_idx_].c_str(), elapsed, cpu_time);
-      fflush(stdout);
-      ++cnt_ok_;
-      ++test_idx_;
-      run_next_test();
-      return;
-    }
-    auto S = check_merkle_update(res.move_as_ok(), original_merkle_update);
-    if (S.is_error()) {
-      printf("%*lu  %-*s %8.5f %8.5f  ERROR  invalid Merkle update %s\n", (int)test_idx_column_width_, test_idx_ + 1,
-             (int)test_name_column_width_, test_files_[test_idx_].c_str(), elapsed, cpu_time, S.to_string().c_str());
-      fflush(stdout);
-      ++cnt_fail_;
-      ++test_idx_;
-      run_next_test();
-      return;
+    if (!skip_verification_) {
+      bool got_valid = res.is_ok();
+      if (got_valid != valid) {
+        printf("%*lu  %-*s %8.5f %8.5f  ERROR  expected %s, found %s\n", (int)test_idx_column_width_, test_idx_ + 1,
+               (int)test_name_column_width_, test_files_[test_idx_].c_str(), elapsed, cpu_time,
+               (valid ? "VALID" : "INVALID"), (got_valid ? "VALID" : "INVALID"));
+        fflush(stdout);
+        ++cnt_fail_;
+        ++test_idx_;
+        run_next_test();
+        return;
+      }
+      if (!valid) {
+        printf("%*lu  %-*s %8.5f %8.5f  OK     block is INVALID\n", (int)test_idx_column_width_, test_idx_ + 1,
+               (int)test_name_column_width_, test_files_[test_idx_].c_str(), elapsed, cpu_time);
+        fflush(stdout);
+        ++cnt_ok_;
+        ++test_idx_;
+        run_next_test();
+        return;
+      }
+      auto S = check_merkle_update(res.move_as_ok(), original_merkle_update);
+      if (S.is_error()) {
+        printf("%*lu  %-*s %8.5f %8.5f  ERROR  invalid Merkle update %s\n", (int)test_idx_column_width_, test_idx_ + 1,
+               (int)test_name_column_width_, test_files_[test_idx_].c_str(), elapsed, cpu_time, S.to_string().c_str());
+        fflush(stdout);
+        ++cnt_fail_;
+        ++test_idx_;
+        run_next_test();
+        return;
+      }
     }
 
     printf("%*lu  %-*s %8.5f %8.5f  OK     block is VALID\n", (int)test_idx_column_width_, test_idx_ + 1,
@@ -221,12 +224,15 @@ class ContestGrader : public td::actor::Actor {
 
   double total_time_ = 0.0;
   double total_cpu_time_ = 0.0;
+
+  bool skip_verification_ = false;
 };
 
 int main(int argc, char* argv[]) {
   SET_VERBOSITY_LEVEL(verbosity_ERROR);
 
   td::actor::ActorOwn<ContestGrader> x;
+  bool skip_verification = false;
   td::unique_ptr<td::LogInterface> logger_;
   SCOPE_EXIT {
     td::log_interface = td::default_log_interface;
@@ -253,11 +259,12 @@ int main(int argc, char* argv[]) {
     TRY_RESULT_ASSIGN(threads, td::to_integer_safe<td::uint32>(arg));
     return td::Status::OK();
   });
+  p.add_option(0, "skip-verification", "skip verification of Merkle updates", [&]() { skip_verification = true; });
 
   p.run(argc, argv).ensure();
   td::actor::Scheduler scheduler({threads});
 
-  scheduler.run_in_context([&] { x = td::actor::create_actor<ContestGrader>("grader", tests_dir); });
+  scheduler.run_in_context([&] { x = td::actor::create_actor<ContestGrader>("grader", tests_dir, skip_verification); });
   while (scheduler.run(1)) {
   }
 
