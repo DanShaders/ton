@@ -314,5 +314,11 @@ function(Main)
     endif()
 endfunction()
 
+option(SKIP_GIT_STATE_CHECK_AT_BUILD "Don't check git repository state during build" OFF)
+
 # And off we go...
-Main()
+if (SKIP_GIT_STATE_CHECK_AT_BUILD)
+    add_custom_target(check_git)
+else()
+    Main()
+endif()
