@@ -328,14 +328,14 @@ TEST(Rldp2, Pacer) {
   LOG_CHECK(passed > 9.9 && passed < 10.1) << passed;
 }
 
-class Sleep : public td::actor::Actor {
+class Sleep1 : public td::actor::Actor {
  public:
-  static void put_to_sleep(td::actor::ActorId<Sleep> sleep, td::Timestamp till, td::Promise<td::Unit> promise) {
-    send_closure(sleep, &Sleep::do_put_to_sleep, till, std::move(promise));
+  static void put_to_sleep(td::actor::ActorId<Sleep1> sleep, td::Timestamp till, td::Promise<td::Unit> promise) {
+    send_closure(sleep, &Sleep1::do_put_to_sleep, till, std::move(promise));
   }
 
   static TD_WARN_UNUSED_RESULT auto create() {
-    return td::actor::create_actor<Sleep>("Sleep");
+    return td::actor::create_actor<Sleep1>("Sleep");
   }
 
  private:
@@ -454,11 +454,11 @@ class NetChannel : public td::actor::Actor {
   };
 
   static TD_WARN_UNUSED_RESULT td::actor::ActorOwn<NetChannel> create(Options options,
-                                                                      td::actor::ActorId<Sleep> sleep) {
+                                                                      td::actor::ActorId<Sleep1> sleep) {
     return td::actor::create_actor<NetChannel>("NetChannel", options, std::move(sleep));
   }
 
-  NetChannel(Options options, td::actor::ActorId<Sleep> sleep) : options_(options), sleep_(std::move(sleep)) {
+  NetChannel(Options options, td::actor::ActorId<Sleep1> sleep) : options_(options), sleep_(std::move(sleep)) {
   }
 
   td::uint64 total_sent() const {
@@ -502,7 +502,7 @@ class NetChannel : public td::actor::Actor {
   double got_{0};
   td::Timestamp got_at_{};
 
-  td::actor::ActorId<Sleep> sleep_;
+  td::actor::ActorId<Sleep1> sleep_;
 
   void loop() override {
     auto now = td::Timestamp::now();
@@ -520,7 +520,7 @@ class NetChannel : public td::actor::Actor {
       got_ -= (double)query.size;
       total_size_ -= (double)query.size;
       out_cnt_++;
-      Sleep::put_to_sleep(sleep_, td::Timestamp::in(options_.rtt), std::move(query.promise));
+      Sleep1::put_to_sleep(sleep_, td::Timestamp::in(options_.rtt), std::move(query.promise));
     }
 
     if (queue_.empty()) {
@@ -632,7 +632,7 @@ struct RldpBasicTest {
   class Test : public td::actor::Actor {
    public:
     Test(Options options, td::actor::ActorOwn<Rldp> alice, td::actor::ActorOwn<Rldp> bob,
-         td::actor::ActorOwn<Sleep> sleep, Rldp::Stats *alice_stats, Rldp::Stats *bob_stats)
+         td::actor::ActorOwn<Sleep1> sleep, Rldp::Stats *alice_stats, Rldp::Stats *bob_stats)
         : options_(options)
         , alice_(std::move(alice))
         , bob_(std::move(bob))
@@ -645,7 +645,7 @@ struct RldpBasicTest {
     Options options_;
     td::actor::ActorOwn<Rldp> alice_;
     td::actor::ActorOwn<Rldp> bob_;
-    td::actor::ActorOwn<Sleep> sleep_;
+    td::actor::ActorOwn<Sleep1> sleep_;
 
     Rldp::Stats *alice_stats_;
     Rldp::Stats *bob_stats_;
@@ -731,7 +731,7 @@ struct RldpBasicTest {
     auto bob_stats = std::make_unique<Rldp::Stats>();
 
     scheduler.run_in_context([&] {
-      auto sleep = Sleep::create();
+      auto sleep = Sleep1::create();
       auto alice_to_bob = NetChannel::create(options.net_options, sleep.get());
       auto bob_to_alice = NetChannel::create(options.net_options, sleep.get());
 
@@ -1159,9 +1159,9 @@ TEST(Torrent, Peer) {
     std::map<ton::PeerId, td::actor::ActorOwn<NetChannel>> inbound_channel_;
     std::map<ton::PeerId, td::actor::ActorOwn<NetChannel>> outbound_channel_;
 
-    td::actor::ActorOwn<Sleep> sleep_;
+    td::actor::ActorOwn<Sleep1> sleep_;
     void start_up() override {
-      sleep_ = Sleep::create();
+      sleep_ = Sleep1::create();
     }
 
     td::actor::ActorId<NetChannel> get_outbound_channel(ton::PeerId peer_id) {

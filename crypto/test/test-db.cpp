@@ -1015,8 +1015,9 @@ void with_all_boc_options(F &&f, size_t tests_n = 500) {
       options.seed = i == 0 ? 123 : i;
       f(options);
       auto after = counter();
-      LOG_CHECK((options.o_in_memory && options.o_in_memory->use_arena) || before == after)
-          << before << " vs " << after;
+      CHECK((options.o_in_memory && options.o_in_memory->use_arena) || before == after);
+      //LOG_CHECK((options.o_in_memory && options.o_in_memory->use_arena) || before == after)
+      //    << before << " vs " << after;
     }
   };
   run({.async_executor = std::make_shared<ThreadExecutor>(4)});
