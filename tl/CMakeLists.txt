@@ -7,6 +7,11 @@ add_library(tl_api STATIC
 	tl/tl_object_parse.h 
 	tl/tl_object_store.h 
 	tl/TlObject.h)
+
+if (MSVC)
+  target_compile_options(tl_api PRIVATE /bigobj)
+endif()
+
 add_dependencies(tl_api tl_generate_common)
 target_link_libraries(tl_api tdutils)
 target_include_directories(tl_api PUBLIC

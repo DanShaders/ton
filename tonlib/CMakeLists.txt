@@ -55,6 +55,10 @@ set(USE_EMSCRIPTEN ${USE_EMSCRIPTEN} PARENT_SCOPE)
 
 add_library(tonlib STATIC ${TONLIB_SOURCE})
 
+if (MSVC)
+  target_compile_options(tonlib PRIVATE /bigobj)
+endif()
+
 target_include_directories(tonlib PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>/..

@@ -211,6 +211,10 @@ target_include_directories(full-node PUBLIC
 
 target_link_libraries(validator PRIVATE tdactor adnl rldp tl_api dht tdfec overlay catchain validatorsession ton_db)
 
+if (MSVC)
+  target_compile_options(validator PRIVATE /bigobj)
+endif()
+
 target_link_libraries(validator-disk PRIVATE tdactor adnl rldp tl_api dht tdfec overlay catchain validatorsession ton_db)
 
 target_link_libraries(validator-hardfork PRIVATE tdactor adnl rldp tl_api dht tdfec overlay catchain validatorsession ton_db)
