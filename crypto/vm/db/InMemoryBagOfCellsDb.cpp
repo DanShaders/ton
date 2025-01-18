@@ -711,8 +711,9 @@ class CellStorage {
         auto full_cell = full_cell_ptr->cell;
         auto to_destroy = cell.reset_ref_unsafe(i, std::move(full_cell));
         if (!to_destroy->is_loaded()) {
-          Ref<PrunnedCell<ArenaPrunnedCellCreator::Counter>> x(std::move(to_destroy));
-          x->~PrunnedCell<ArenaPrunnedCellCreator::Counter>();
+          using PrunnedCellType = PrunnedCell<ArenaPrunnedCellCreator::Counter>;
+          Ref<PrunnedCellType> x{std::move(to_destroy)};
+          x->~PrunnedCellType();
           x.release();
         } else {
           bucket.boc_count_++;
