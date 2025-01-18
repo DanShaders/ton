@@ -20,11 +20,66 @@
 #include "vm/vm.h"
 #include "vm/cells/MerkleUpdate.h"
 
-#include <sys/resource.h>
+#ifndef TD_WINDOWS
+  #include <sys/resource.h>
+#endif
 
 using namespace ton;
 
 static constexpr td::uint64 CPU_USAGE_PER_SEC = 1000000;
+
+#ifdef TD_WINDOWS
+
+#define RUSAGE_SELF 0
+#define RUSAGE_CHILDREN (-1)
+
+namespace {
+
+struct rusage
+{
+  struct timeval ru_utime; /* user time used */
+  struct timeval ru_stime; /* system time used */
+};
+
+/// from PostgreSQL: https://github.com/postgres/postgres/blob/7559d8ebfa11d98728e816f6b655582ce41150f3/src/port/getrusage.c
+int getrusage(int who, struct rusage* rusage) {
+  FILETIME starttime;
+  FILETIME exittime;
+  FILETIME kerneltime;
+  FILETIME usertime;
+  ULARGE_INTEGER li;
+
+  if (who != RUSAGE_SELF) {
+    /* Only RUSAGE_SELF is supported in this implementation for now */
+    errno = EINVAL;
+    return -1;
+  }
+
+  if (rusage == (struct rusage*)NULL) {
+    errno = EFAULT;
+    return -1;
+  }
+  memset(rusage, 0, sizeof(struct rusage));
+  if (GetProcessTimes(GetCurrentProcess(), &starttime, &exittime, &kerneltime, &usertime) == 0) {
+    return -1;
+  }
+
+  /* Convert FILETIMEs (0.1 us) to struct timeval */
+  memcpy(&li, &kerneltime, sizeof(FILETIME));
+  li.QuadPart /= 10L; /* Convert to microseconds */
+  rusage->ru_stime.tv_sec = li.QuadPart / 1000000L;
+  rusage->ru_stime.tv_usec = li.QuadPart % 1000000L;
+
+  memcpy(&li, &usertime, sizeof(FILETIME));
+  li.QuadPart /= 10L; /* Convert to microseconds */
+  rusage->ru_utime.tv_sec = li.QuadPart / 1000000L;
+  rusage->ru_utime.tv_usec = li.QuadPart % 1000000L;
+
+  return 0;
+}
+
+} // namespace
+#endif
 
 static td::uint64 get_cpu_usage() {
   rusage usage;
@@ -32,9 +87,19 @@ static td::uint64 get_cpu_usage() {
   return (td::uint64)usage.ru_utime.tv_sec * 1000000 + (td::uint64)usage.ru_utime.tv_usec;
 }
 
+void path_normalize_slashes(std::string &path) {
+  std::replace(path.begin(), path.end(), '\\', '/');
+}
+
+std::string path_normalize_slashes_copy(std::string path) {
+  path_normalize_slashes(path);
+  return path;
+}
+
 class ContestGrader : public td::actor::Actor {
  public:
   explicit ContestGrader(std::string tests_dir) : tests_dir_(tests_dir) {
+    path_normalize_slashes(tests_dir);
   }
 
   void start_up() override {
@@ -43,10 +108,11 @@ class ContestGrader : public td::actor::Actor {
     run_next_test();
   }
 
+ private:
   void scan_tests_dir() {
     auto walk_status = td::WalkPath::run(tests_dir_, [&](td::CSlice name, td::WalkPath::Type type) {
       if (type == td::WalkPath::Type::NotDir && td::ends_with(name, ".bin")) {
-        test_files_.push_back(td::PathView::relative(name.str(), tests_dir_).str());
+        test_files_.push_back(td::PathView::relative(path_normalize_slashes_copy(name.str()), tests_dir_).str());
       }
       return td::WalkPath::Action::Continue;
     });
