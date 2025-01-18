@@ -35,7 +35,7 @@ SymDef* predefine_builtin_func(std::string name, TypeExpr* func_type) {
   if (name.back() == '_') {
     prohibited_var_names.insert(name);
   }
-  sym_idx_t name_idx = sym::symbols.lookup(name, 1);
+  sym_idx_t name_idx = sym::symbols.lookup(false, name, 1);
   if (sym::symbols.is_keyword(name_idx)) {
     std::cerr << "fatal: global function `" << name << "` already defined as a keyword" << std::endl;
   }

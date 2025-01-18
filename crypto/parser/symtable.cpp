@@ -47,7 +47,7 @@ std::string Symbol::unknown_symbol_name(sym_idx_t i) {
   }
 }
 
-sym_idx_t SymTableBase::gen_lookup(std::string str, int mode, sym_idx_t idx) {
+sym_idx_t SymTableBase::gen_lookup(bool is_tlbc, std::string str, int mode, sym_idx_t idx) {
   unsigned long long h1 = 1, h2 = 1;
   for (char c : str) {
     h1 = ((h1 * 239) + (unsigned char)(c)) % p;
@@ -71,18 +71,18 @@ sym_idx_t SymTableBase::gen_lookup(std::string str, int mode, sym_idx_t idx) {
       if (def_sym >= ((long long)p * 3) / 4) {
         throw SymTableOverflow{def_sym};
       }
-      sym_table[h1] = std::make_unique<Symbol>(str, idx <= 0 ? sym_idx_t(h1) : -idx);
+      sym_table[h1] = std::make_unique<Symbol>(is_tlbc, str, idx <= 0 ? sym_idx_t(h1) : -idx);
       ++def_sym;
       return sym_idx_t(h1);
     }
   }
 }
 
-SymTableBase& SymTableBase::add_keyword(std::string str, sym_idx_t idx) {
+SymTableBase& SymTableBase::add_keyword(bool _in_tlbc, std::string str, sym_idx_t idx) {
   if (idx <= 0) {
     idx = ++def_kw;
   }
-  sym_idx_t res = gen_lookup(str, -1, idx);
+  sym_idx_t res = gen_lookup(_in_tlbc, str, -1, idx);
   if (!res) {
     throw SymTableKwRedef{str};
   }
@@ -139,8 +139,8 @@ SymDef* lookup_symbol(sym_idx_t idx, int flags) {
   return nullptr;
 }
 
-SymDef* lookup_symbol(std::string name, int flags) {
-  return lookup_symbol(symbols.lookup(name), flags);
+SymDef* lookup_symbol(bool _in_tlbc, std::string name, int flags) {
+  return lookup_symbol(symbols.lookup(_in_tlbc, name), flags);
 }
 
 SymDef* define_global_symbol(sym_idx_t name_idx, bool force_new, const src::SrcLocation& loc) {
@@ -176,6 +176,64 @@ SymDef* define_symbol(sym_idx_t name_idx, bool force_new, const src::SrcLocation
   found = sym_def[name_idx] = new SymDef(scope_level, name_idx, loc);
   symbol_stack.push_back(std::make_pair(scope_level, SymDef{0, name_idx}));
   return found;
+}
+
+}
+
+namespace sym {
+
+enum class IdSc : char { undef = 0, lc = 1, uc = 2, blc = 3 };
+// subclass:
+// 1 = first letter or first letter after last . is lowercase
+// 2 = ... uppercase
+// 3 = 1 + first character (after last ., if present) is a !
+// 0 = else
+int compute_symbol_subclass_tldb(std::string str) {
+  IdSc res = IdSc::undef;
+  int t = 0, s = 0;
+  for (char c : str) {
+    if (c == '.') {
+      res = IdSc::undef;
+      s = t = 0;
+    } else if (res == IdSc::undef) {
+      if (!s) {
+        s = (c == '!' ? 1 : -1);
+      }
+      if ((c | 0x20) >= 'a' && (c | 0x20) <= 'z') {
+        res = (c & 0x20 ? IdSc::lc : IdSc::uc);
+      }
+      if (t && (((unsigned)c & 0xc0) == 0x80)) {
+        t = (t << 6) | ((unsigned)c & 0x3f);
+        if (t >= 0x410 && t < 0x450) {
+          res = (t < 0x430 ? IdSc::uc : IdSc::lc);
+        }
+      }
+      t = (((unsigned)c & 0xe0) == 0xc0 ? (c & 0x1f) : 0);
+    }
+  }
+  if (s == 1 && res == IdSc::lc) {
+    res = IdSc::blc;
+  }
+  return (int)res;
+}
+
+}  // namespace sym
+
+#include "../func/func.h"
+
+namespace sym {
+
+int compute_symbol_subclass_func(std::string str) {
+  using funC::IdSc;
+  if (str.size() < 2) {
+    return IdSc::undef;
+  } else if (str[0] == '.') {
+    return IdSc::dotid;
+  } else if (str[0] == '~') {
+    return IdSc::tildeid;
+  } else {
+    return IdSc::undef;
+  }
 }
 
 }  // namespace sym

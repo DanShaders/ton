@@ -29,6 +29,83 @@ namespace src {
  *
  */
 
+namespace {
+
+// parses constant bitstrings in format \#[0-9a-f]*_? or \$[01]*_?
+unsigned long long get_special_value(std::string str) {
+  std::size_t i = 1, n = str.size();
+  if (n <= 1) {
+    return 0;
+  }
+  unsigned long long val = 0;
+  int bits = 0;
+  if (str[0] == '#') {
+    for (; i < n; i++) {
+      int c = str[i];
+      if (c == '_') {
+        break;
+      }
+      if (c >= '0' && c <= '9') {
+        c -= '0';
+      } else if (c >= 'A' && c <= 'F') {
+        c -= 'A' - 10;
+      } else if (c >= 'a' && c <= 'f') {
+        c -= 'a' - 10;
+      } else {
+        return 0;
+      }
+      if (bits > 60) {
+        return 0;
+      }
+      val |= (unsigned long long)c << (60 - bits);
+      bits += 4;
+    }
+  } else if (str[0] == '$') {
+    if (str[1] != '_') {
+      for (; i < n; i++) {
+        int c = str[i];
+        c -= '0';
+        if (c & -2) {
+          return 0;
+        }
+        if (bits > 63) {
+          return 0;
+        }
+        val |= (unsigned long long)c << (63 - bits);
+        bits++;
+      }
+    }
+  } else {
+    return 0;
+  }
+  if (i < n - 1) {
+    return 0;
+  }
+  if (i == n - 1 && bits) {
+    // trailing _
+    while (bits && !((val >> (64 - bits)) & 1)) {
+      --bits;
+    }
+    if (bits) {
+      --bits;
+    }
+  }
+  if (bits == 64) {
+    return 0;
+  }
+  return val | (1ULL << (63 - bits));
+}
+
+}  // namespace
+
+int lexem_is_special_tlbc(std::string str) {
+  return get_special_value(str) ? Lexem::Special : 0;
+}
+
+int lexem_is_special_func(std::string str) {
+  return 0;  // no special lexems
+}
+
 std::string Lexem::lexem_name_str(int idx) {
   if (idx == Eof) {
     return "end of file";
@@ -93,11 +170,11 @@ bool is_number(std::string str) {
   return true;
 }
 
-int Lexem::classify() {
+int Lexem::classify(bool _in_tlbc) {
   if (tp != Unknown) {
     return tp;
   }
-  sym::sym_idx_t i = sym::symbols.lookup(str);
+  sym::sym_idx_t i = sym::symbols.lookup(_in_tlbc, str);
   if (i) {
     assert(str == sym::symbols[i]->str);
     str = sym::symbols[i]->str;
@@ -107,26 +184,36 @@ int Lexem::classify() {
   } else if (is_number(str)) {
     tp = Number;
   } else {
-    tp = lexem_is_special(str);
+    if (_in_tlbc) {
+      tp = lexem_is_special_tlbc(str);
+    } else {
+      tp = lexem_is_special_func(str);
+    }
   }
   if (tp == Unknown) {
     tp = Ident;
-    val = sym::symbols.lookup(str, 1);
+    val = sym::symbols.lookup(_in_tlbc, str, 1);
   }
   return tp;
 }
 
-int Lexem::set(std::string _str, const SrcLocation& _loc, int _tp, int _val) {
+int Lexem::set(bool _in_tlbc, std::string _str, const SrcLocation& _loc, int _tp, int _val) {
   str = _str;
   loc = _loc;
   tp = _tp;
   val = _val;
-  return classify();
+  return classify(_in_tlbc);
 }
 
-Lexer::Lexer(SourceReader& _src, bool init, std::string active_chars, std::string eol_cmts, std::string open_cmts,
+Lexer::Lexer(bool _in_tlbc, SourceReader& _src, bool init, std::string active_chars, std::string eol_cmts,
+             std::string open_cmts,
              std::string close_cmts, std::string quote_chars, std::string multiline_quote)
-    : src(_src), eof(false), lexem("", src.here(), Lexem::Undefined), peek_lexem("", {}, Lexem::Undefined),
+    : in_tlbc_(_in_tlbc)
+    , src(_src)
+    , eof(false)
+    , lexem(_in_tlbc, "", src.here(), Lexem::Undefined)
+    , peek_lexem(_in_tlbc, "", {}, Lexem::Undefined)
+    ,
       multiline_quote(std::move(multiline_quote)) {
   std::memset(char_class, 0, sizeof(char_class));
   unsigned char activity = cc::active;
@@ -270,7 +357,7 @@ const Lexem& Lexer::next() {
     if (!end) {
       src.error("string extends past end of file");
     }
-    lexem.set(body, here, Lexem::String);
+    lexem.set(in_tlbc_, body, here, Lexem::String);
     int c = src.cur_char();
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
       lexem.val = c;
@@ -289,7 +376,7 @@ const Lexem& Lexer::next() {
     if (*end != qc) {
       src.error(qc == '`' ? "a `back-quoted` token extends past end of line" : "string extends past end of line");
     }
-    lexem.set(std::string{src.get_ptr() + 1, end}, src.here(), qc == '`' ? Lexem::Unknown : Lexem::String);
+    lexem.set(in_tlbc_, std::string{src.get_ptr() + 1, end}, src.here(), qc == '`' ? Lexem::Unknown : Lexem::String);
     src.set_ptr(end + 1);
     c = src.cur_char();
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
@@ -313,7 +400,7 @@ const Lexem& Lexer::next() {
     }
     pc = c;
   }
-  lexem.set(std::string{src.get_ptr(), end}, src.here());
+  lexem.set(in_tlbc_, std::string{src.get_ptr(), end}, src.here());
   src.set_ptr(end);
   // std::cerr << lexem.name_str() << ' ' << lexem.str << std::endl;
   return lexem;

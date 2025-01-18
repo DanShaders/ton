@@ -30,7 +30,8 @@ namespace src {
  *
  */
 
-int lexem_is_special(std::string str);  // return 0 if no special lexems are needed
+int lexem_is_special_tlbc(std::string str);
+int lexem_is_special_func(std::string str);  // return 0 if no special lexems are needed
 
 struct Lexem {
   enum { Undefined = -2, Eof = -1, Unknown = 0, Ident = 0, Number = 1, Special = 2, String = 3 };
@@ -38,12 +39,12 @@ struct Lexem {
   int val;
   std::string str;
   SrcLocation loc;
-  int classify();
-  Lexem(std::string _str = "", const SrcLocation& _loc = {}, int _tp = Unknown, int _val = 0)
+  int classify(bool _in_tlbc);
+  Lexem(bool _in_tlbc, std::string _str = "", const SrcLocation& _loc = {}, int _tp = Unknown, int _val = 0)
       : tp(_tp), val(_val), str(_str), loc(_loc) {
-    classify();
+    classify(_in_tlbc);
   }
-  int set(std::string _str = "", const SrcLocation& _loc = {}, int _tp = Unknown, int _val = 0);
+  int set(bool _in_tlbc, std::string _str = "", const SrcLocation& _loc = {}, int _tp = Unknown, int _val = 0);
   Lexem& clear(const SrcLocation& _loc = {}, int _tp = Unknown, int _val = 0) {
     tp = _tp;
     val = _val;
@@ -66,6 +67,8 @@ struct Lexem {
 };
 
 class Lexer {
+  bool in_tlbc_ = false;
+
   SourceReader& src;
   bool eof;
   Lexem lexem, peek_lexem;
@@ -78,7 +81,8 @@ class Lexer {
   bool eof_found() const {
     return eof;
   }
-  Lexer(SourceReader& _src, bool init = false, std::string active_chars = ";,() ~.", std::string eol_cmts = ";;",
+  Lexer(bool _in_tlbc, SourceReader& _src, bool init = false, std::string active_chars = ";,() ~.",
+        std::string eol_cmts = ";;",
         std::string open_cmts = "{-", std::string close_cmts = "-}", std::string quote_chars = "\"",
         std::string multiline_quote = "\"\"\"");
   const Lexem& next();

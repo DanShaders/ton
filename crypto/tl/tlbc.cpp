@@ -67,30 +67,30 @@ namespace src {
 enum { _Eof = -1, _Ident = 0, _Number, _Special, _Eq = 0x80, _Leq, _Geq, _Neq, _Type, _EMPTY };
 
 void define_keywords() {
-  sym::symbols.add_kw_char('+')
-      .add_kw_char('-')
-      .add_kw_char('*')
-      .add_kw_char(':')
-      .add_kw_char(';')
-      .add_kw_char('(')
-      .add_kw_char(')')
-      .add_kw_char('{')
-      .add_kw_char('}')
-      .add_kw_char('[')
-      .add_kw_char(']')
-      .add_kw_char('=')
-      .add_kw_char('_')
-      .add_kw_char('?')
-      .add_kw_char('.')
-      .add_kw_char('~')
-      .add_kw_char('^');
+  sym::symbols.add_kw_char(true, '+')
+      .add_kw_char(true, '-')
+      .add_kw_char(true, '*')
+      .add_kw_char(true, ':')
+      .add_kw_char(true, ';')
+      .add_kw_char(true, '(')
+      .add_kw_char(true, ')')
+      .add_kw_char(true, '{')
+      .add_kw_char(true, '}')
+      .add_kw_char(true, '[')
+      .add_kw_char(true, ']')
+      .add_kw_char(true, '=')
+      .add_kw_char(true, '_')
+      .add_kw_char(true, '?')
+      .add_kw_char(true, '.')
+      .add_kw_char(true, '~')
+      .add_kw_char(true, '^');
 
-  sym::symbols.add_keyword("==", _Eq)
-      .add_keyword("<=", _Leq)
-      .add_keyword(">=", _Geq)
-      .add_keyword("!=", _Neq)
-      .add_keyword("Type", _Type)
-      .add_keyword("EMPTY", _EMPTY);
+  sym::symbols.add_keyword(true, "==", _Eq)
+      .add_keyword(true, "<=", _Leq)
+      .add_keyword(true, ">=", _Geq)
+      .add_keyword(true, "!=", _Neq)
+      .add_keyword(true, "Type", _Type)
+      .add_keyword(true, "EMPTY", _EMPTY);
 }
 
 // parses constant bitstrings in format \#[0-9a-f]*_? or \$[01]*_?
@@ -167,39 +167,6 @@ int lexem_is_special(std::string str) {
 namespace sym {
 
 enum class IdSc : char { undef = 0, lc = 1, uc = 2, blc = 3 };
-// subclass:
-// 1 = first letter or first letter after last . is lowercase
-// 2 = ... uppercase
-// 3 = 1 + first character (after last ., if present) is a !
-// 0 = else
-int compute_symbol_subclass(std::string str) {
-  IdSc res = IdSc::undef;
-  int t = 0, s = 0;
-  for (char c : str) {
-    if (c == '.') {
-      res = IdSc::undef;
-      s = t = 0;
-    } else if (res == IdSc::undef) {
-      if (!s) {
-        s = (c == '!' ? 1 : -1);
-      }
-      if ((c | 0x20) >= 'a' && (c | 0x20) <= 'z') {
-        res = (c & 0x20 ? IdSc::lc : IdSc::uc);
-      }
-      if (t && (((unsigned)c & 0xc0) == 0x80)) {
-        t = (t << 6) | ((unsigned)c & 0x3f);
-        if (t >= 0x410 && t < 0x450) {
-          res = (t < 0x430 ? IdSc::uc : IdSc::lc);
-        }
-      }
-      t = (((unsigned)c & 0xe0) == 0xc0 ? (c & 0x1f) : 0);
-    }
-  }
-  if (s == 1 && res == IdSc::lc) {
-    res = IdSc::blc;
-  }
-  return (int)res;
-}
 
 inline bool is_lc_ident(sym_idx_t idx) {
   auto sc = symbols.get_subclass(idx);
@@ -2421,7 +2388,7 @@ std::vector<const src::FileDescr*> source_fdescr;
 
 bool parse_source(std::istream* is, src::FileDescr* fdescr) {
   src::SourceReader reader{is, fdescr};
-  src::Lexer lex{reader, true, "(){}:;? #$. ^~ #", "//", "/*", "*/", ""};
+  src::Lexer lex{true, reader, true, "(){}:;? #$. ^~ #", "//", "/*", "*/", ""};
   while (lex.tp() != src::_Eof) {
     parse_constructor_def(lex);
     // std::cerr << lex.cur().str << '\t' << lex.cur().name_str() << std::endl;
@@ -2456,7 +2423,7 @@ bool parse_source_stdin() {
 
 Type* define_builtin_type(std::string name_str, std::string args, bool produces_nat, int size = -1, int min_size = -1,
                           bool any_bits = false, int is_int = 0) {
-  sym_idx_t name = sym::symbols.lookup_add(name_str);
+  sym_idx_t name = sym::symbols.lookup_add(true, name_str);
   assert(name_str.size() && name);
   int arity = (int)args.size();
   types.emplace_back(types_num++, name, produces_nat, arity, true, true);
@@ -2485,7 +2452,7 @@ Type* define_builtin_type(std::string name_str, std::string args, bool produces_
 }
 
 Type* lookup_type(std::string name_str) {
-  sym_idx_t name = sym::symbols.lookup(name_str);
+  sym_idx_t name = sym::symbols.lookup(true, name_str);
   if (name) {
     auto sym_def = sym::lookup_symbol(name);
     if (sym_def) {
@@ -2525,10 +2492,10 @@ void define_builtins() {
   Eq_type = define_builtin_type("=", "##", false, 0, 0, true);
   Less_type = define_builtin_type("<", "##", false, 0, 0, true);
   Leq_type = define_builtin_type("<=", "##", false, 0, 0, true);
-  Nat_name = sym::symbols.lookup("#");
-  Eq_name = sym::symbols.lookup("=");
-  Less_name = sym::symbols.lookup("<");
-  Leq_name = sym::symbols.lookup("<=");
+  Nat_name = sym::symbols.lookup(true, "#");
+  Eq_name = sym::symbols.lookup(true, "=");
+  Less_name = sym::symbols.lookup(true, "<");
+  Leq_name = sym::symbols.lookup(true, "<=");
   builtin_types_num = types_num;
 }
 

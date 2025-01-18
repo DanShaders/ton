@@ -47,7 +47,8 @@ struct SymValBase {
  */
 
 // defined outside this module (by the end user)
-int compute_symbol_subclass(std::string str);  // return 0 if unneeded
+int compute_symbol_subclass_func(std::string str);  // return 0 if unneeded
+int compute_symbol_subclass_tldb(std::string str);
 
 typedef int sym_idx_t;
 
@@ -57,8 +58,12 @@ struct Symbol {
   int subclass;
   Symbol(std::string _str, sym_idx_t _idx, int _sc) : str(_str), idx(_idx), subclass(_sc) {
   }
-  Symbol(std::string _str, sym_idx_t _idx) : str(_str), idx(_idx) {
-    subclass = compute_symbol_subclass(std::move(_str));
+  Symbol(bool is_tldb, std::string _str, sym_idx_t _idx) : str(_str), idx(_idx) {
+    if (is_tldb) {
+      subclass = compute_symbol_subclass_tldb(std::move(_str));
+    } else {
+      subclass = compute_symbol_subclass_func(std::move(_str));
+    }
   }
   static std::string unknown_symbol_name(sym_idx_t i);
 };
@@ -76,15 +81,15 @@ class SymTableBase {
     std::memset(keywords, 0, sizeof(keywords));
   }
   static constexpr sym_idx_t not_found = 0;
-  SymTableBase& add_keyword(std::string str, sym_idx_t idx = 0);
-  SymTableBase& add_kw_char(char c) {
-    return add_keyword(std::string{c}, c);
+  SymTableBase& add_keyword(bool _in_tlbc, std::string str, sym_idx_t idx = 0);
+  SymTableBase& add_kw_char(bool _in_tlbc, char c) {
+    return add_keyword(_in_tlbc, std::string{c}, c);
   }
-  sym_idx_t lookup(std::string str, int mode = 0) {
-    return gen_lookup(str, mode);
+  sym_idx_t lookup(bool is_tlbc, std::string str, int mode = 0) {
+    return gen_lookup(is_tlbc, str, mode);
   }
-  sym_idx_t lookup_add(std::string str) {
-    return gen_lookup(str, 1);
+  sym_idx_t lookup_add(bool is_tlbc, std::string str) {
+    return gen_lookup(is_tlbc, str, 1);
   }
   Symbol* operator[](sym_idx_t i) const {
     return sym_table[i].get();
@@ -103,7 +108,7 @@ class SymTableBase {
   }
 
  protected:
-  sym_idx_t gen_lookup(std::string str, int mode = 0, sym_idx_t idx = 0);
+  sym_idx_t gen_lookup(bool is_tlbc, std::string str, int mode = 0, sym_idx_t idx = 0);
 };
 
 template <unsigned pp>
@@ -120,12 +125,12 @@ class SymTable : public SymTableBase {
  public:
   SymTable() : SymTableBase(pp, sym) {
   }
-  SymTable& add_keyword(std::string str, sym_idx_t idx = 0) {
-    SymTableBase::add_keyword(str, idx);
+  SymTable& add_keyword(bool _in_tlbc, std::string str, sym_idx_t idx = 0) {
+    SymTableBase::add_keyword(_in_tlbc, str, idx);
     return *this;
   }
-  SymTable& add_kw_char(char c) {
-    return add_keyword(std::string{c}, c);
+  SymTable& add_kw_char(bool _in_tlbc, char c) {
+    return add_keyword(_in_tlbc, std::string{c}, c);
   }
 };
 

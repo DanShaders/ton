@@ -223,7 +223,7 @@ int func_proceed(const std::vector<std::string> &sources, std::ostream &outs, st
   int ok = 0, proc = 0;
   try {
     for (auto src : sources) {
-      ok += funC::parse_source_file(src.c_str(), {}, true);
+      ok += funC::parse_source_file(src.c_str(), Lexem{false}, true);
       proc++;
     }
     if (funC::interactive) {

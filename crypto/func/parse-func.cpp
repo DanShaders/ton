@@ -23,23 +23,6 @@
 #include "block/block.h"
 #include "block-parse.h"
 
-namespace sym {
-
-int compute_symbol_subclass(std::string str) {
-  using funC::IdSc;
-  if (str.size() < 2) {
-    return IdSc::undef;
-  } else if (str[0] == '.') {
-    return IdSc::dotid;
-  } else if (str[0] == '~') {
-    return IdSc::tildeid;
-  } else {
-    return IdSc::undef;
-  }
-}
-
-}  // namespace sym
-
 namespace funC {
 using namespace std::literals::string_literals;
 using src::Lexer;
@@ -731,7 +714,7 @@ Expr* parse_expr80(Lexer& lex, CodeBlob& code, bool nv) {
     auto name = lex.cur().val;
     auto sym = sym::lookup_symbol(name);
     if (!sym || !dynamic_cast<SymValFunc*>(sym->value)) {
-      auto name1 = symbols.lookup(lex.cur().str.substr(1));
+      auto name1 = symbols.lookup(false, lex.cur().str.substr(1));
       if (name1) {
         auto sym1 = sym::lookup_symbol(name1);
         if (sym1 && dynamic_cast<SymValFunc*>(sym1->value)) {
@@ -776,7 +759,7 @@ Expr* parse_expr80(Lexer& lex, CodeBlob& code, bool nv) {
 // parse [ ~ ] E
 Expr* parse_expr75(Lexer& lex, CodeBlob& code, bool nv) {
   if (lex.tp() == '~') {
-    sym_idx_t name = symbols.lookup_add("~_");
+    sym_idx_t name = symbols.lookup_add(false, "~_");
     check_global_func(lex.cur(), name);
     SrcLocation loc{lex.cur().loc};
     lex.next();
@@ -800,7 +783,7 @@ Expr* parse_expr30(Lexer& lex, CodeBlob& code, bool nv) {
          lex.tp() == _DivR || lex.tp() == _ModC || lex.tp() == _ModR || lex.tp() == '&') {
     res->chk_rvalue(lex.cur());
     int t = lex.tp();
-    sym_idx_t name = symbols.lookup_add(std::string{"_"} + lex.cur().str + "_");
+    sym_idx_t name = symbols.lookup_add(false, std::string{"_"} + lex.cur().str + "_");
     SrcLocation loc{lex.cur().loc};
     check_global_func(lex.cur(), name);
     lex.next();
@@ -820,7 +803,7 @@ Expr* parse_expr20(Lexer& lex, CodeBlob& code, bool nv) {
   Expr* res;
   int t = lex.tp();
   if (t == '-') {
-    sym_idx_t name = symbols.lookup_add("-_");
+    sym_idx_t name = symbols.lookup_add(false, "-_");
     check_global_func(lex.cur(), name);
     SrcLocation loc{lex.cur().loc};
     lex.next();
@@ -837,7 +820,7 @@ Expr* parse_expr20(Lexer& lex, CodeBlob& code, bool nv) {
   while (lex.tp() == '-' || lex.tp() == '+' || lex.tp() == '|' || lex.tp() == '^') {
     res->chk_rvalue(lex.cur());
     t = lex.tp();
-    sym_idx_t name = symbols.lookup_add(std::string{"_"} + lex.cur().str + "_");
+    sym_idx_t name = symbols.lookup_add(false, std::string{"_"} + lex.cur().str + "_");
     check_global_func(lex.cur(), name);
     SrcLocation loc{lex.cur().loc};
     lex.next();
@@ -858,7 +841,7 @@ Expr* parse_expr17(Lexer& lex, CodeBlob& code, bool nv) {
   while (lex.tp() == _Lshift || lex.tp() == _Rshift || lex.tp() == _RshiftC || lex.tp() == _RshiftR) {
     res->chk_rvalue(lex.cur());
     int t = lex.tp();
-    sym_idx_t name = symbols.lookup_add(std::string{"_"} + lex.cur().str + "_");
+    sym_idx_t name = symbols.lookup_add(false, std::string{"_"} + lex.cur().str + "_");
     check_global_func(lex.cur(), name);
     SrcLocation loc{lex.cur().loc};
     lex.next();
@@ -880,7 +863,7 @@ Expr* parse_expr15(Lexer& lex, CodeBlob& code, bool nv) {
       lex.tp() == _Neq || lex.tp() == _Spaceship) {
     res->chk_rvalue(lex.cur());
     int t = lex.tp();
-    sym_idx_t name = symbols.lookup_add(std::string{"_"} + lex.cur().str + "_");
+    sym_idx_t name = symbols.lookup_add(false, std::string{"_"} + lex.cur().str + "_");
     check_global_func(lex.cur(), name);
     SrcLocation loc{lex.cur().loc};
     lex.next();
@@ -924,7 +907,7 @@ Expr* parse_expr10(Lexer& lex, CodeBlob& code, bool nv) {
       t == _RshiftRLet || t == _AndLet || t == _OrLet || t == _XorLet) {
     x->chk_lvalue(lex.cur());
     x->chk_rvalue(lex.cur());
-    sym_idx_t name = symbols.lookup_add(std::string{"^_"} + lex.cur().str + "_");
+    sym_idx_t name = symbols.lookup_add(false, std::string{"^_"} + lex.cur().str + "_");
     check_global_func(lex.cur(), name);
     SrcLocation loc{lex.cur().loc};
     lex.next();
@@ -1737,7 +1720,7 @@ void parse_include(Lexer& lex, const src::FileDescr* fdescr) {
 
 bool parse_source(std::istream* is, src::FileDescr* fdescr) {
   src::SourceReader reader{is, fdescr};
-  Lexer lex{reader, true, ";,()[] ~."};
+  Lexer lex{false, reader, true, ";,()[] ~."};
   while (lex.tp() != _Eof) {
     if (lex.tp() == _PragmaHashtag) {
       parse_pragma(lex);

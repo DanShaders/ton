@@ -886,7 +886,7 @@ public:
 
 // defined in parse-func.cpp
 bool parse_source(std::istream* is, const src::FileDescr* fdescr);
-bool parse_source_file(const char* filename, src::Lexem lex = {}, bool is_main = false);
+bool parse_source_file(const char* filename, src::Lexem lex, bool is_main = false);
 bool parse_source_stdin();
 
 extern std::stack<src::SrcLocation> inclusion_locations;
