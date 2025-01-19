@@ -233,7 +233,12 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
 
   // init data
   auto* data_ptr = info.get_data(storage);
-  td::BitPtr{data_ptr}.copy_from(data, bits);
+  if (data.byte_aligned()) {
+    std::memcpy(data_ptr, data.get_byte_ptr(), (bits + 7) / 8);
+  } else {
+    td::BitPtr{data_ptr}.copy_from(data, bits);
+  }
+
   // prepare for serialization
   if (bits & 7) {
     int m = (0x80 >> (bits & 7));
