@@ -217,6 +217,7 @@ class DataCell : public Cell {
   td::uint16 do_get_depth(td::uint32 level) const override;
 
   friend class CellBuilder;
+  friend struct CellSerializationInfo;
   static td::Result<Ref<DataCell>> create(td::ConstBitPtr data, unsigned bits, td::Span<Ref<Cell>> refs, bool special);
   static td::Result<Ref<DataCell>> create(td::ConstBitPtr data, unsigned bits, td::MutableSpan<Ref<Cell>> refs,
                                           bool special);
