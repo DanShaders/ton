@@ -39,7 +39,7 @@ struct ArenaAllocator {
 private:
   td::MutableSlice alloc_batch() {
     size_t batch_size = 1 << 20;
-    auto batch = std::make_unique<char[]>(batch_size);
+    auto batch = std::make_unique_for_overwrite<char[]>(batch_size);
     return td::MutableSlice(batch.release(), batch_size);
   }
   char* fast_alloc(size_t size) {
