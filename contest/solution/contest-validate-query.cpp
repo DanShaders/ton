@@ -196,6 +196,7 @@ void ContestValidateQuery::finish_query() {
  */
 void ContestValidateQuery::start_up() {
   LOG(INFO) << "validate query for " << id_.to_str() << " started";
+  vm::FlushArenaAllocatorEpoch();
   rand_seed_.set_zero();
 
   if (ShardIdFull(id_) != shard_) {
@@ -1897,16 +1898,20 @@ bool ContestValidateQuery::postcheck_account_updates() {
   LOG(INFO) << "pre-checking all Account updates between the old and the new state";
   try {
     CHECK(ps_.account_dict_ && ns_.account_dict_);
+    size_t accounts_size = 0;
     if (!ps_.account_dict_->scan_diff(
             *ns_.account_dict_,
-            [this](td::ConstBitPtr key, int key_len, Ref<vm::CellSlice> old_val_extra,
+            [this, &accounts_size](td::ConstBitPtr key, int key_len, Ref<vm::CellSlice> old_val_extra,
                    Ref<vm::CellSlice> new_val_extra) {
+              //++accounts_size;
               CHECK(key_len == 256);
               return postcheck_one_account_update(key, std::move(old_val_extra), std::move(new_val_extra));
             },
             2 /* check augmentation of changed nodes in the new dict */)) {
+      LOG(ERROR) << "Post2 " << accounts_size;
       return reject_query("invalid ShardAccounts dictionary in the new state");
     }
+    //LOG(ERROR) << "Post1 " << accounts_size;
   } catch (vm::VmError& err) {
     return reject_query("invalid ShardAccount dictionary difference between the old and the new state: "s +
                         err.get_msg());
@@ -2146,7 +2151,11 @@ bool ContestValidateQuery::build_new_message_queue() {
       std::make_unique<vm::AugmentedDictionary>(ps_.dispatch_queue_->get_root(), 256, block::tlb::aug_DispatchQueue);
   ns_.out_msg_queue_size_ = ps_.out_msg_queue_size_.value();
 
+  // ~50
+  size_t in_size = 0, out_size = 0;
+
   bool ok = in_msg_dict_->check_for_each_extra([&](Ref<vm::CellSlice> value, Ref<vm::CellSlice>, td::ConstBitPtr, int) {
+    //++in_size;
     int tag = block::gen::t_InMsg.get_tag(*value);
     switch (tag) {
       case block::gen::InMsg::msg_import_ext: {
@@ -2217,6 +2226,7 @@ bool ContestValidateQuery::build_new_message_queue() {
     return reject_query("failed to parse in msg dict");
   }
   ok = out_msg_dict_->check_for_each_extra([&](Ref<vm::CellSlice> value, Ref<vm::CellSlice>, td::ConstBitPtr key, int) {
+    //++out_size;
     int tag = block::gen::t_OutMsg.get_tag(*value);
     switch (tag) {
       case block::gen::OutMsg::msg_export_ext: {
@@ -2438,6 +2448,7 @@ bool ContestValidateQuery::build_new_message_queue() {
     }
     return true;
   });
+  //LOG(ERROR) << "Msg " << in_size << " " << out_size;
   if (!ok) {
     return reject_query("failed to parse out msg dict");
   }
@@ -5045,11 +5056,20 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
   if (!tlb::type_unpack_cell(std::move(acc_blk.state_update), block::gen::t_HASH_UPDATE_Account, hash_upd)) {
     return reject_query("cannot extract (HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex());
   }
+  // td::PerfWarningTimer perf_timer_("excess_lookup");
+  // static long double excess_lookup = 0;
+
   block::tlb::ShardAccount::Record old_state, new_state;
   if (!(old_state.unpack(ps_.account_dict_->lookup(account.addr)) &&
-        new_state.unpack(ns_.account_dict_->lookup(account.addr)))) {
+        new_state.unpack(ns_.account_dict_->lookup(account.addr)))) { // remove second lookup?
+    // never happens in tests // LOG(ERROR) << "rejecting query extract";
     return reject_query("cannot extract Account from the ShardAccount of "s + account.addr.to_hex());
   }
+  // LOG(ERROR) << perf_timer_.elapsed();
+  // excess_lookup += perf_timer_.elapsed();
+  // if (int(excess_lookup*1000000)%100 < 2) {
+  //     LOG(ERROR) << int(excess_lookup * 1000000);
+  // }
   if (hash_upd.old_hash != old_state.account->get_hash().bits()) {
     return reject_query("(HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex() +
                         " has incorrect old hash");
@@ -5071,11 +5091,23 @@ bool ContestValidateQuery::check_transactions() {
   LOG(INFO) << "checking all transactions";
   ns_.account_dict_ =
       std::make_unique<vm::AugmentedDictionary>(ps_.account_dict_->get_root(), 256, block::tlb::aug_ShardAccounts);
+
+
+  // auto account_blocks_size = account_blocks_dict_->get_size(); // ~50
+  // LOG(ERROR) << "Blocks2 size = " << account_blocks_size;
+  //auto copy = std::make_unique<vm::AugmentedDictionary>(
+  //    ps_.account_dict_->get_root(), 256, block::tlb::aug_ShardAccounts
+  //);
+  //auto ps_size = copy->get_size();
+  //LOG(ERROR) << "Blocks size: " << account_blocks_size << ", ps size: " << ps_size;
+
   bool ok = account_blocks_dict_->check_for_each_extra(
       [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
         CHECK(key_len == 256);
+
+        // ~5.3% TODO: set_builder in parallel with account_blocks_dict_->check_for_each_extra 
         return check_account_transactions(key, std::move(value));
-      });
+      }, false, true);
 
   return ok;
 }

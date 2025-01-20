@@ -17,6 +17,7 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "vm/dict.h"
+#include "td/utils/Timer.h"
 #include "vm/cells.h"
 #include "vm/cellslice.h"
 #include "vm/stack.hpp"
@@ -227,12 +228,25 @@ Ref<Cell> DictionaryFixed::finish_create_fork(CellBuilder& cb, Ref<Cell> c1, Ref
   return cb.finalize();
 }
 
+// 1.7%
 bool DictionaryFixed::check_fork_raw(Ref<CellSlice> cs_ref, int n) const {
+  // static long double fork_time = 0;
+  // if (int(fork_time*1000000)%10000 < 2) {
+  //     LOG(ERROR) << int(fork_time * 1000000);
+  // }
+  // td::PerfWarningTimer timer("c");
+
   if (cs_ref.is_null()) {
+    // fork_time += timer.elapsed();
     return false;
   }
   Ref<Cell> c1, c2;
   CellSlice& cs = cs_ref.write();
+
+  // const bool result = cs.fetch_ref_to(c1) && cs.fetch_ref_to(c2) && check_fork(cs, std::move(c1), std::move(c2), n);
+  // fork_time += timer.elapsed();
+  // return result;
+  // //
   return cs.fetch_ref_to(c1) && cs.fetch_ref_to(c2) && check_fork(cs, std::move(c1), std::move(c2), n);
 }
 
@@ -456,8 +470,15 @@ Ref<Cell> Dictionary::extract_value_ref(Ref<CellSlice> cs) {
 }
 
 Ref<CellSlice> DictionaryFixed::lookup(td::ConstBitPtr key, int key_len) {
+  // static long double overall_time = 0;
+  // if (int(overall_time * 1000000.) % 10000 < 1) {
+  //     LOG(ERROR) << "Lookup time " << int(overall_time*1000000.);
+  // }
+  // td::PerfWarningTimer timer("l");
+
   force_validate();
   if (key_len != get_key_bits() || is_empty()) {
+    // overall_time += timer.elapsed();
     return {};
   }
   //std::cerr << "dictionary lookup for key = " << key.to_hex(key_len) << std::endl;
@@ -467,17 +488,19 @@ Ref<CellSlice> DictionaryFixed::lookup(td::ConstBitPtr key, int key_len) {
     LabelParser label{std::move(cell), n, label_mode()};
     if (!label.is_prefix_of(key, n)) {
       //std::cerr << "(not a prefix)\n";
+      // overall_time += timer.elapsed();
       return {};
     }
     n -= label.l_bits;
     if (n <= 0) {
       assert(!n);
       label.skip_label();
+      // overall_time += timer.elapsed();
       return std::move(label.remainder);
     }
     key += label.l_bits;
     bool sw = *key++;
-    //std::cerr << "key bit at position " << key_bits - n << " equals " << sw << std::endl;
+    // LOG(ERROR) << "key bit at position " << key_bits - n << " equals " << sw;
     --n;
     cell = label.remainder->prefetch_ref(sw);
   }
@@ -2052,6 +2075,18 @@ bool DictionaryFixed::check_for_each(const foreach_func_t& foreach_func, bool in
                              shuffle);
 }
 
+// sometimes doesn't work for whatever reason
+size_t DictionaryFixed::get_size() {
+    size_t result = 0;
+    for (auto it = begin(); it != end(); ++it) {
+        result += 1;
+    }
+    // if (result != result2) {
+    //     LOG(ERROR) << "Size " << result << " " << result2;
+    // }
+    return result;
+}
+
 static inline bool set_bit(td::BitPtr ptr, bool value = true) {
   *ptr = value;
   return true;
@@ -2746,7 +2781,13 @@ Ref<Cell> AugmentedDictionary::finish_create_fork(CellBuilder& cb, Ref<Cell> c1,
 }
 
 std::pair<Ref<Cell>, bool> AugmentedDictionary::dict_set(Ref<Cell> dict, td::ConstBitPtr key, int n,
-                                                         const CellSlice& value, Dictionary::SetMode mode) const {
+                                                         const CellSlice& value,
+                                                         //std::vector<Ref<Cell>>& hints,
+                                                         Dictionary::SetMode mode) const {
+  // MAXN = 352
+  // if (n > 350) {
+  //     LOG(ERROR) << "N = " << n;
+  // }
   //std::cerr << "augmented dictionary modification for " << n << "-bit key = " << key.to_hex(n) << std::endl;
   if (dict.is_null()) {
     // the dictionary is very empty
@@ -2758,14 +2799,31 @@ std::pair<Ref<Cell>, bool> AugmentedDictionary::dict_set(Ref<Cell> dict, td::Con
     append_dict_label(cb, key, n, n);
     return std::make_pair(finish_create_leaf(cb, value), true);
   }
-  LabelParser label{std::move(dict), n, 2};
+  LabelParser label{dict, n, 2};
   label.validate();
+
+  // unsigned char buffer[DictionaryFixed::max_key_bytes];
+  // td::BitPtr cur_vertex(buffer);
+  // {
+  //     LabelParser label2{std::move(dict), n, 2};
+  //     label2.validate();
+  //     label2.extract_label_to(cur_vertex);
+  // }
+
   int pfx_len = label.common_prefix_len(key, n);
+
+  // if (pfx_len != hints.size()) {
+  //   LOG(ERROR) << "Prefix " << pfx_len << " " << hints.size() << "\n" << key.to_binary(n) << "\n" << cur_vertex.to_binary(n);
+  // }
+
+  //hints.push_back(dict);
+
   assert(pfx_len >= 0 && pfx_len <= label.l_bits && label.l_bits <= n);
   if (pfx_len < label.l_bits) {
     // have to insert a new node (fork) inside the current edge
     if (mode == Dictionary::SetMode::Replace) {
       // key not found, return unchanged dictionary
+      //hints.pop_back();
       return std::make_pair(Ref<Cell>{}, false);
     }
     // first, create the edge + new leaf cell
@@ -2786,6 +2844,7 @@ std::pair<Ref<Cell>, bool> AugmentedDictionary::dict_set(Ref<Cell> dict, td::Con
     }
     // now cs is the old payload of the edge, either a value or two subdictionary references
     if (!cell_builder_add_slice_bool(cb, *cs)) {
+      //hints.pop_back();
       throw VmError{Excno::cell_ov, "cannot change label of an old augmented dictionary cell (?)"};
     }
     Ref<Cell> c2 = cb.finalize();  // the other child of the new fork
@@ -2795,6 +2854,7 @@ std::pair<Ref<Cell>, bool> AugmentedDictionary::dict_set(Ref<Cell> dict, td::Con
     if (sw_bit) {
       c1.swap(c2);
     }
+    //hints.pop_back();
     return std::make_pair(finish_create_fork(cb, std::move(c1), std::move(c2), n - pfx_len), true);
   }
   if (label.l_bits == n) {
@@ -2807,6 +2867,7 @@ std::pair<Ref<Cell>, bool> AugmentedDictionary::dict_set(Ref<Cell> dict, td::Con
     // replace the value of the only element of the dictionary
     CellBuilder cb;
     append_dict_label(cb, key, n, n);
+    //hints.pop_back();
     return std::make_pair(finish_create_leaf(cb, value), true);
   }
   // main case: the edge leads to a fork, have to insert new value either in the right or in the left subtree
@@ -2815,17 +2876,19 @@ std::pair<Ref<Cell>, bool> AugmentedDictionary::dict_set(Ref<Cell> dict, td::Con
   label.remainder.clear();
   if (key[label.l_bits]) {
     // insert key into the right child (c2)
-    auto res = dict_set(std::move(c2), key + (label.l_bits + 1), n - label.l_bits - 1, value, mode);
+    auto res = dict_set(std::move(c2), key + (label.l_bits + 1), n - label.l_bits - 1, value, /*hints,*/ mode);
     if (!res.second) {
       // return unchanged dictionary
+      //hints.pop_back();
       return std::make_pair(Ref<Cell>{}, false);
     }
     c2 = std::move(res.first);
   } else {
     // insert key into the left child (c1)
-    auto res = dict_set(std::move(c1), key + (label.l_bits + 1), n - label.l_bits - 1, value, mode);
+    auto res = dict_set(std::move(c1), key + (label.l_bits + 1), n - label.l_bits - 1, value, /*hints,*/ mode);
     if (!res.second) {
       // return unchanged dictionary
+      //hints.pop_back();
       return std::make_pair(Ref<Cell>{}, false);
     }
     c1 = std::move(res.first);
@@ -2833,6 +2896,7 @@ std::pair<Ref<Cell>, bool> AugmentedDictionary::dict_set(Ref<Cell> dict, td::Con
   // create a new label with the same content
   CellBuilder cb;
   append_dict_label(cb, key, label.l_bits, n);
+  //hints.pop_back();
   return std::make_pair(finish_create_fork(cb, std::move(c1), std::move(c2), n - label.l_bits), true);
 }
 
@@ -2845,7 +2909,8 @@ bool AugmentedDictionary::set(td::ConstBitPtr key, int key_len, const CellSlice&
   if (key_len != get_key_bits()) {
     return false;
   }
-  auto res = dict_set(get_root_cell(), key, key_len, value, mode);
+  std::vector<Ref<Cell>> hints;
+  auto res = dict_set(get_root_cell(), key, key_len, value, /*hints,*/ mode);
   if (res.second) {
     //vm::CellSlice cs{vm::NoVmOrd(), res.first};
     //std::cerr << "new augmented dictionary root is:\n";
@@ -2869,7 +2934,7 @@ bool AugmentedDictionary::set_builder(td::ConstBitPtr key, int key_len, const Ce
   return set(key, key_len, load_cell_slice(value.finalize_copy()));
 }
 
-bool AugmentedDictionary::check_for_each_extra(const foreach_extra_func_t& foreach_extra_func, bool invert_first) {
+bool AugmentedDictionary::check_for_each_extra(const foreach_extra_func_t& foreach_extra_func, bool invert_first, bool shuffle) {
   force_validate();
   const auto& augm = aug;
   foreach_func_t foreach_func = [&foreach_extra_func, &augm](Ref<vm::CellSlice> value_extra, td::ConstBitPtr key,
@@ -2877,7 +2942,7 @@ bool AugmentedDictionary::check_for_each_extra(const foreach_extra_func_t& forea
     auto extra = augm.extract_extra(value_extra.write());
     return extra.not_null() && foreach_extra_func(std::move(value_extra), std::move(extra), key, key_len);
   };
-  return DictionaryFixed::check_for_each(foreach_func, invert_first);
+  return DictionaryFixed::check_for_each(foreach_func, invert_first, shuffle);
 }
 
 std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::dict_traverse_extra(

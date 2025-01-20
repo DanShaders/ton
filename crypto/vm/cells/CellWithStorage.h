@@ -78,7 +78,7 @@ class CellWithUniquePtrStorage : public CellT {
  public:
   template <class... ArgsT>
   CellWithUniquePtrStorage(size_t storage_size, ArgsT&&... args)
-      : CellT(std::forward<ArgsT>(args)...), storage_(std::make_unique<char[]>(storage_size)) {
+      : CellT(std::forward<ArgsT>(args)...), storage_(std::make_unique<char[]>(storage_size)) { // 3.5%
   }
   ~CellWithUniquePtrStorage() {
     CellT::destroy_storage(get_storage());

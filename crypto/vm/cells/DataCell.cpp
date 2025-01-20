@@ -24,8 +24,10 @@
 
 #include "vm/cells/CellWithStorage.h"
 
+// #include "vm/rsha256_fast_x64.hpp"
+
 namespace vm {
-thread_local bool DataCell::use_arena = false;
+ thread_local bool DataCell::use_arena = false;
 
 namespace {
 template <class CellT>
@@ -36,33 +38,66 @@ struct ArenaAllocator {
     T* obj = new (ptr) T(std::forward<ArgsT>(args)...);
     return std::unique_ptr<T>(obj);
   }
+
+  static size_t epoch;
 private:
   td::MutableSlice alloc_batch() {
-    size_t batch_size = 1 << 20;
+    LOG(ERROR) << "Alloc new batch";
+    size_t batch_size = 1 << 27;
     auto batch = std::make_unique<char[]>(batch_size);
     return td::MutableSlice(batch.release(), batch_size);
   }
+
   char* fast_alloc(size_t size) {
     thread_local td::MutableSlice batch;
+    thread_local size_t l = 0;
+    //thread_local size_t thread_epoch = 1;
+
+    //if (td::unlikely(thread_epoch != epoch)) {
+    //    //LOG(ERROR) << "Flushing " << l << " " << thread_epoch << " " << epoch;
+    //    thread_epoch = epoch;
+    //    l = 0;
+    //}
+    // thread_local size_t total_alloc = 1;
+
+    // total_alloc += size;
+    // if (total_alloc % 10000 < 10) {
+    //     LOG(ERROR) << total_alloc;
+    // }
     auto aligned_size = (size + 7) / 8 * 8;
-    if (batch.size() < size) {
+    const auto left = batch.size() - l;
+    //LOG(ERROR) << left;
+    if (td::unlikely(left < size)) {
       batch = alloc_batch();
+      l = 0;
     }
-    auto res = batch.begin();
-    batch.remove_prefix(aligned_size);
+    auto res = batch.begin() + l;
+    l += aligned_size;
+    // batch.remove_prefix(aligned_size);
     return res;
   }
 };
 }
-std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
-  if (use_arena) {
-    ArenaAllocator<DataCell> allocator;
-    auto res = detail::CellWithArrayStorage<DataCell>::create(allocator, info.get_storage_size(), info);
-    // this is dangerous
-    Ref<DataCell>(res.get()).release();
-    return res;
-  }
 
+void FlushArenaAllocatorEpoch() {
+    return;
+    ++ArenaAllocator<DataCell>::epoch;
+}
+
+template<> size_t ArenaAllocator<DataCell>::epoch = 1;
+std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
+  //if constexpr(false) {
+  //  ArenaAllocator<DataCell> allocator;
+  //  auto res = detail::CellWithArrayStorage<DataCell>::create(allocator, info.get_storage_size(), info);
+  //  // this is dangerous
+  //  Ref<DataCell>(res.get()).release();
+  //  return res;
+  //}
+
+  // if (info.get_storage_size() > 300) {
+  //     LOG(ERROR) << info.get_storage_size();
+  // }
+  // < 300
   return detail::CellWithUniquePtrStorage<DataCell>::create(info.get_storage_size(), info);
 }
 
@@ -254,6 +289,8 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
   // NB: be careful with special cells
   auto total_hash_count = level_mask.get_hashes_count();
   auto hash_i_offset = total_hash_count - hash_count;
+
+  // <= 2 iterations
   for (td::uint32 level_i = 0, hash_i = 0, level = level_mask.get_level(); level_i <= level; level_i++) {
     if (!level_mask.is_significant(level_i)) {
       continue;
@@ -264,12 +301,14 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     if (hash_i < hash_i_offset) {
       continue;
     }
+    // ++iters;
     unsigned char tmp[2];
     tmp[0] = info.d1(level_mask.apply(level_i));
     tmp[1] = info.d2();
 
     static TD_THREAD_LOCAL digest::SHA256* hasher;
     td::init_thread_local<digest::SHA256>(hasher);
+ 
     hasher->reset();
 
     hasher->feed(td::Slice(tmp, 2));
@@ -307,6 +346,7 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
       }
       depth++;
     }
+
     depth_ptr[dest_i] = depth;
 
     // children hash

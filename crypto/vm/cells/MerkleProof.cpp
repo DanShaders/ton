@@ -67,22 +67,37 @@ class MerkleProofImpl {
   }
 
   Ref<Cell> dfs(Ref<Cell> cell, int merkle_depth) {
+    //static size_t lookups_time = 0;
+
     CHECK(cell.not_null());
     Key key{cell->get_hash(), merkle_depth};
     {
+      //td::PerfWarningTimer timer("s");
       auto it = cells_.find(key);
+      //lookups_time += timer.elapsed()*1000000.;
+      //LOG(ERROR) << "Found " << (it != cells_.end());
       if (it != cells_.end()) {
+        //LOG(ERROR) << "Merkle " << merkle_depth;
         CHECK(it->second.not_null());
         return it->second;
       }
     }
 
     if (is_prunned_(cell)) {
+      //LOG(ERROR) << "Prunned";
       auto res = CellBuilder::create_pruned_branch(cell, merkle_depth + 1);
       CHECK(res.not_null());
+      //td::PerfWarningTimer timer("s2");
       cells_.emplace(key, res);
+      //lookups_time += timer.elapsed()*1000000.;
       return res;
+    } else {
+      //LOG(ERROR) << "NotPrunned";
     }
+
+    //if (lookups_time % 10000 < 1000) {
+    //    LOG(ERROR) << "Lookup " << lookups_time;
+    //}
     CellSlice cs(NoVm(), cell);
     int children_merkle_depth = cs.child_merkle_depth(merkle_depth);
     CellBuilder cb;

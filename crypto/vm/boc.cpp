@@ -1131,8 +1131,17 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlic
     }
   }
   CellInfo res;
+  // if (cs.size_refs() > 2) {
+  //     LOG(ERROR) << "Size refs " << cs.size_refs();
+  // }
   while (cs.size_refs()) {
     TRY_RESULT(child, add_used_storage(cs.fetch_ref(), kill_dup));
+    // if (res.max_merkle_depth != 0) {
+    //     LOG(ERROR) << res.max_merkle_depth;
+    // }
+    // if (child.max_merkle_depth != 0) {
+    //     LOG(ERROR) << "Child " << child.max_merkle_depth;
+    // }
     res.max_merkle_depth = std::max(res.max_merkle_depth, child.max_merkle_depth);
   }
   if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
@@ -1147,11 +1156,29 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
   if (cell.is_null()) {
     return td::Status::Error("cell is null");
   }
+  // static unsigned long long hit = 0;
+  // static unsigned long long miss = 0;
+
+  // if ((hit+miss) % 10000 == 0) {
+  //     LOG(ERROR) << "Cache hit/miss " << hit << " " << miss;
+  // }
+
+  // if (seen.size() > 100) { // max 65537
+  //     LOG(ERROR) << "Seen " << seen.size();
+  // }
   if (kill_dup) {
-    auto ins = seen.emplace(cell->get_hash(), CellInfo{});
+    auto ins = seen.emplace(cell->get_hash());
     if (!ins.second) {
-      return ins.first->second;
+  //      ++hit;
+        return CellInfo{};
     }
+  //  ++miss;
+    // if (!ins.second) {
+    //   if (ins.first->second.max_merkle_depth != 0) {
+    //       LOG(ERROR) << "Found " << ins.first->second.max_merkle_depth;
+    //   }
+    //   return ins.first->second;
+    // }
   }
   vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
   return add_used_storage(std::move(cs), kill_dup, skip_count_root);

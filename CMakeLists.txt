@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
 project(TON VERSION 0.5 LANGUAGES C CXX)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
 #set(OPENSSL_USE_STATIC_LIBS TRUE)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-semantic-interposition")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Bsymbolic")
 
 # Define the two required variables before including the source code for watching a git repository.
 set(PRE_CONFIGURE_FILE "git.cc.in")

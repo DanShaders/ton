@@ -31,6 +31,8 @@
 #include "td/utils/Timer.h"
 #include "td/utils/port/FileFd.h"
 
+#include <absl/container/flat_hash_set.h>
+
 namespace vm {
 using td::Ref;
 
@@ -117,14 +119,14 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+  td::HashSet<vm::Cell::Hash> seen;
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)
       : cells(0), bits(0), public_cells(0), limit_cells(limit_cells) {
   }
   void clear_seen() {
-    seen.clear();
+    seen = {};
   }
   void clear() {
     cells = bits = public_cells = 0;

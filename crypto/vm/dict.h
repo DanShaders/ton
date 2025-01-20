@@ -264,6 +264,7 @@ class DictionaryFixed : public DictionaryBase {
     return lookup_nearest_key(key_buffer.bits(), key_buffer.size(), fetch_next, allow_eq, invert_first);
   }
 
+  size_t get_size();
  protected:
   virtual int label_mode() const {
     return dict::LabelParser::chk_all;
@@ -588,7 +589,7 @@ class AugmentedDictionary final : public DictionaryFixed {
   bool set(td::ConstBitPtr key, int key_len, Ref<CellSlice> value, SetMode mode = SetMode::Set);
   bool set_ref(td::ConstBitPtr key, int key_len, Ref<Cell> val_ref, SetMode mode = SetMode::Set);
   bool set_builder(td::ConstBitPtr key, int key_len, const CellBuilder& value, SetMode mode = SetMode::Set);
-  bool check_for_each_extra(const foreach_extra_func_t& foreach_extra_func, bool invert_first = false);
+  bool check_for_each_extra(const foreach_extra_func_t& foreach_extra_func, bool invert_first = false, bool shuffle = false);
   std::pair<Ref<CellSlice>, Ref<CellSlice>> traverse_extra(td::BitPtr key_buffer, int key_len,
                                                            const traverse_func_t& traverse_node);
   bool validate_check_extra(const foreach_extra_func_t& foreach_extra_func, bool invert_first = false);
@@ -643,6 +644,7 @@ class AugmentedDictionary final : public DictionaryFixed {
   Ref<Cell> finish_create_leaf(CellBuilder& cb, const CellSlice& value) const override;
   Ref<Cell> finish_create_fork(CellBuilder& cb, Ref<Cell> c1, Ref<Cell> c2, int n) const override;
   std::pair<Ref<Cell>, bool> dict_set(Ref<Cell> dict, td::ConstBitPtr key, int n, const CellSlice& value,
+                                      //std::vector<Ref<Cell>>& hints,
                                       SetMode mode = SetMode::Set) const;
   int label_mode() const override {
     return dict::LabelParser::chk_size;

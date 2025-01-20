@@ -24,7 +24,8 @@
 #include "td/utils/ThreadSafeCounter.h"
 
 namespace vm {
-
+    void FlushArenaAllocatorEpoch();
+    
 class DataCell : public Cell {
  public:
   // NB: cells created with use_arena=true are never freed

@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse3 -msha")
+
 if (NOT OPENSSL_FOUND)
   find_package(OpenSSL REQUIRED)
 endif()
@@ -126,6 +128,7 @@ set(TON_CRYPTO_SOURCE
   vm/continuation.h
   vm/contops.h
   vm/cp0.h
+  # vm/rsha256_fast_x64.hpp
   vm/debugops.h
   vm/dictops.h
   vm/excno.hpp
