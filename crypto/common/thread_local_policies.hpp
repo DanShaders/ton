@@ -3,6 +3,7 @@
 
 namespace td {
 namespace tl_policies {
+namespace memory {
 
 struct IAllocator {
   virtual ~IAllocator() = default;
@@ -19,8 +20,8 @@ struct DefaultAllocator : public IAllocator {
   }
 };
 
-struct MultiLineAllocator : public IAllocator {
-  explicit MultiLineAllocator(std::size_t _size) : size(_size) {
+struct MultiPagedFixedBlockAllocator : public IAllocator {
+  explicit MultiPagedFixedBlockAllocator(std::size_t _size) : size(_size) {
     cur = ptr = static_cast<std::uint8_t*>(malloc(size));
     if (!ptr) {
       throw std::bad_alloc();
@@ -28,7 +29,7 @@ struct MultiLineAllocator : public IAllocator {
     end = ptr + size;
   }
 
-  ~MultiLineAllocator() override {
+  ~MultiPagedFixedBlockAllocator() override {
     free(ptr);
   }
 
@@ -48,15 +49,25 @@ struct MultiLineAllocator : public IAllocator {
   std::size_t size;
 };
 
-/// \brief Аллокатор для локального применения. При помощи его можно изменить механизм аллокации для конкретного
+inline IAllocator* get_default_allocator() {
+  static TD_THREAD_LOCAL DefaultAllocator obj;
+  return &obj;
+}
+
+inline IAllocator* get_multipaged_fixed_block_allocator() {
+  static TD_THREAD_LOCAL MultiPagedFixedBlockAllocator obj{1 * 1024ll * 1024ll * 1024ll};
+  return &obj;
+}
+
+/// \brief Установка локализованной политики выделения и освобождения памяти.
+///   При помощи ее можно изменить механизм аллокации для конкретного
 ///   места в коде, не влияя на поведение в других местах.
-class PolicyAllocation {
+class Policy {
  private:
-  PolicyAllocation() = default;
+  Policy() = default;
 
   static IAllocator*& instance() {
-    static TD_THREAD_LOCAL IAllocator* obj =
-        new MultiLineAllocator{2 * 1024 * 1024ll * 1024ll};  //new DefaultAllocator;
+    static TD_THREAD_LOCAL IAllocator* obj = get_multipaged_fixed_block_allocator(); // get_default_allocator();
     return obj;
   }
 
@@ -66,24 +77,24 @@ class PolicyAllocation {
   }
 
   static void set(IAllocator* ptr) {
-    if (instance() != nullptr) {
-      delete instance();
-    }
+    /// \remark не удаляем предыдущий аллокатор, т.к. PolicyAllocation не должен им владеть
+    ///   потоки могут завершиться в любой момент и выделенная память не должна от этого зависеть.
     instance() = ptr;
   }
 };
 
 template <typename T, typename... Args>
 T* allocate(Args&&... args) {
-  void* ptr = PolicyAllocation::get()->allocate(sizeof(T));
+  void* ptr = Policy::get()->allocate(sizeof(T));
   return new (ptr) T(std::forward<Args>(args)...);
 }
 
 template <typename T>
 void deallocate(const T* ptr) {
   ptr->~T();
-  PolicyAllocation::get()->deallocate(static_cast<const void*>(ptr));
+  Policy::get()->deallocate(static_cast<const void*>(ptr));
 }
 
+}  // namespace memory
 }  // namespace tl_policies
 }  // namespace td
