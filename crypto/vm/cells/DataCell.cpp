@@ -65,7 +65,7 @@ std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
     return res;
   }
 
-  return detail::CellWithUniquePtrStorage<DataCell>::create(storage_size, std::move(info));
+  return detail::CellWithArrayStorage<DataCell>::create(storage_size, std::move(info)); // default allocator
 }
 
 DataCell::DataCell(Info info) : info_(std::move(info)) {
