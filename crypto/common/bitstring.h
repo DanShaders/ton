@@ -23,7 +23,9 @@
 #include <string>
 #include <ostream>
 #include <cstdlib>
+#include <limits>
 #include "td/utils/bits.h"
+#include "td/utils/as.h"
 
 namespace td {
 template <class Pt>
@@ -399,8 +401,18 @@ class BitSliceWrite : public BitSliceGen<RefAny, unsigned char> {
   operator const BitSlice&() const {
     return *reinterpret_cast<const BitSlice*>(this);
   }
-  const BitSliceWrite& operator=(const BitSlice& bs) const;
-  const BitSliceWrite& operator=(bool val) const;
+  const BitSliceWrite& operator=(const BitSlice& bs) const {
+    if (size() != bs.size()) {
+      throw LengthMismatch();
+    }
+    bitstring::bits_memcpy(get_ptr(), get_offs(), bs.get_ptr(), bs.get_offs(), size());
+    return *this;
+  }
+
+  const BitSliceWrite& operator=(bool val) const {
+    bitstring::bits_memset(get_ptr(), get_offs(), val, size());
+    return *this;
+  }
 };
 
 class BitString : public CntObject {
@@ -668,4 +680,140 @@ Ref<BitString> make_bitstring_ref(const BitArray<N>& value) {
   return value.make_bitstring_ref();
 }
 
+namespace bitstring {
+
+inline void bits_memcpy(BitPtr to, ConstBitPtr from, std::size_t bit_count) {
+  bits_memcpy(to.ptr, to.offs, from.ptr, from.offs, bit_count);
+}
+
+inline void bits_memset(BitPtr to, bool val, std::size_t bit_count) {
+  bits_memset(to.ptr, to.offs, val, bit_count);
+}
+
+inline int bits_memcmp(ConstBitPtr bs1, ConstBitPtr bs2, std::size_t bit_count, std::size_t* same_upto) {
+  return bits_memcmp(bs1.ptr, bs1.offs, bs2.ptr, bs2.offs, bit_count, same_upto);
+}
+
+inline int bits_lexcmp(ConstBitPtr bs1, std::size_t bs1_bit_count, ConstBitPtr bs2, std::size_t bs2_bit_count) {
+  return bits_lexcmp(bs1.ptr, bs1.offs, bs1_bit_count, bs2.ptr, bs2.offs, bs2_bit_count);
+}
+
+inline std::size_t bits_memscan(ConstBitPtr bs, std::size_t bit_count, bool cmp_to) {
+  return bits_memscan(bs.ptr, bs.offs, bit_count, cmp_to);
+}
+
+inline std::size_t bits_memscan_rev(ConstBitPtr bs, std::size_t bit_count, bool cmp_to) {
+  return bits_memscan_rev(bs.ptr, bs.offs, bit_count, cmp_to);
+}
+
+inline void bits_store_long_top(BitPtr to, unsigned long long val, unsigned top_bits) {
+  bits_store_long_top(to.ptr, to.offs, val, top_bits);
+}
+
+inline void bits_store_long(BitPtr to, unsigned long long val, unsigned bits) {
+  bits_store_long_top(to, val << (64 - bits), bits);
+}
+
+template <unsigned _top_bits>
+inline void bits_store_long_top(unsigned char* to, int to_offs, unsigned long long val) {
+  static_assert(_top_bits > 0 && _top_bits <= 64);
+  unsigned top_bits = _top_bits;
+
+  to += (to_offs >> 3);
+  to_offs &= 7;
+  if (!to_offs && !(top_bits & 7)) {
+    // good only on little-endian machines!
+    unsigned long long tmp = td::bswap64(val);
+    std::memcpy(to, &tmp, top_bits >> 3);
+    return;
+  }
+  unsigned long long z = (unsigned long long)(*to & (-0x100 >> to_offs)) << 56;
+  z |= (val >> to_offs);
+  top_bits += to_offs;
+  if (top_bits > 64) {
+    as<unsigned long long>(to) = td::bswap64(z);
+    z = (val << (8 - to_offs));
+    int mask = (0xff >> (top_bits - 64));
+    to[8] = (unsigned char)((to[8] & mask) | ((int)z & ~mask));
+  } else {
+    int p = 56, q = 64 - top_bits;
+    if (q <= 32) {
+      as<unsigned>(to) = td::bswap32((unsigned)(z >> 32));
+      to += 4;
+      p -= 32;
+    }
+    while (p >= q) {
+      *to++ = (unsigned char)(z >> p);
+      p -= 8;
+    }
+    top_bits = p + 8 - q;
+    if (top_bits > 0) {
+      int mask = (0xff >> top_bits);
+      *to = (unsigned char)((*to & mask) | ((z >> p) & ~mask));
+    }
+  }
+}
+
+template <unsigned top_bits>
+inline void bits_store_long_top(BitPtr to, unsigned long long val) {
+  static_assert(top_bits > 0 && top_bits <= 64);
+  bits_store_long_top<top_bits>(to.ptr, to.offs, val);
+}
+
+template <unsigned bits>
+inline void bits_store_long(BitPtr to, unsigned long long val) {
+  static_assert(bits > 0 && bits <= 64);
+  bits_store_long_top<bits>(to, val << (64 - bits));
+}
+
+template <unsigned top_bits>
+inline unsigned long long bits_load_long_top(const unsigned char* from, int from_offs) {
+  static_assert(top_bits > 0 && top_bits <= 64);
+  from += (from_offs >> 3);
+  from_offs &= 7;
+  if ((unsigned)from_offs + top_bits <= 64) {
+    unsigned long long tmp;
+    std::memcpy(&tmp, from, (from_offs + top_bits + 7) >> 3);
+    return (td::bswap64(tmp) << from_offs) & (std::numeric_limits<td::uint64>::max() << (64 - top_bits));
+  } else {
+    unsigned long long z = td::bswap64(as<unsigned long long>(from));
+    z <<= from_offs;
+    z |= (from[8] >> (8 - from_offs));
+    return z & (std::numeric_limits<td::uint64>::max() << (64 - top_bits));
+  }
+}
+
+template <unsigned top_bits>
+inline unsigned long long bits_load_long_top(ConstBitPtr from) {
+  static_assert(top_bits > 0 && top_bits <= 64);
+  return bits_load_long_top<top_bits>(from.ptr, from.offs);
+}
+
+template <unsigned top_bits>
+inline unsigned long long bits_load_ulong(ConstBitPtr from) {
+  static_assert(top_bits > 0 && top_bits <= 64);
+  return bits_load_long_top<top_bits>(from) >> (64 - top_bits);
+}
+
+inline unsigned long long bits_load_long_top(ConstBitPtr from, unsigned top_bits) {
+  return bits_load_long_top(from.ptr, from.offs, top_bits);
+}
+
+inline unsigned long long bits_load_ulong(ConstBitPtr from, unsigned bits) {
+  return bits == 0 ? 0 : bits_load_long_top(from, bits) >> (64 - bits);
+}
+
+inline long long bits_load_long(ConstBitPtr from, unsigned bits) {
+  return (long long)bits_load_long_top(from, bits) >> (64 - bits);
+}
+
+inline std::string bits_to_binary(ConstBitPtr bs, std::size_t len) {
+  return bits_to_binary(bs.ptr, bs.offs, len);
+}
+
+inline std::string bits_to_hex(ConstBitPtr bs, std::size_t len) {
+  return bits_to_hex(bs.ptr, bs.offs, len);
+}
+
+}  // namespace bitstring
 }  // namespace td

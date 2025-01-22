@@ -667,8 +667,8 @@ static Expr* process_expr(V<ast_string_const> v) {
       }
 
       unsigned char data[3 + 8 + 256];  // addr_std$10 anycast:(Maybe Anycast) workchain_id:int8 address:bits256 = MsgAddressInt;
-      td::bitstring::bits_store_long_top(data, 0, static_cast<uint64_t>(4) << (64 - 3), 3);
-      td::bitstring::bits_store_long_top(data, 3, static_cast<uint64_t>(workchain) << (64 - 8), 8);
+      td::bitstring::bits_store_long_top<3>(data, 0, static_cast<uint64_t>(4) << (64 - 3));
+      td::bitstring::bits_store_long_top<8>(data, 3, static_cast<uint64_t>(workchain) << (64 - 8));
       td::bitstring::bits_memcpy(data, 3 + 8, addr.bits().ptr, 0, addr.size());
       res->strval = td::BitSlice{data, sizeof(data)}.to_hex();
       break;

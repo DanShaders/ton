@@ -110,7 +110,7 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     if (bits < 8) {
       return td::Status::Error("Not enough data for a special cell");
     }
-    type = static_cast<SpecialType>(td::bitstring::bits_load_ulong(data, 8));
+    type = static_cast<SpecialType>(td::bitstring::bits_load_ulong<8>(data));
     if (type == SpecialType::Ordinary) {
       return td::Status::Error("Special cell has Ordinary type");
     }
@@ -134,7 +134,7 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
       if (bits < 16) {
         return td::Status::Error("Not enough data for a PrunnedBranch special cell");
       }
-      level_mask = LevelMask((td::bitstring::bits_load_ulong(data + 8, 8)) & 0xff);
+      level_mask = LevelMask((td::bitstring::bits_load_ulong<8>(data + 8)) & 0xff);
       auto level = level_mask.get_level();
       if (level > max_level || level == 0) {
         return td::Status::Error("Prunned Branch has an invalid level");

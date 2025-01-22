@@ -98,19 +98,6 @@ BitSliceWrite BitString::subslice_write(unsigned from, unsigned bits) {
   return BitSliceWrite{BitStringRef{this}, ptr, offs + from, bits};
 }
 
-const BitSliceWrite& BitSliceWrite::operator=(const BitSlice& bs) const {
-  if (size() != bs.size()) {
-    throw LengthMismatch();
-  }
-  bitstring::bits_memcpy(get_ptr(), get_offs(), bs.get_ptr(), bs.get_offs(), size());
-  return *this;
-}
-
-const BitSliceWrite& BitSliceWrite::operator=(bool val) const {
-  bitstring::bits_memset(get_ptr(), get_offs(), val, size());
-  return *this;
-}
-
 std::ostream& operator<<(std::ostream& os, const BitString& bs) {
   return os << bs.to_hex();
 }
@@ -196,10 +183,6 @@ void bits_memcpy(unsigned char* to, int to_offs, const unsigned char* from, int 
   }
 }
 
-void bits_memcpy(BitPtr to, ConstBitPtr from, std::size_t bit_count) {
-  bits_memcpy(to.ptr, to.offs, from.ptr, from.offs, bit_count);
-}
-
 void bits_memset(unsigned char* to, int to_offs, bool val, std::size_t bit_count) {
   if (bit_count <= 0) {
     return;
@@ -232,10 +215,6 @@ void bits_memset(unsigned char* to, int to_offs, bool val, std::size_t bit_count
       to[l] = (unsigned char)(to[l] & (0xff >> bit_count));
     }
   }
-}
-
-void bits_memset(BitPtr to, bool val, std::size_t bit_count) {
-  bits_memset(to.ptr, to.offs, val, bit_count);
 }
 
 std::size_t bits_memscan_rev(const unsigned char* ptr, int offs, std::size_t bit_count, bool cmp_to) {
@@ -336,14 +315,6 @@ std::size_t bits_memscan(const unsigned char* ptr, int offs, std::size_t bit_cou
   }
 }
 
-std::size_t bits_memscan(ConstBitPtr bs, std::size_t bit_count, bool cmp_to) {
-  return bits_memscan(bs.ptr, bs.offs, bit_count, cmp_to);
-}
-
-std::size_t bits_memscan_rev(ConstBitPtr bs, std::size_t bit_count, bool cmp_to) {
-  return bits_memscan_rev(bs.ptr, bs.offs, bit_count, cmp_to);
-}
-
 int bits_memcmp(const unsigned char* bs1, int bs1_offs, const unsigned char* bs2, int bs2_offs, std::size_t bit_count,
                 std::size_t* same_upto) {
   if (!bit_count) {
@@ -416,10 +387,6 @@ int bits_memcmp(const unsigned char* bs1, int bs1_offs, const unsigned char* bs2
   return 0;
 }
 
-int bits_memcmp(ConstBitPtr bs1, ConstBitPtr bs2, std::size_t bit_count, std::size_t* same_upto) {
-  return bits_memcmp(bs1.ptr, bs1.offs, bs2.ptr, bs2.offs, bit_count, same_upto);
-}
-
 int bits_lexcmp(const unsigned char* bs1, int bs1_offs, std::size_t bs1_bit_count, const unsigned char* bs2,
                 int bs2_offs, std::size_t bs2_bit_count) {
   int res = bits_memcmp(bs1, bs1_offs, bs2, bs2_offs, std::min(bs1_bit_count, bs2_bit_count), 0);
@@ -427,10 +394,6 @@ int bits_lexcmp(const unsigned char* bs1, int bs1_offs, std::size_t bs1_bit_coun
     return res;
   }
   return bs1_bit_count < bs2_bit_count ? -1 : 1;
-}
-
-int bits_lexcmp(ConstBitPtr bs1, std::size_t bs1_bit_count, ConstBitPtr bs2, std::size_t bs2_bit_count) {
-  return bits_lexcmp(bs1.ptr, bs1.offs, bs1_bit_count, bs2.ptr, bs2.offs, bs2_bit_count);
 }
 
 void bits_store_long_top(unsigned char* to, int to_offs, unsigned long long val, unsigned top_bits) {
@@ -473,14 +436,6 @@ void bits_store_long_top(unsigned char* to, int to_offs, unsigned long long val,
   }
 }
 
-void bits_store_long_top(BitPtr to, unsigned long long val, unsigned top_bits) {
-  bits_store_long_top(to.ptr, to.offs, val, top_bits);
-}
-
-void bits_store_long(BitPtr to, unsigned long long val, unsigned bits) {
-  bits_store_long_top(to, val << (64 - bits), bits);
-}
-
 unsigned long long bits_load_long_top(const unsigned char* from, int from_offs, unsigned top_bits) {
   CHECK(top_bits <= 64);
   if (!top_bits) {
@@ -500,18 +455,6 @@ unsigned long long bits_load_long_top(const unsigned char* from, int from_offs, 
   }
 }
 
-unsigned long long bits_load_long_top(ConstBitPtr from, unsigned top_bits) {
-  return bits_load_long_top(from.ptr, from.offs, top_bits);
-}
-
-unsigned long long bits_load_ulong(ConstBitPtr from, unsigned bits) {
-  return bits == 0 ? 0 : bits_load_long_top(from, bits) >> (64 - bits);
-}
-
-long long bits_load_long(ConstBitPtr from, unsigned bits) {
-  return (long long)bits_load_long_top(from, bits) >> (64 - bits);
-}
-
 std::string bits_to_binary(const unsigned char* ptr, int offs, std::size_t len) {
   if (!len) {
     return "";
@@ -529,10 +472,6 @@ std::string bits_to_binary(const unsigned char* ptr, int offs, std::size_t len) 
     }
   } while (--len > 0);
   return s;
-}
-
-std::string bits_to_binary(ConstBitPtr bs, std::size_t len) {
-  return bits_to_binary(bs.ptr, bs.offs, len);
 }
 
 static const char hex_digits[] = "0123456789ABCDEF";
@@ -584,10 +523,6 @@ std::string bits_to_hex(const unsigned char* ptr, int offs, std::size_t len) {
     s.push_back('_');
   }
   return s;
-}
-
-std::string bits_to_hex(ConstBitPtr bs, std::size_t len) {
-  return bits_to_hex(bs.ptr, bs.offs, len);
 }
 
 long parse_bitstring_hex_literal(unsigned char* buff, std::size_t buff_size, const char* str, const char* str_end) {

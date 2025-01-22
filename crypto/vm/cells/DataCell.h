@@ -34,10 +34,10 @@ class DataCell : public Cell {
   ~DataCell() override;
 
   static void store_depth(td::uint8* dest, td::uint16 depth) {
-    td::bitstring::bits_store_long(dest, depth, depth_bits);
+    td::bitstring::bits_store_long<depth_bits>(dest, depth);
   }
   static td::uint16 load_depth(const td::uint8* src) {
-    return td::bitstring::bits_load_ulong(src, depth_bits) & 0xffff;
+    return td::bitstring::bits_load_ulong<depth_bits>(src) & 0xffff;
   }
 
  protected:

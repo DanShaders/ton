@@ -1944,7 +1944,7 @@ bool AnyIntView<Tr>::export_bits_any(unsigned char* buff, int offs, unsigned bit
         return false;
       }
       td::bitstring::bits_memset(buff, offs, v < 0, bits - 64);
-      td::bitstring::bits_store_long_top(buff, offs + bits - 64, v, 64);
+      td::bitstring::bits_store_long_top<64>(buff, offs + bits - 64, v);
     }
     return true;
   }
