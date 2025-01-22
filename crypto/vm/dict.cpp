@@ -244,7 +244,7 @@ bool DictionaryFixed::check_fork_raw(Ref<CellSlice> cs_ref, int n) const {
 
 namespace dict {
 
-LabelParser::LabelParser(Ref<CellSlice> cs, int max_label_len, int auto_validate) : remainder(), l_offs(0), l_same(0) {
+LabelParser::LabelParser(Ref<CellSlice> &&cs, int max_label_len, int auto_validate) : remainder(), l_offs(0), l_same(0) {
   if (!parse_label(cs.write(), max_label_len)) {
     l_offs = 0;
   } else {
@@ -262,7 +262,7 @@ LabelParser::LabelParser(Ref<CellSlice> cs, int max_label_len, int auto_validate
   }
 }
 
-LabelParser::LabelParser(Ref<Cell> cell, int max_label_len, int auto_validate) : remainder(), l_offs(0), l_same(0) {
+LabelParser::LabelParser(Ref<Cell> &&cell, int max_label_len, int auto_validate) : remainder(), l_offs(0), l_same(0) {
   Ref<CellSlice> cs = load_cell_slice_ref(std::move(cell));
   if (!parse_label(cs.unique_write(), max_label_len)) {
     l_offs = 0;

@@ -36,8 +36,16 @@ struct LabelParser {
   int l_same;
   int l_bits;
   unsigned s_bits;
-  LabelParser(Ref<CellSlice> cs, int max_label_len, int auto_validate = chk_all);
-  LabelParser(Ref<Cell> cell, int max_label_len, int auto_validate = chk_all);
+
+  LabelParser(const Ref<CellSlice> &cs, int max_label_len, int auto_validate = chk_all)
+    : LabelParser(Ref<CellSlice>{cs}, max_label_len, auto_validate) {
+  }
+  LabelParser(const Ref<Cell> &cell, int max_label_len, int auto_validate = chk_all)
+    : LabelParser(Ref<Cell>{cell}, max_label_len, auto_validate) {
+  }
+
+  LabelParser(Ref<CellSlice>&& cs, int max_label_len, int auto_validate = chk_all);
+  LabelParser(Ref<Cell>&& cell, int max_label_len, int auto_validate = chk_all);
   int is_valid() const {
     return l_offs;
   }
