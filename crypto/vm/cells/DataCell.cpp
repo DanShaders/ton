@@ -92,13 +92,6 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
   return create(std::move(data), bits, td::MutableSpan<Ref<Cell>>(copied_refs.data(), refs.size()), special);
 }
 
-DataCell::SpecialType DataCell::special_type() const {
-  if (is_special()) {
-    return static_cast<SpecialType>(td::bitstring::bits_load_ulong(get_data(), 8));
-  }
-  return SpecialType::Ordinary;
-}
-
 td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, td::MutableSpan<Ref<Cell>> refs,
                                            bool special) {
   for (auto& ref : refs) {

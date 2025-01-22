@@ -23,6 +23,17 @@
 
 #include "td/utils/ThreadSafeCounter.h"
 
+#define MULTIPLE_2(val)  ((val) << 1)
+#define MULTIPLE_4(val)  ((val) << 2)
+#define MULTIPLE_8(val)  ((val) << 3)
+#define MULTIPLE_16(val) ((val) << 4)
+#define MULTIPLE_32(val) ((val) << 5)
+#define DIVIDE_2(val)    ((val) >> 1)
+#define DIVIDE_4(val)    ((val) >> 2)
+#define DIVIDE_8(val)    ((val) >> 3)
+#define DIVIDE_16(val)   ((val) >> 4)
+#define DIVIDE_32(val)   ((val) >> 5)
+
 namespace vm {
 
 class DataCell : public Cell {
@@ -60,20 +71,20 @@ class DataCell : public Cell {
       // d1 = refs_count + 8 * is_special + 32 * level
       //      + 16 * with_hashes - for seriazlization
       // d1 = 7 + 16 + 32 * l - for absent cells
-      return static_cast<unsigned char>(refs_count_ + 8 * is_special_ + 32 * level_mask.get_mask());
+      return static_cast<unsigned char>(refs_count_ + 8 * is_special_ + MULTIPLE_32(level_mask.get_mask()));
     }
     unsigned char d2() const {
-      auto res = static_cast<unsigned char>((bits_ / 8) * 2);
+      auto res = static_cast<unsigned char>(MULTIPLE_2(DIVIDE_8(bits_)));
       if ((bits_ & 7) != 0) {
         return static_cast<unsigned char>(res + 1);
       }
       return res;
     }
-    size_t get_hashes_offset() const {
+    constexpr size_t get_hashes_offset() const {
       return 0;
     }
     size_t get_refs_offset() const {
-      return get_hashes_offset() + hash_bytes * hash_count_;
+      return get_hashes_offset() + MULTIPLE_32(hash_count_);
     }
     size_t get_depth_offset() const {
       return get_refs_offset() + refs_count_ * sizeof(Cell*);
@@ -82,7 +93,7 @@ class DataCell : public Cell {
       return get_depth_offset() + sizeof(td::uint16) * hash_count_;
     }
     size_t get_storage_size() const {
-      return get_data_offset() + (bits_ + 7) / 8;
+      return get_data_offset() + DIVIDE_8(bits_ + 7);
     }
 
     const Hash* get_hashes(const char* storage) const {
@@ -181,7 +192,14 @@ class DataCell : public Cell {
   bool is_special() const {
     return info_.is_special_;
   }
-  SpecialType special_type() const;
+
+  DataCell::SpecialType special_type() const {
+    if (is_special()) {
+      return static_cast<SpecialType>(td::bitstring::bits_load_ulong<8>(get_data()));
+    }
+    return SpecialType::Ordinary;
+  }
+
   int get_serialized_size(bool with_hashes = false) const {
     return ((get_bits() + 23) >> 3) +
            (with_hashes ? get_level_mask().get_hashes_count() * (hash_bytes + depth_bytes) : 0);
@@ -200,7 +218,7 @@ class DataCell : public Cell {
   void store(StorerT& storer) const {
     storer.template store_binary<td::uint8>(info_.d1());
     storer.template store_binary<td::uint8>(info_.d2());
-    storer.store_slice(td::Slice(get_data(), (get_bits() + 7) / 8));
+    storer.store_slice(td::Slice(get_data(), DIVIDE_8(get_bits() + 7)));
   }
 
  protected:
