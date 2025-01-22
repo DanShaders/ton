@@ -25,6 +25,7 @@
 
 #include "td/utils/StringBuilder.h"
 #include "td/utils/logging.h"
+#include "crypto/common/thread_local_policies.hpp"
 
 namespace td {
 
@@ -177,7 +178,8 @@ class Ref {
   template <typename... Args>
   explicit Ref(bool init, Args&&... args) : ptr(0) {
     //assert(init);
-    ptr = new T(std::forward<Args>(args)...);
+    void* p = tl_policies::PolicyAllocation::get()->allocate(sizeof(T));
+    ptr = new (p) T(std::forward<Args>(args)...);
   }
   /*
   explicit Ref(const T& c) : ptr(&c) {
