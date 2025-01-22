@@ -181,7 +181,20 @@ class CellSlice : public td::CntObject {
     return (res = fetch_int256(bits, false)).not_null();
   }
   Ref<Cell> prefetch_ref(unsigned offset = 0) const;
-  Ref<Cell> fetch_ref();
+
+  Ref<Cell> fetch_ref() {
+    if (have_refs()) {
+      auto ref_id = refs_st++;
+      auto res = cell->get_ref(ref_id)->virtualize(child_virt());
+      if (!tree_node.empty()) {
+        res = UsageCell::create(std::move(res), tree_node.create_child(ref_id));
+      }
+      return res;
+    } else {
+      return Ref<Cell>{};
+    }
+  }
+
   bool fetch_ref_to(Ref<Cell>& ref) {
     return (ref = fetch_ref()).not_null();
   }
@@ -333,6 +346,12 @@ CellSlice load_cell_slice(const Ref<Cell>& cell);
 Ref<CellSlice> load_cell_slice_ref(const Ref<Cell>& cell);
 CellSlice load_cell_slice_special(const Ref<Cell>& cell, bool& is_special);
 Ref<CellSlice> load_cell_slice_ref_special(const Ref<Cell>& cell, bool& is_special);
+
+CellSlice load_cell_slice(Ref<Cell>&& cell);
+Ref<CellSlice> load_cell_slice_ref(Ref<Cell>&& cell);
+CellSlice load_cell_slice_special(Ref<Cell>&& cell, bool& is_special);
+Ref<CellSlice> load_cell_slice_ref_special(Ref<Cell>&& cell, bool& is_special);
+
 void print_load_cell(std::ostream& os, Ref<Cell> cell, int indent = 0);
 
 }  // namespace vm
