@@ -55,15 +55,17 @@ private:
 };
 }
 std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
+  const size_t storage_size = info.get_storage_size();
+
   if (use_arena) {
     ArenaAllocator<DataCell> allocator;
-    auto res = detail::CellWithArrayStorage<DataCell>::create(allocator, info.get_storage_size(), info);
+    auto res = detail::CellWithArrayStorage<DataCell>::create(allocator, storage_size, std::move(info));
     // this is dangerous
     Ref<DataCell>(res.get()).release();
     return res;
   }
 
-  return detail::CellWithUniquePtrStorage<DataCell>::create(info.get_storage_size(), info);
+  return detail::CellWithUniquePtrStorage<DataCell>::create(storage_size, std::move(info));
 }
 
 DataCell::DataCell(Info info) : info_(std::move(info)) {
@@ -272,11 +274,11 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     td::init_thread_local<digest::SHA256>(hasher);
     hasher->reset();
 
-    hasher->feed(td::Slice(tmp, 2));
+    hasher->feed(tmp, 2);
 
     if (hash_i == hash_i_offset) {
       DCHECK(level_i == 0 || type == SpecialType::PrunnedBranch);
-      hasher->feed(td::Slice(data_ptr, (bits + 7) >> 3));
+      hasher->feed(data_ptr, (bits + 7) >> 3);
     } else {
       DCHECK(level_i != 0 && type != SpecialType::PrunnedBranch);
       hasher->feed(hashes_ptr[hash_i - hash_i_offset - 1].as_slice());
