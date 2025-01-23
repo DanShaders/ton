@@ -61,9 +61,8 @@ class CellSlice : public td::CntObject {
   CellSlice& operator=(const CellSlice& other) = default;
   CellSlice();
 
-  template <typename... Args>
-  static void* operator new(std::size_t count, Args&&... args) {
-    return td::tl_policies::memory::allocate<CellSlice>(std::forward<Args>(args)...);
+  static void* operator new(std::size_t count) {
+    return td::tl_policies::memory::allocate(count);
   }
 
   static void operator delete(void* ptr) {

@@ -83,16 +83,12 @@ class Policy {
   }
 };
 
-template <typename T, typename... Args>
-T* allocate(Args&&... args) {
-  void* ptr = Policy::get()->allocate(sizeof(T));
-  return ::new (ptr) T(std::forward<Args>(args)...);
+inline void* allocate(std::size_t count) {
+  return Policy::get()->allocate(count);
 }
 
-template <typename T>
-void deallocate(const T* ptr) {
-  ptr->~T();
-  Policy::get()->deallocate(static_cast<const void*>(ptr));
+inline void deallocate(const void* ptr) {
+  Policy::get()->deallocate(ptr);
 }
 
 }  // namespace memory
