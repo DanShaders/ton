@@ -178,8 +178,7 @@ class Ref {
   template <typename... Args>
   explicit Ref(bool init, Args&&... args) : ptr(0) {
     //assert(init);
-    void* p = tl_policies::memory::Policy::get()->allocate(sizeof(T));
-    ptr = new (p) T(std::forward<Args>(args)...);
+    ptr = new T(std::forward<Args>(args)...);
   }
   /*
   explicit Ref(const T& c) : ptr(&c) {

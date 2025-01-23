@@ -55,7 +55,7 @@ inline IAllocator* get_default_allocator() {
 }
 
 inline IAllocator* get_multipaged_fixed_block_allocator() {
-  static TD_THREAD_LOCAL MultiPagedFixedBlockAllocator obj{1 * 1024ll * 1024ll * 1024ll};
+  static TD_THREAD_LOCAL MultiPagedFixedBlockAllocator obj{static_cast<uint64_t>(1.5 * 1024.0 * 1024.0 * 1024.0)};
   return &obj;
 }
 
@@ -86,7 +86,7 @@ class Policy {
 template <typename T, typename... Args>
 T* allocate(Args&&... args) {
   void* ptr = Policy::get()->allocate(sizeof(T));
-  return new (ptr) T(std::forward<Args>(args)...);
+  return ::new (ptr) T(std::forward<Args>(args)...);
 }
 
 template <typename T>

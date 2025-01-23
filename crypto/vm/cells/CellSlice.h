@@ -21,6 +21,7 @@
 #include "common/refcnt.hpp"
 #include "common/refint.h"
 #include "vm/cells.h"
+#include "common/thread_local_policies.hpp"
 
 namespace td {
 class StringBuilder;
@@ -59,6 +60,16 @@ class CellSlice : public td::CntObject {
   CellSlice(const CellSlice&);
   CellSlice& operator=(const CellSlice& other) = default;
   CellSlice();
+
+  template <typename... Args>
+  static void* operator new(std::size_t count, Args&&... args) {
+    return td::tl_policies::memory::allocate<CellSlice>(std::forward<Args>(args)...);
+  }
+
+  static void operator delete(void* ptr) {
+    return td::tl_policies::memory::deallocate(ptr);
+  }
+
   Cell::LoadedCell move_as_loaded_cell();
   td::CntObject* make_copy() const override {
     return new CellSlice{*this};
