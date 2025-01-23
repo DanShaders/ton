@@ -456,7 +456,7 @@ Ref<Cell> Dictionary::extract_value_ref(Ref<CellSlice> cs) {
 }
 
 Ref<CellSlice> DictionaryFixed::lookup(td::ConstBitPtr key, int key_len) {
-  force_validate();
+  force_validate(); // ??TODO: Need this checks?
   if (key_len != get_key_bits() || is_empty()) {
     return {};
   }

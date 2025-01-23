@@ -1185,10 +1185,14 @@ void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQ
   descr.set_queue_root(qinfo.out_queue->prefetch_ref(0));
   // TODO: comment the next two lines in the future when the output queues become huge
   // (do this carefully)
+
+  //*|t_OutMsgQueueInfo.validate_ref|
   if (debug_checks_) {
     CHECK(block::gen::t_OutMsgQueueInfo.validate_ref(1000000, outq_descr->root_cell()));
     CHECK(block::tlb::t_OutMsgQueueInfo.validate_ref(1000000, outq_descr->root_cell()));
   }
+  //|t_OutMsgQueueInfo.validate_ref|*/
+
   // unpack ProcessedUpto
   LOG(DEBUG) << "unpacking ProcessedUpto of neighbor " << descr.blk_.to_str();
   if (verbosity >= 2) {
@@ -1850,7 +1854,7 @@ bool ContestValidateQuery::postcheck_one_account_update(td::ConstBitPtr acc_id, 
   LOG(DEBUG) << "checking update of account " << acc_id.to_hex(256);
   old_value = ps_.account_dict_->extract_value(std::move(old_value));
   new_value = ns_.account_dict_->extract_value(std::move(new_value));
-  auto acc_blk_root = account_blocks_dict_->lookup(acc_id, 256);
+  auto acc_blk_root = account_blocks_dict_->lookup(acc_id, 256); // ??TODO: possible to get rid of lookup?
   if (acc_blk_root.is_null()) {
     return reject_query("the state of account "s + acc_id.to_hex(256) +
                         " changed in the new state with respect to the old state, but the block contains no "
@@ -2315,7 +2319,7 @@ bool ContestValidateQuery::build_new_message_queue() {
         block::gen::OutMsg::Record_msg_export_new_defer rec;
         block::tlb::MsgEnvelope::Record_std env;
         block::gen::CommonMsgInfo::Record_int_msg_info msg;
-        CHECK(block::gen::csr_unpack(value, rec));
+        CHECK(block::gen::csr_unpack(value, rec)); // ??TODO: Duplicate function invocation? (here and in many other places)
         if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.out_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
           return fatal_error("cannot unpack msg_export_new");
@@ -2512,7 +2516,7 @@ bool ContestValidateQuery::precheck_one_message_queue_update(td::ConstBitPtr out
   auto q_msg_env = (old_value.not_null() ? old_value : new_value)->prefetch_ref();
   int tag = block::tlb::t_OutMsg.get_tag(*out_msg_cs);
   if (tag == 12 || tag == 13) {
-    tag /= 2;
+    tag /= 2; // ??TODO: why not just 6?
   } else if (tag == 20) {
     tag = 8;
   } else if (tag == 21) {
