@@ -94,7 +94,11 @@ class ContestValidateQuery : public td::actor::Actor {
   ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice collated_data,
                        td::Promise<td::BufferSlice> promise);
 
+  ~ContestValidateQuery();
+
  private:
+  vm::Arena arena{};
+  vm::BagOfCells boc1, boc2;
   int verbosity{0};
   int pending{0};
   const ShardIdFull shard_;
@@ -192,6 +196,32 @@ class ContestValidateQuery : public td::actor::Actor {
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_proc_lt_;
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_emitted_lt_;
 
+  struct TransactionBlockChecker {
+    ContestValidateQuery* self_;
+    std::unique_ptr<vm::AugmentedDictionary> account_dict;
+    std::set<StdSmcAddress> deleted;
+    std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_proc_lt_;
+    block::CurrencyCollection total_burned_{0}, fees_burned_{0};
+    td::uint64 total_gas_used_{0}, total_special_gas_used_{0};
+    std::set<StdSmcAddress> account_expected_defer_all_messages_;
+    td::Status status;
+
+    TransactionBlockChecker(ContestValidateQuery* self) : self_(self) {
+      account_dict = std::make_unique<vm::AugmentedDictionary>(256, block::tlb::aug_ShardAccounts);
+    }
+
+    bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root);    
+    bool check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first, bool is_last);
+
+    bool reject_query(std::string error, td::BufferSlice reason = {});
+    bool reject_query(std::string err_msg, td::Status error, td::BufferSlice reason = {});
+    
+    bool fatal_error(td::Status error);
+    bool fatal_error(int err_code, std::string err_msg);
+    bool fatal_error(int err_code, std::string err_msg, td::Status error);
+    bool fatal_error(std::string err_msg, int err_code = -666);
+  };
+
   std::map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;
   std::map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> new_dispatch_queue_messages_;
   std::set<StdSmcAddress> account_expected_defer_all_messages_;
@@ -212,6 +242,7 @@ class ContestValidateQuery : public td::actor::Actor {
 
   void finish_query();
   void abort_query(td::Status error);
+  bool reject_query(td::Status error);
   bool reject_query(std::string error, td::BufferSlice reason = {});
   bool reject_query(std::string err_msg, td::Status error, td::BufferSlice reason = {});
   bool soft_reject_query(std::string error, td::BufferSlice reason = {});
@@ -322,10 +353,7 @@ class ContestValidateQuery : public td::actor::Actor {
   bool check_in_queue();
   std::unique_ptr<block::Account> make_account_from(td::ConstBitPtr addr, Ref<vm::CellSlice> account);
   std::unique_ptr<block::Account> unpack_account(td::ConstBitPtr addr);
-  bool check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first,
-                             bool is_last);
-  bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr);
-  bool check_transactions();
+  bool check_transactions_async();
   bool check_message_processing_order();
   bool check_new_state();
   bool postcheck_value_flow();

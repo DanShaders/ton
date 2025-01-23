@@ -38,6 +38,8 @@ std::string ErrorCtx::as_string() const {
   return a;
 }
 
+void init_worker_threads(int n);
+
 /**
  * Constructs a ContestValidateQuery object.
  *
@@ -55,6 +57,12 @@ ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice 
     , main_promise(std::move(promise))
     , shard_pfx_(shard_.shard)
     , shard_pfx_len_(ton::shard_prefix_length(shard_)) {
+      vm::BagOfCells::init_actors(td::thread::hardware_concurrency());
+      init_worker_threads(td::thread::hardware_concurrency());
+}
+
+ContestValidateQuery::~ContestValidateQuery() {
+  (*get_actor_info_ptr()).mailbox().clear();
 }
 
 /**
@@ -64,6 +72,10 @@ ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice 
  */
 void ContestValidateQuery::abort_query(td::Status error) {
   (void)fatal_error(std::move(error));
+}
+
+bool ContestValidateQuery::reject_query(td::Status error) {
+  return fatal_error(std::move(error));
 }
 
 /**
@@ -221,25 +233,89 @@ void ContestValidateQuery::start_up() {
     reject_query("error unpacking block candidate");
     return;
   }
+}
+
+struct ScopedSetArena {
+  vm::Arena* old_arena;
+  ScopedSetArena(vm::Arena* new_arena) : old_arena(vm::DataCell::arena) {
+    vm::DataCell::arena = new_arena;
+  }
+  ~ScopedSetArena() {
+    vm::DataCell::arena = old_arena;
+  }
+};
+
+/**
+ * Unpacks and validates a block candidate.
+ *
+ * This function unpacks the block candidate data and performs various validation checks to ensure its integrity.
+ * It checks the file hash and root hash of the block candidate against the expected values.
+ * It then parses the block header and checks its validity.
+ * Finally, it deserializes the collated data and extracts the collated roots.
+ *
+ * @returns True if the block candidate was successfully unpacked, false otherwise.
+ */
+bool ContestValidateQuery::unpack_block_candidate() {
+  vm::BagOfCells::Info info, info_collated;
+  info.parse_serialized_header(this->block_data);
+  info_collated.parse_serialized_header(this->collated_data);
+  size_t max_mem = (info.cell_count + info_collated.cell_count) * (sizeof(vm::DataCell) + vm::Cell::max_bytes);
+  arena.reserve(max_mem);
+
+  ScopedSetArena set_arena (&arena);
+  auto res = boc1.deserialize_async(block_data);  
+  if (res.is_error()) {
+    return reject_query("cannot deserialize block", res.move_as_error());
+  }
+  if (boc1.get_root_count() != 1) {
+    return reject_query("block BoC must contain exactly one root");
+  }
+  block_root_ = boc1.get_root_cell();
+  CHECK(block_root_.not_null());
+  // 3. initial block parse
+  {
+    auto guard = error_ctx_add_guard("parsing block header");
+    try {
+      if (!init_parse()) {
+        return reject_query("invalid block header");
+      }
+    } catch (vm::VmError& err) {
+      return reject_query(err.get_msg());
+    } catch (vm::VmVirtError& err) {
+      return reject_query(err.get_msg());
+    }
+  }
+  
+  // ...
+  // 8. deserialize collated data
+
+  res = boc2.deserialize_async(collated_data);  
+  if (res.is_error()) {
+    return reject_query("cannot deserialize collated data", res.move_as_error());
+  }
+  int n = boc2.get_root_count();
+  CHECK(n >= 0);
+  for (int i = 0; i < n; i++) {
+    collated_roots_.emplace_back(boc2.get_root_cell(i));
+  }
+  // 9. extract/classify collated data
+  extract_collated_data();
+
   if (prev_blocks.size() > 2) {
-    soft_reject_query("cannot have more than two previous blocks");
-    return;
+    return soft_reject_query("cannot have more than two previous blocks");
   }
   if (!prev_blocks.size()) {
-    soft_reject_query("must have one or two previous blocks to generate a next block");
-    return;
+    return soft_reject_query("must have one or two previous blocks to generate a next block");
   }
   if (prev_blocks.size() == 2) {
     if (!(shard_is_parent(shard_, ShardIdFull(prev_blocks[0])) &&
           shard_is_parent(shard_, ShardIdFull(prev_blocks[1])) && prev_blocks[0].id.shard < prev_blocks[1].id.shard)) {
-      soft_reject_query(
+      return soft_reject_query(
           "the two previous blocks for a merge operation are not siblings or are not children of current shard");
-      return;
     }
     for (const auto& blk : prev_blocks) {
       if (!blk.id.seqno) {
-        soft_reject_query("previous blocks for a block merge operation must have non-zero seqno");
-        return;
+        return soft_reject_query("previous blocks for a block merge operation must have non-zero seqno");
       }
     }
     // soft_reject_query("merging shards is not implemented yet");
@@ -248,13 +324,11 @@ void ContestValidateQuery::start_up() {
     CHECK(prev_blocks.size() == 1);
     // creating next block
     if (!ShardIdFull(prev_blocks[0]).is_valid_ext()) {
-      soft_reject_query("previous block does not have a valid id");
-      return;
+      return soft_reject_query("previous block does not have a valid id");
     }
     if (ShardIdFull(prev_blocks[0]) != shard_) {
       if (!shard_is_parent(ShardIdFull(prev_blocks[0]), shard_)) {
-        soft_reject_query("previous block does not belong to the shard we are generating a new block for");
-        return;
+        return soft_reject_query("previous block does not belong to the shard we are generating a new block for");
       }
     }
     if (after_split_) {
@@ -277,56 +351,7 @@ void ContestValidateQuery::start_up() {
                                 fetch_block_state(mc_blkid_));
   // ...
   CHECK(pending);
-}
-
-/**
- * Unpacks and validates a block candidate.
- *
- * This function unpacks the block candidate data and performs various validation checks to ensure its integrity.
- * It checks the file hash and root hash of the block candidate against the expected values.
- * It then parses the block header and checks its validity.
- * Finally, it deserializes the collated data and extracts the collated roots.
- *
- * @returns True if the block candidate was successfully unpacked, false otherwise.
- */
-bool ContestValidateQuery::unpack_block_candidate() {
-  vm::BagOfCells boc1, boc2;
-  // 1. deserialize block itself
-  auto res1 = boc1.deserialize(block_data);
-  if (res1.is_error()) {
-    return reject_query("cannot deserialize block", res1.move_as_error());
-  }
-  if (boc1.get_root_count() != 1) {
-    return reject_query("block BoC must contain exactly one root");
-  }
-  block_root_ = boc1.get_root_cell();
-  CHECK(block_root_.not_null());
-  // 3. initial block parse
-  {
-    auto guard = error_ctx_add_guard("parsing block header");
-    try {
-      if (!init_parse()) {
-        return reject_query("invalid block header");
-      }
-    } catch (vm::VmError& err) {
-      return reject_query(err.get_msg());
-    } catch (vm::VmVirtError& err) {
-      return reject_query(err.get_msg());
-    }
-  }
-  // ...
-  // 8. deserialize collated data
-  auto res2 = boc2.deserialize(collated_data);
-  if (res2.is_error()) {
-    return reject_query("cannot deserialize collated data", res2.move_as_error());
-  }
-  int n = boc2.get_root_count();
-  CHECK(n >= 0);
-  for (int i = 0; i < n; i++) {
-    collated_roots_.emplace_back(boc2.get_root_cell(i));
-  }
-  // 9. extract/classify collated data
-  return extract_collated_data();
+  return true;
 }
 
 /**
@@ -4473,6 +4498,36 @@ std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBi
   return new_acc;
 }
 
+bool ContestValidateQuery::TransactionBlockChecker::reject_query(std::string error, td::BufferSlice reason) {
+  status = td::Status::Error(error + ": " + reason.as_slice().str());
+  return false;
+}
+
+bool ContestValidateQuery::TransactionBlockChecker::reject_query(std::string err_msg, td::Status error, td::BufferSlice reason) {
+  status = td::Status::Error(err_msg + ": " + reason.as_slice().str() + error.message().str());
+  return false;
+}
+
+bool ContestValidateQuery::TransactionBlockChecker::fatal_error(td::Status error) {
+  status = std::move(error);
+  return false;
+}
+
+bool ContestValidateQuery::TransactionBlockChecker::fatal_error(int err_code, std::string err_msg) {
+  status = td::Status::Error(err_code, err_msg);
+  return false;
+}
+
+bool ContestValidateQuery::TransactionBlockChecker::fatal_error(int err_code, std::string err_msg, td::Status error) {
+  status = td::Status::Error(err_code, err_msg + error.message().str());
+  return false;
+}
+
+bool ContestValidateQuery::TransactionBlockChecker::fatal_error(std::string err_msg, int err_code) {
+  status = td::Status::Error(err_code, err_msg);
+  return false;
+}
+
 /**
  * Checks the validity of a single transaction for a given account.
  * Performs transaction execution.
@@ -4485,8 +4540,8 @@ std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBi
  *
  * @returns True if the transaction is valid, false otherwise.
  */
-bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::LogicalTime lt, Ref<vm::Cell> trans_root,
-                                                 bool is_first, bool is_last) {
+bool ContestValidateQuery::TransactionBlockChecker::check_one_transaction(block::Account& account, ton::LogicalTime lt, Ref<vm::Cell> trans_root,
+                                                                          bool is_first, bool is_last) {
   LOG(DEBUG) << "checking transaction " << lt << " of account " << account.addr.to_hex();
   const StdSmcAddress& addr = account.addr;
   block::gen::Transaction::Record trans;
@@ -4503,7 +4558,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   CHECK(tag >= 0);  // we have already validated the serialization of all Transactions
   td::optional<block::MsgMetadata> in_msg_metadata;
   if (in_msg_root.not_null()) {
-    auto in_descr_cs = in_msg_dict_->lookup(in_msg_root->get_hash().as_bitslice());
+    auto in_descr_cs = self_->in_msg_dict_->lookup(in_msg_root->get_hash().as_bitslice());
     if (in_descr_cs.is_null()) {
       return reject_query(PSTRING() << "inbound message with hash " << in_msg_root->get_hash().to_hex()
                                     << " of transaction " << lt << " of account " << addr.to_hex()
@@ -4518,7 +4573,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
                                     << " has an invalid InMsg record (not one of msg_import_ext, msg_import_fin, "
                                        "msg_import_imm, msg_import_ihr or msg_import_deferred_fin)");
     }
-    is_special_tx = is_special_in_msg(*in_descr_cs);
+    is_special_tx = self_->is_special_in_msg(*in_descr_cs);
     // once we know there is a InMsg with correct hash, we already know that it contains a message with this hash (by the verification of InMsg), so it is our message
     // have still to check its destination address and imported value
     // and that it refers to this transaction
@@ -4550,7 +4605,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
           emitted_lt = msg_env.emitted_lt.value();
         }
       }
-      if (info.created_lt != start_lt_ || !is_special_tx) {
+      if (info.created_lt != self_->start_lt_ || !is_special_tx) {
         msg_proc_lt_.emplace_back(addr, lt, emitted_lt);
       }
       dest = std::move(info.dest);
@@ -4564,7 +4619,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     WorkchainId d_wc;
     StdSmcAddress d_addr;
     CHECK(block::tlb::t_MsgAddressInt.extract_std_address(dest, d_wc, d_addr));
-    if (d_wc != workchain() || d_addr != addr) {
+    if (d_wc != self_->workchain() || d_addr != addr) {
       return reject_query(PSTRING() << "inbound message of transaction " << lt << " of account " << addr.to_hex()
                                     << " has a different destination address " << d_wc << ":" << d_addr.to_hex());
     }
@@ -4578,7 +4633,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   }
   // check output messages
   td::optional<block::MsgMetadata> new_msg_metadata;
-  if (msg_metadata_enabled_) {
+  if (self_->msg_metadata_enabled_) {
     if (external || is_special_tx || tag != block::gen::TransactionDescr::trans_ord) {
       new_msg_metadata = block::MsgMetadata{0, account.workchain, account.addr, (LogicalTime)trans.lt};
     } else if (in_msg_metadata) {
@@ -4590,7 +4645,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   for (int i = 0; i < trans.outmsg_cnt; i++) {
     auto out_msg_root = out_dict.lookup_ref(td::BitArray<15>{i});
     CHECK(out_msg_root.not_null());  // we have pre-checked this
-    auto out_descr_cs = out_msg_dict_->lookup(out_msg_root->get_hash().as_bitslice());
+    auto out_descr_cs = self_->out_msg_dict_->lookup(out_msg_root->get_hash().as_bitslice());
     if (out_descr_cs.is_null()) {
       return reject_query(PSTRING() << "outbound message #" << i + 1 << " with hash "
                                     << out_msg_root->get_hash().to_hex() << " of transaction " << lt << " of account "
@@ -4641,7 +4696,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     WorkchainId s_wc;
     StdSmcAddress ss_addr;  // s_addr is some macros in Windows
     CHECK(block::tlb::t_MsgAddressInt.extract_std_address(src, s_wc, ss_addr));
-    if (s_wc != workchain() || ss_addr != addr) {
+    if (s_wc != self_->workchain() || ss_addr != addr) {
       return reject_query(PSTRING() << "outbound message #" << i + 1 << " of transaction " << lt << " of account "
                                     << addr.to_hex() << " has a different source address " << s_wc << ":"
                                     << ss_addr.to_hex());
@@ -4657,18 +4712,18 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
       bool is_deferred = tag == block::gen::OutMsg::msg_export_new_defer;
       if (account_expected_defer_all_messages_.count(ss_addr) && !is_deferred) {
         return reject_query(
-            PSTRING() << "outbound message #" << i + 1 << " on account " << workchain() << ":" << ss_addr.to_hex()
+            PSTRING() << "outbound message #" << i + 1 << " on account " << self_->workchain() << ":" << ss_addr.to_hex()
                       << " must be deferred because this account has earlier messages in DispatchQueue");
       }
       if (is_deferred) {
-        LOG(INFO) << "message from account " << workchain() << ":" << ss_addr.to_hex() << " with lt " << message_lt
+        LOG(INFO) << "message from account " << self_->workchain() << ":" << ss_addr.to_hex() << " with lt " << message_lt
                   << " was deferred";
-        if (!deferring_messages_enabled_ && !account_expected_defer_all_messages_.count(ss_addr)) {
-          return reject_query(PSTRING() << "outbound message #" << i + 1 << " on account " << workchain() << ":"
+        if (!self_->deferring_messages_enabled_ && !account_expected_defer_all_messages_.count(ss_addr)) {
+          return reject_query(PSTRING() << "outbound message #" << i + 1 << " on account " << self_->workchain() << ":"
                                         << ss_addr.to_hex() << " is deferred, but deferring messages is disabled");
         }
         if (i == 0 && !account_expected_defer_all_messages_.count(ss_addr)) {
-          return reject_query(PSTRING() << "outbound message #1 on account " << workchain() << ":" << ss_addr.to_hex()
+          return reject_query(PSTRING() << "outbound message #1 on account " << self_->workchain() << ":" << ss_addr.to_hex()
                                         << " must not be deferred (the first message cannot be deferred unless some "
                                            "prevoius messages are deferred)");
         }
@@ -4685,7 +4740,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
       tag == block::gen::TransactionDescr::trans_split_install) {
     bool split = (tag == block::gen::TransactionDescr::trans_split_prepare ||
                   tag == block::gen::TransactionDescr::trans_split_install);
-    if (split && !before_split_) {
+    if (split && !self_->before_split_) {
       return reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
                                     << " is a split prepare/install transaction, but this block is not before a split");
     }
@@ -4694,7 +4749,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
                                     << " is a split prepare/install transaction, but it is not the last transaction "
                                        "for this account in this block");
     }
-    if (!split && !after_merge_) {
+    if (!split && !self_->after_merge_) {
       return reject_query(
           PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
                     << " is a merge prepare/install transaction, but this block is not immediately after a merge");
@@ -4722,7 +4777,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   CHECK(account.total_state.not_null());
   if (hash_upd.old_hash != account.total_state->get_hash().bits()) {
     return reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
-                                  << " claims that the original account state hash must be "
+                                  << " claims tha-the original account state hash must be "
                                   << hash_upd.old_hash.to_hex() << " but the actual value is "
                                   << account.total_state->get_hash().to_hex());
   }
@@ -4821,9 +4876,9 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   // similar to Collator::create_ordinary_transaction() and Collator::create_ticktock_transaction()
   // ....
   std::unique_ptr<block::transaction::Transaction> trs =
-      std::make_unique<block::transaction::Transaction>(account, trans_type, lt, now_, in_msg_root);
+      std::make_unique<block::transaction::Transaction>(account, trans_type, lt, self_->now_, in_msg_root);
   if (in_msg_root.not_null()) {
-    if (!trs->unpack_input_msg(ihr_delivered, &action_phase_cfg_)) {
+    if (!trs->unpack_input_msg(ihr_delivered, &self_->action_phase_cfg_)) {
       // inbound external message was not accepted
       return reject_query(PSTRING() << "could not unpack inbound " << (external ? "external" : "internal")
                                     << " message processed by ordinary transaction " << lt << " of account "
@@ -4831,7 +4886,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     }
   }
   if (trs->bounce_enabled) {
-    if (!trs->prepare_storage_phase(storage_phase_cfg_, true)) {
+    if (!trs->prepare_storage_phase(self_->storage_phase_cfg_, true)) {
       return reject_query(PSTRING() << "cannot re-create storage phase of transaction " << lt << " for smart contract "
                                     << addr.to_hex());
     }
@@ -4844,12 +4899,12 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
       return reject_query(PSTRING() << "cannot re-create credit phase of transaction " << lt << " for smart contract "
                                     << addr.to_hex());
     }
-    if (!trs->prepare_storage_phase(storage_phase_cfg_, true, need_credit_phase)) {
+    if (!trs->prepare_storage_phase(self_->storage_phase_cfg_, true, need_credit_phase)) {
       return reject_query(PSTRING() << "cannot re-create storage phase of transaction " << lt << " for smart contract "
                                     << addr.to_hex());
     }
   }
-  if (!trs->prepare_compute_phase(compute_phase_cfg_)) {
+  if (!trs->prepare_compute_phase(self_->compute_phase_cfg_)) {
     return reject_query(PSTRING() << "cannot re-create compute phase of transaction " << lt << " for smart contract "
                                   << addr.to_hex());
   }
@@ -4863,13 +4918,13 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
                                     << " of account " << addr.to_hex() << " was not processed without any reason");
     }
   }
-  if (trs->compute_phase->success && !trs->prepare_action_phase(action_phase_cfg_)) {
+  if (trs->compute_phase->success && !trs->prepare_action_phase(self_->action_phase_cfg_)) {
     return reject_query(PSTRING() << "cannot re-create action phase of transaction " << lt << " for smart contract "
                                   << addr.to_hex());
   }
   if (trs->bounce_enabled &&
       (!trs->compute_phase->success || trs->action_phase->state_exceeds_limits || trs->action_phase->bounce) &&
-      !trs->prepare_bounce_phase(action_phase_cfg_)) {
+      !trs->prepare_bounce_phase(self_->action_phase_cfg_)) {
     return reject_query(PSTRING() << "cannot re-create bounce phase of  transaction " << lt << " for smart contract "
                                   << addr.to_hex());
   }
@@ -4877,10 +4932,14 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     return reject_query(PSTRING() << "cannot re-create the serialization of  transaction " << lt
                                   << " for smart contract " << addr.to_hex());
   }
+  
+#if 0
+  // This only bumps the block_limit_status_->cur_lt, which is then unused
   if (!trs->update_limits(*block_limit_status_, /* with_gas = */ false, /* with_size = */ false)) {
     return fatal_error(PSTRING() << "cannot update block limit status to include transaction " << lt << " of account "
                                  << addr.to_hex());
   }
+#endif
 
   // Collator should stop if total gas usage exceeds limits, including transactions on special accounts, but without
   // ticktocks and mint/recover.
@@ -4888,18 +4947,18 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   if (!is_special_tx && !trs->gas_limit_overridden && trans_type == block::transaction::Transaction::tr_ord) {
     (account.is_special ? total_special_gas_used_ : total_gas_used_) += trs->gas_used();
   }
-  if (total_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.gas_limit) {
+  if (total_gas_used_ > self_->block_limits_->gas.hard() + self_->compute_phase_cfg_.gas_limit) {
     return reject_query(PSTRING() << "gas block limits are exceeded: total_gas_used > gas_limit_hard + trx_gas_limit ("
                                   << "total_gas_used=" << total_gas_used_
-                                  << ", gas_limit_hard=" << block_limits_->gas.hard()
-                                  << ", trx_gas_limit=" << compute_phase_cfg_.gas_limit << ")");
+                                  << ", gas_limit_hard=" << self_->block_limits_->gas.hard()
+                                  << ", trx_gas_limit=" << self_->compute_phase_cfg_.gas_limit << ")");
   }
-  if (total_special_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.special_gas_limit) {
+  if (total_special_gas_used_ > self_->block_limits_->gas.hard() + self_->compute_phase_cfg_.special_gas_limit) {
     return reject_query(
         PSTRING() << "gas block limits are exceeded: total_special_gas_used > gas_limit_hard + special_gas_limit ("
                   << "total_special_gas_used=" << total_special_gas_used_
-                  << ", gas_limit_hard=" << block_limits_->gas.hard()
-                  << ", special_gas_limit=" << compute_phase_cfg_.special_gas_limit << ")");
+                  << ", gas_limit_hard=" << self_->block_limits_->gas.hard()
+                  << ", special_gas_limit=" << self_->compute_phase_cfg_.special_gas_limit << ")");
   }
 
   auto trans_root2 = trs->commit(account);
@@ -4909,7 +4968,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   }
   // now compare the re-created transaction with the one we have
   if (trans_root2->get_hash() != trans_root->get_hash()) {
-    if (verbosity >= 3 * 0) {
+    if (self_->verbosity >= 3 * 0) {
       std::cerr << "original transaction " << lt << " of " << addr.to_hex() << ": ";
       block::gen::t_Transaction.print_ref(std::cerr, trans_root);
       std::cerr << "re-created transaction " << lt << " of " << addr.to_hex() << ": ";
@@ -4976,10 +5035,10 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
  *
  * @returns True if the account transactions are valid, false otherwise.
  */
-bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root) {
+bool ContestValidateQuery::TransactionBlockChecker::check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root) {
   block::gen::AccountBlock::Record acc_blk;
   CHECK(tlb::csr_unpack(std::move(acc_blk_root), acc_blk) && acc_blk.account_addr == acc_addr);
-  auto account_p = unpack_account(acc_addr.cbits());
+  auto account_p = self_->unpack_account(acc_addr.cbits());
   if (!account_p) {
     return reject_query("cannot unpack old state of account "s + acc_addr.to_hex());
   }
@@ -5011,22 +5070,25 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
       if (!(cb.store_ref_bool(account.total_state)             // account_descr$_ account:^Account
             && cb.store_bits_bool(account.last_trans_hash_)    // last_trans_hash:bits256
             && cb.store_long_bool(account.last_trans_lt_, 64)  // last_trans_lt:uint64
-            && ns_.account_dict_->set_builder(account.addr, cb, vm::Dictionary::SetMode::Add))) {
+            && account_dict->set_builder(account.addr, cb, vm::Dictionary::SetMode::Add))) {
         return fatal_error(std::string{"cannot add newly-created account "} + account.addr.to_hex() +
                            " into ShardAccounts");
       }
     } else if (account.status == block::Account::acc_nonexist) {
       // account deleted
-      if (verbosity > 2) {
+      if (self_->verbosity > 2) {
         std::cerr << "deleting account " << account.addr.to_hex() << " with empty new value ";
         block::gen::t_Account.print_ref(std::cerr, account.total_state);
       }
-      if (ns_.account_dict_->lookup_delete(account.addr).is_null()) {
+      /*
+      if (account_dict->lookup_delete(account.addr).is_null()) {
         return fatal_error(std::string{"cannot delete account "} + account.addr.to_hex() + " from ShardAccounts");
       }
+      */
+      deleted.insert(account.addr);
     } else {
       // existing account modified
-      if (verbosity > 4) {
+      if (self_->verbosity > 4) {
         std::cerr << "modifying account " << account.addr.to_hex() << " to ";
         block::gen::t_Account.print_ref(std::cerr, account.total_state);
       }
@@ -5034,7 +5096,7 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
       if (!(cb.store_ref_bool(account.total_state)             // account_descr$_ account:^Account
             && cb.store_bits_bool(account.last_trans_hash_)    // last_trans_hash:bits256
             && cb.store_long_bool(account.last_trans_lt_, 64)  // last_trans_lt:uint64
-            && ns_.account_dict_->set_builder(account.addr, cb, vm::Dictionary::SetMode::Replace))) {
+            && account_dict->set_builder(account.addr, cb, vm::Dictionary::SetMode::Set))) {
         return fatal_error(std::string{"cannot modify existing account "} + account.addr.to_hex() +
                            " in ShardAccounts");
       }
@@ -5046,8 +5108,8 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
     return reject_query("cannot extract (HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex());
   }
   block::tlb::ShardAccount::Record old_state, new_state;
-  if (!(old_state.unpack(ps_.account_dict_->lookup(account.addr)) &&
-        new_state.unpack(ns_.account_dict_->lookup(account.addr)))) {
+  if (!(old_state.unpack(self_->ps_.account_dict_->lookup(account.addr)) &&
+        new_state.unpack(account_dict->lookup(account.addr)))) {
     return reject_query("cannot extract Account from the ShardAccount of "s + account.addr.to_hex());
   }
   if (hash_upd.old_hash != old_state.account->get_hash().bits()) {
@@ -5062,20 +5124,130 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
   return true;
 }
 
+struct TaskThread {
+  int idx;
+  bool quit{};
+  std::deque<std::function<void()>> tasks;
+  std::thread thread;
+  std::mutex mtx;
+  std::condition_variable cv;
+  TaskThread(int idx) {
+    this->idx = idx;
+    thread = std::thread([this] {
+      while (true) {
+        std::function<void()> task;
+        {
+          std::unique_lock<std::mutex> lock(mtx);
+          cv.wait(lock, [this] { return quit || !tasks.empty(); });
+          if (quit) {
+            break;
+          }
+          task = std::move(tasks.front());
+          tasks.pop_front();
+        }
+        task();
+      }
+    });
+  }
+  ~TaskThread() {
+    {
+      std::unique_lock<std::mutex> lock(mtx);
+      quit = true;
+    }
+    cv.notify_one();
+    thread.join();
+  }
+  void queue(std::function<void(void)>&& task) {
+    std::unique_lock<std::mutex> lock(mtx);
+    tasks.push_back(std::move(task));
+    cv.notify_one();
+  }
+};
+static std::vector<std::unique_ptr<TaskThread>> worker_threads;
+
+void init_worker_threads(int n) {
+  if (worker_threads.size() == n) {
+    return;
+  }
+  worker_threads.clear();
+  worker_threads.reserve(n);
+  for (int i = 0; i < n; i++) {
+    worker_threads.push_back(std::make_unique<TaskThread>(i));
+  }
+}
+
 /**
  * Checks all transactions in the account blocks.
  *
  * @returns True if all transactions pass the check, False otherwise.
  */
-bool ContestValidateQuery::check_transactions() {
+bool ContestValidateQuery::check_transactions_async() {
   LOG(INFO) << "checking all transactions";
   ns_.account_dict_ =
       std::make_unique<vm::AugmentedDictionary>(ps_.account_dict_->get_root(), 256, block::tlb::aug_ShardAccounts);
-  bool ok = account_blocks_dict_->check_for_each_extra(
-      [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
-        CHECK(key_len == 256);
-        return check_account_transactions(key, std::move(value));
-      });
+  std::atomic<int> finished_threads = 0;
+  std::condition_variable cv;
+  std::mutex mtx;
+  std::vector<td::Status> results(worker_threads.size());
+  for(auto &thread : worker_threads) {
+    thread->queue([this, idx=thread->idx, &finished_threads, &cv, &results, &mtx] {
+      int i = 0;
+      TransactionBlockChecker checker{this};
+      bool ok = account_blocks_dict_->check_for_each_extra(
+          [&i, this, idx, &checker](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
+            if (i++ % worker_threads.size() == idx) {
+              CHECK(key_len == 256);
+              return checker.check_account_transactions(key, std::move(value));
+            }
+            return true;
+          });
+      {
+        std::unique_lock<std::mutex> lock(mtx);
+        if (!ok) {
+          results.push_back(checker.status.move());
+        } else {
+          results.push_back(td::Status::OK());
+        }
+        // merge account_dict to ns_.account_dict_
+        for(const auto& kv : *checker.account_dict) {
+          ns_.account_dict_->set(kv.first, StdSmcAddress{}.size(), kv.second);
+        }
+        for(const auto& addr : checker.deleted) {
+          ns_.account_dict_->lookup_delete(addr);
+        }
+        msg_proc_lt_.insert(msg_proc_lt_.end(), checker.msg_proc_lt_.begin(), checker.msg_proc_lt_.end());
+        total_burned_ += checker.total_burned_;
+        fees_burned_ += checker.fees_burned_;
+        total_gas_used_ += checker.total_gas_used_;
+        total_special_gas_used_ += checker.total_special_gas_used_;
+        
+        finished_threads++;
+      }
+      cv.notify_all();
+    });
+  }
+  std::unique_lock<std::mutex> lock(mtx);
+  cv.wait(lock, [&finished_threads] { return finished_threads == worker_threads.size(); });
+  bool ok = true;
+  for (auto& res : results) {
+    if (res.is_error()) {
+      return reject_query(res.move_as_error());
+    }
+  }
+
+  if (total_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.gas_limit) {
+    return reject_query(PSTRING() << "gas block limits are exceeded: total_gas_used > gas_limit_hard + trx_gas_limit ("
+                                  << "total_gas_used=" << total_gas_used_
+                                  << ", gas_limit_hard=" << block_limits_->gas.hard()
+                                  << ", trx_gas_limit=" << compute_phase_cfg_.gas_limit << ")");
+  }
+  if (total_special_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.special_gas_limit) {
+    return reject_query(
+        PSTRING() << "gas block limits are exceeded: total_special_gas_used > gas_limit_hard + special_gas_limit ("
+                  << "total_special_gas_used=" << total_special_gas_used_
+                  << ", gas_limit_hard=" << block_limits_->gas.hard()
+                  << ", special_gas_limit=" << compute_phase_cfg_.special_gas_limit << ")");
+  }
 
   return ok;
 }
@@ -5299,7 +5471,7 @@ bool ContestValidateQuery::try_validate() {
     if (!check_in_queue()) {
       return reject_query("cannot check inbound message queues");
     }
-    if (!check_transactions()) {
+    if (!check_transactions_async()) {
       return reject_query("invalid collection of account transactions in ShardAccountBlocks");
     }
     if (!postcheck_account_updates()) {

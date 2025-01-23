@@ -21,6 +21,7 @@
 
 #include <set>
 #include <map>
+#include <future>
 #include "vm/db/DynamicBagOfCellsDb.h"
 #include "vm/cells.h"
 #include "td/utils/Status.h"
@@ -30,6 +31,8 @@
 #include "td/utils/Time.h"
 #include "td/utils/Timer.h"
 #include "td/utils/port/FileFd.h"
+#include "td/actor/actor.h"
+#include "td/utils/HashMap.h"
 
 namespace vm {
 using td::Ref;
@@ -117,7 +120,7 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+  td::HashMap<vm::Cell::Hash, CellInfo> seen;
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)
@@ -199,6 +202,7 @@ struct CellSerializationInfo {
   td::Result<int> get_bits(td::Slice cell) const;
 
   td::Result<Ref<DataCell>> create_data_cell(td::Slice data, td::Span<Ref<Cell>> refs) const;
+  td::Result<Ref<DataCell>> create_data_cell_partial(td::Slice data, Cell::LevelMask level_mask) const;
 };
 
 class BagOfCellsLogger {
@@ -323,6 +327,8 @@ class BagOfCells {
   const unsigned char* data_ptr{nullptr};
   std::vector<unsigned long long> custom_index;
   BagOfCellsLogger* logger_ptr_{nullptr};
+  std::vector<DataCell*> cell_list;
+  std::vector<td::uint8> cell_should_cache;
 
  public:
   void clear();
@@ -345,6 +351,7 @@ class BagOfCells {
   td::Result<std::size_t> serialize_to_impl(WriterT& writer, int mode = 0);
   std::string extract_string() const;
 
+  td::Result<long long> deserialize_async(const td::Slice& data, int max_roots = default_max_roots);
   td::Result<long long> deserialize(const td::Slice& data, int max_roots = default_max_roots);
   td::Result<long long> deserialize(const unsigned char* buffer, std::size_t buff_size,
                                     int max_roots = default_max_roots) {
@@ -359,6 +366,7 @@ class BagOfCells {
 
   static int precompute_cell_serialization_size(const unsigned char* cell, std::size_t len, int ref_size,
                                                 int* refs_num_ptr = nullptr);
+  static void init_actors(size_t count);
 
  private:
   int rv_idx;
@@ -379,6 +387,28 @@ class BagOfCells {
   td::Result<td::Slice> get_cell_slice(int index, td::Slice data);
   td::Result<td::Ref<vm::DataCell>> deserialize_cell(int index, td::Slice data, td::Span<td::Ref<DataCell>> cells,
                                                      std::vector<td::uint8>* cell_should_cache);
+
+  struct DeserializeActor {
+    int idx;
+    bool quit{};
+    std::deque<std::function<void()>> tasks;
+    std::thread thread;
+    std::mutex mtx;
+    std::condition_variable cv;
+    DeserializeActor(int idx);
+    ~DeserializeActor();
+    td::Result<td::Ref<vm::DataCell>> deserialize_cell(BagOfCells* boc, int cell_count, int idx, td::Slice cells_slice,
+                                                              std::vector<DataCell*>& cell_list);
+    void deserialize(BagOfCells* boc, int cell_count, td::Slice cells_data, std::vector<DataCell*>& cell_list, std::vector<int>& queue, std::atomic<int>& queue_ptr, std::function<void(td::Result<td::Unit>)> cb);
+    void task();
+    void queue(std::function<void(void)>&& task);
+  };
+  static std::vector<std::unique_ptr<DeserializeActor>> deserialize_actors;
+  static std::mutex deserialize_actors_mutex;
+  std::future<void> queue_cells_deserialize(int cell_count, td::Slice cells_data, std::vector<DataCell*>& cell_list, std::vector<td::uint8>* cell_should_cache);
+  td::Status order_queue_dfs(std::vector<int>& in_degree, std::vector<int>& order_queue, std::set<int>& inserted, int root_idx, int& write_idx, int cell_count, td::Slice cells_slice);
+  td::Status compute_in_degree(std::vector<int>& in_degree, int cell_count, td::Slice cells_slice);
+  td::Status compute_inverse_level(std::vector<int>& inverse_levels, int cell_count, td::Slice cells_slice, std::vector<td::uint8>& cell_should_cache);
 };
 
 td::Result<Ref<Cell>> std_boc_deserialize(td::Slice data, bool can_be_empty = false, bool allow_nonzero_level = false);

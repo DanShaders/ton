@@ -25,7 +25,8 @@
 #include "vm/cells/CellWithStorage.h"
 
 namespace vm {
-thread_local bool DataCell::use_arena = false;
+
+Arena* DataCell::arena = nullptr;
 
 namespace {
 template <class CellT>
@@ -55,10 +56,8 @@ private:
 };
 }
 std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
-  if (use_arena) {
-    ArenaAllocator<DataCell> allocator;
-    auto res = detail::CellWithArrayStorage<DataCell>::create(allocator, info.get_storage_size(), info);
-    // this is dangerous
+  if (arena) {
+    auto res = detail::CellWithInlineStorage<DataCell>::create(*arena, info.get_storage_size(), info);
     Ref<DataCell>(res.get()).release();
     return res;
   }

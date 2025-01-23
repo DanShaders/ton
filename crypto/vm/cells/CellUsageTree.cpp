@@ -23,7 +23,7 @@ namespace vm {
 // CellUsageTree::NodePtr
 //
 bool CellUsageTree::NodePtr::on_load(const td::Ref<vm::DataCell>& cell) const {
-  auto tree = tree_weak_.lock();
+  auto tree = tree_weak_; //.lock();
   if (!tree) {
     return false;
   }
@@ -32,7 +32,7 @@ bool CellUsageTree::NodePtr::on_load(const td::Ref<vm::DataCell>& cell) const {
 }
 
 CellUsageTree::NodePtr CellUsageTree::NodePtr::create_child(unsigned ref_id) const {
-  auto tree = tree_weak_.lock();
+  auto tree = tree_weak_; //.lock();
   if (!tree) {
     return {};
   }
@@ -41,8 +41,8 @@ CellUsageTree::NodePtr CellUsageTree::NodePtr::create_child(unsigned ref_id) con
 
 bool CellUsageTree::NodePtr::is_from_tree(const CellUsageTree* master_tree) const {
   DCHECK(master_tree);
-  auto tree = tree_weak_.lock();
-  if (tree.get() != master_tree) {
+  auto tree = tree_weak_; //.lock();
+  if (tree/*.get()*/ != master_tree) {
     return false;
   }
   return true;
@@ -50,8 +50,8 @@ bool CellUsageTree::NodePtr::is_from_tree(const CellUsageTree* master_tree) cons
 
 bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
   DCHECK(master_tree);
-  auto tree = tree_weak_.lock();
-  if (tree.get() != master_tree) {
+  auto tree = tree_weak_; //.lock();
+  if (tree/*.get()*/ != master_tree) {
     return false;
   }
   master_tree->mark_path(node_id_);
@@ -62,7 +62,8 @@ bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
 // CellUsageTree
 //
 CellUsageTree::NodePtr CellUsageTree::root_ptr() {
-  return {shared_from_this(), 1};
+  // return {shared_from_this(), 1};
+  return {this, 1};
 }
 
 CellUsageTree::NodeId CellUsageTree::root_id() const {
@@ -70,6 +71,7 @@ CellUsageTree::NodeId CellUsageTree::root_id() const {
 };
 
 bool CellUsageTree::is_loaded(NodeId node_id) const {
+  std::unique_lock lk(mtx_);
   if (use_mark_) {
     return nodes_[node_id].has_mark;
   }
@@ -77,10 +79,20 @@ bool CellUsageTree::is_loaded(NodeId node_id) const {
 }
 
 bool CellUsageTree::has_mark(NodeId node_id) const {
+  std::unique_lock lk(mtx_);
+  return nodes_[node_id].has_mark;
+}
+
+bool CellUsageTree::has_mark(NodeId node_id, std::unique_lock<std::mutex>& lk) const {
   return nodes_[node_id].has_mark;
 }
 
 void CellUsageTree::set_mark(NodeId node_id, bool mark) {
+  std::unique_lock lk(mtx_);
+  set_mark(node_id, mark, lk);
+}
+
+void CellUsageTree::set_mark(NodeId node_id, bool mark, std::unique_lock<std::mutex>& lk) {
   if (node_id == 0) {
     return;
   }
@@ -88,21 +100,28 @@ void CellUsageTree::set_mark(NodeId node_id, bool mark) {
 }
 
 void CellUsageTree::mark_path(NodeId node_id) {
-  auto cur_node_id = get_parent(node_id);
+  std::unique_lock lk(mtx_);
+  auto cur_node_id = get_parent(node_id, lk);
   while (cur_node_id != 0) {
-    if (has_mark(cur_node_id)) {
+    if (has_mark(cur_node_id, lk)) {
       break;
     }
-    set_mark(cur_node_id);
-    cur_node_id = get_parent(cur_node_id);
+    set_mark(cur_node_id, true, lk);
+    cur_node_id = get_parent(cur_node_id, lk);
   }
 }
 
 CellUsageTree::NodeId CellUsageTree::get_parent(NodeId node_id) {
+  std::unique_lock lk(mtx_);
+  return nodes_[node_id].parent;
+}
+
+CellUsageTree::NodeId CellUsageTree::get_parent(NodeId node_id, std::unique_lock<std::mutex>& lk) {
   return nodes_[node_id].parent;
 }
 
 CellUsageTree::NodeId CellUsageTree::get_child(NodeId node_id, unsigned ref_id) {
+  std::unique_lock lk(mtx_);
   DCHECK(ref_id < CellTraits::max_refs);
   return nodes_[node_id].children[ref_id];
 }
@@ -112,6 +131,7 @@ void CellUsageTree::set_use_mark_for_is_loaded(bool use_mark) {
 }
 
 void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
+  std::unique_lock lk(mtx_);
   if (nodes_[node_id].is_loaded) {
     return;
   }
@@ -122,6 +142,7 @@ void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
 }
 
 CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_id) {
+  std::unique_lock lk(mtx_);
   DCHECK(ref_id < CellTraits::max_refs);
   NodeId res = nodes_[node_id].children[ref_id];
   if (res) {

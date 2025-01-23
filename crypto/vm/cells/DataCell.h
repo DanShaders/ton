@@ -25,10 +25,46 @@
 
 namespace vm {
 
+struct Arena {
+  void* base;
+  size_t size;
+  std::atomic<size_t> used;
+  size_t allocs{};
+  Arena() : base(nullptr), size(0), used(0) {
+  }
+  Arena(size_t size) : base(::operator new(size)), size(size), used(0) {
+  }
+  ~Arena() {
+    ::operator delete(base);
+  }
+  void reserve(size_t size) {
+    assert(base == nullptr);
+    base = ::operator new(size);
+    this->size = size;
+  }
+  void* alloc(size_t size) {
+    size = (size + 7) & ~7;
+    const auto old = used.fetch_add(size);
+    if (old + size > this->size) {
+      used.fetch_sub(size);
+      return nullptr;
+    }
+    auto res = static_cast<char*>(base) + old;
+    return res;
+  }
+  template <class T, class... ArgsT>
+  std::unique_ptr<DataCell> make_unique(ArgsT&&... args) {
+    auto* ptr = alloc(sizeof(T));
+    T* obj = new (ptr) T(std::forward<ArgsT>(args)...);
+    return std::unique_ptr<T>(obj);
+  }
+};
+
 class DataCell : public Cell {
  public:
   // NB: cells created with use_arena=true are never freed
   static thread_local bool use_arena;
+  static Arena* arena;
 
   DataCell(const DataCell& other) = delete;
   ~DataCell() override;

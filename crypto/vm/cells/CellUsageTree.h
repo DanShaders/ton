@@ -23,6 +23,7 @@
 #include "td/utils/int_types.h"
 #include "td/utils/logging.h"
 #include <functional>
+#include <mutex>
 
 namespace vm {
 
@@ -35,11 +36,11 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   struct NodePtr {
    public:
     NodePtr() = default;
-    NodePtr(std::weak_ptr<CellUsageTree> tree_weak, NodeId node_id)
-        : tree_weak_(std::move(tree_weak)), node_id_(node_id) {
+    NodePtr(CellUsageTree* tree_weak, NodeId node_id)
+        : tree_weak_(tree_weak), node_id_(node_id) {
     }
     bool empty() const {
-      return node_id_ == 0 || tree_weak_.expired();
+      return node_id_ == 0; // || tree_weak_.expired();
     }
 
     bool on_load(const td::Ref<vm::DataCell>& cell) const;
@@ -48,7 +49,7 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
     bool is_from_tree(const CellUsageTree* master_tree) const;
 
    private:
-    std::weak_ptr<CellUsageTree> tree_weak_;
+    CellUsageTree* tree_weak_;
     NodeId node_id_{0};
   };
 
@@ -77,8 +78,12 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   bool use_mark_{false};
   std::vector<Node> nodes_{2};
   std::function<void(const td::Ref<vm::DataCell>&)> cell_load_callback_;
+  mutable std::mutex mtx_;
 
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);
+  NodeId get_parent(NodeId node_id, std::unique_lock<std::mutex>& lk);
+  bool has_mark(NodeId node_id, std::unique_lock<std::mutex>& lk) const;
+  void set_mark(NodeId node_id, bool mark, std::unique_lock<std::mutex>& lk);
   NodeId create_node(NodeId parent);
 };
 }  // namespace vm

@@ -39,7 +39,7 @@ class CellWithArrayStorage : public CellT {
     CellT::destroy_storage(get_storage());
   }
   template <class Allocator, class... ArgsT>
-  static auto create(Allocator allocator, size_t storage_size, ArgsT&&... args) {
+  static auto create(Allocator& allocator, size_t storage_size, ArgsT&&... args) {
     static_assert(CellT::max_storage_size <= 40 * 8, "");
     //size = 128 + 32 + 8;
     auto size = (storage_size + 7) / 8;
@@ -101,5 +101,33 @@ class CellWithUniquePtrStorage : public CellT {
     return storage_.get();
   }
 };
+
+
+template <class CellT>
+class CellWithInlineStorage : public CellT {
+ public:
+  template <class... ArgsT>
+  CellWithInlineStorage(ArgsT&&... args) : CellT(std::forward<ArgsT>(args)...) {
+  }
+  ~CellWithInlineStorage() {
+    CellT::destroy_storage(get_storage());
+  }
+  template <class Allocator, class... ArgsT>
+  static auto create(Allocator& allocator, size_t storage_size, ArgsT&&... args) {
+    //std::cout << "Allocating " << sizeof(CellT) << + " + " << storage_size << " bytes" << std::endl;
+    auto* ptr = allocator.alloc(sizeof(CellT) + storage_size);
+    CellWithInlineStorage<CellT>* obj = new (ptr) CellWithInlineStorage<CellT>(std::forward<ArgsT>(args)...);
+    return std::unique_ptr<CellWithInlineStorage<CellT>>(obj);
+  }
+ private:
+
+  const char* get_storage() const final {
+    return (char*)this + sizeof(CellT);
+  }
+  char* get_storage() final {
+    return (char*)this + sizeof(CellT);
+  }
+};
+
 }  // namespace detail
 }  // namespace vm
