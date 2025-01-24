@@ -33,14 +33,14 @@ namespace vm {
  * 
  */
 
-DictionaryBase::DictionaryBase(Ref<CellSlice> _root, int _n, bool validate)
+inline DictionaryBase::DictionaryBase(Ref<CellSlice> _root, int _n, bool validate)
     : root(std::move(_root)), root_cell(), key_bits(_n), flags(f_root_cached) {
   if (validate) {
     force_validate();
   }
 }
 
-DictionaryBase::DictionaryBase(const CellSlice& root_cs, int _n, bool validate)
+inline DictionaryBase::DictionaryBase(const CellSlice& root_cs, int _n, bool validate)
     : root(), root_cell(), key_bits(_n), flags(0) {
   int f = (int)root_cs.prefetch_ulong(1);
   if (f < 0) {
@@ -57,7 +57,7 @@ DictionaryBase::DictionaryBase(const CellSlice& root_cs, int _n, bool validate)
   }
 }
 
-DictionaryBase::DictionaryBase(DictAdvance, CellSlice& root_cs, int _n, bool validate)
+inline DictionaryBase::DictionaryBase(DictAdvance, CellSlice& root_cs, int _n, bool validate)
     : root(), root_cell(), key_bits(_n), flags(0) {
   int f = (int)root_cs.prefetch_ulong(1);
   if (!f) {
@@ -73,20 +73,20 @@ DictionaryBase::DictionaryBase(DictAdvance, CellSlice& root_cs, int _n, bool val
   }
 }
 
-DictionaryBase::DictionaryBase(Ref<Cell> cell, int _n, bool validate)
+inline DictionaryBase::DictionaryBase(Ref<Cell> cell, int _n, bool validate)
     : root(), root_cell(std::move(cell)), key_bits(_n), flags(0) {
   if (validate) {
     force_validate();
   }
 }
 
-DictionaryBase::DictionaryBase(int _n, bool validate) : root(), root_cell(), key_bits(_n), flags(0) {
+inline DictionaryBase::DictionaryBase(int _n, bool validate) : root(), root_cell(), key_bits(_n), flags(0) {
   if (validate) {
     force_validate();
   }
 }
 
-DictionaryBase::DictionaryBase(DictNonEmpty, Ref<CellSlice> _root, int _n, bool validate)
+inline DictionaryBase::DictionaryBase(DictNonEmpty, Ref<CellSlice> _root, int _n, bool validate)
     : root(), root_cell(), key_bits(_n), flags(0) {
   if (_root.is_null() || !init_root_for_nonempty(*_root)) {  // empty ?
     invalidate();                                            // invalidate
@@ -96,7 +96,7 @@ DictionaryBase::DictionaryBase(DictNonEmpty, Ref<CellSlice> _root, int _n, bool 
   }
 }
 
-DictionaryBase::DictionaryBase(DictNonEmpty, const CellSlice& _root, int _n, bool validate)
+inline DictionaryBase::DictionaryBase(DictNonEmpty, const CellSlice& _root, int _n, bool validate)
     : root(), root_cell(), key_bits(_n), flags(0) {
   if (!init_root_for_nonempty(_root)) {
     invalidate();
@@ -106,12 +106,12 @@ DictionaryBase::DictionaryBase(DictNonEmpty, const CellSlice& _root, int _n, boo
   }
 }
 
-bool DictionaryBase::init_root_for_nonempty(const CellSlice& cs) {
+inline bool DictionaryBase::init_root_for_nonempty(const CellSlice& cs) {
   vm::CellBuilder cb;
   return cb.append_cellslice_bool(cs) && cb.finalize_to(root_cell);
 }
 
-Ref<Cell> DictionaryBase::construct_root_from(const CellSlice& root_node_cs) {
+inline Ref<Cell> DictionaryBase::construct_root_from(const CellSlice& root_node_cs) {
   vm::CellBuilder cb;
   if (cb.append_cellslice_bool(root_node_cs)) {
     return cb.finalize();
@@ -120,13 +120,13 @@ Ref<Cell> DictionaryBase::construct_root_from(const CellSlice& root_node_cs) {
   }
 }
 
-void DictionaryBase::force_validate() {
+inline void DictionaryBase::force_validate() {
   if (!is_valid() && !validate()) {
     throw VmError{Excno::dict_err, "invalid dictionary"};
   }
 }
 
-bool DictionaryBase::validate() {
+inline bool DictionaryBase::validate() {
   if (is_valid()) {
     return true;
   }
@@ -157,14 +157,14 @@ bool DictionaryBase::validate() {
   return true;
 }
 
-Ref<CellSlice> DictionaryBase::get_root() const {
+inline Ref<CellSlice> DictionaryBase::get_root() const {
   if (!(flags & f_root_cached) && !compute_root()) {
     return {};
   }
   return root;
 }
 
-Ref<CellSlice> DictionaryBase::extract_root() && {
+inline Ref<CellSlice> DictionaryBase::extract_root() && {
   if (!(flags & f_root_cached) && !compute_root()) {
     return {};
   }
@@ -172,7 +172,7 @@ Ref<CellSlice> DictionaryBase::extract_root() && {
   return std::move(root);
 }
 
-bool DictionaryBase::append_dict_to_bool(CellBuilder& cb) && {
+inline bool DictionaryBase::append_dict_to_bool(CellBuilder& cb) && {
   if (!is_valid()) {
     return false;
   }
@@ -180,11 +180,11 @@ bool DictionaryBase::append_dict_to_bool(CellBuilder& cb) && {
   return cb.store_maybe_ref(std::move(root_cell));
 }
 
-bool DictionaryBase::append_dict_to_bool(CellBuilder& cb) const & {
+inline bool DictionaryBase::append_dict_to_bool(CellBuilder& cb) const& {
   return is_valid() && cb.store_maybe_ref(root_cell);
 }
 
-bool DictionaryBase::compute_root() const {
+inline bool DictionaryBase::compute_root() const {
   if (!is_valid()) {
     return false;
   }
@@ -201,25 +201,25 @@ bool DictionaryBase::compute_root() const {
   return true;
 }
 
-Ref<CellSlice> DictionaryBase::get_empty_dictionary() {
+inline Ref<CellSlice> DictionaryBase::get_empty_dictionary() {
   static Ref<CellSlice> empty_dict{new_empty_dictionary()};
   return empty_dict;
 }
 
-Ref<CellSlice> DictionaryBase::new_empty_dictionary() {
+inline Ref<CellSlice> DictionaryBase::new_empty_dictionary() {
   CellBuilder cb;  // Builder
   cb.store_long(0, 1);
   return Ref<CellSlice>{true, cb.finalize()};
 }
 
-Ref<Cell> DictionaryFixed::finish_create_leaf(CellBuilder& cb, const CellSlice& value) const {
+inline Ref<Cell> DictionaryFixed::finish_create_leaf(CellBuilder& cb, const CellSlice& value) const {
   if (!cb.append_cellslice_bool(value)) {
     throw VmError{Excno::dict_err, "cannot store new value into a dictionary leaf cell"};
   }
   return cb.finalize();
 }
 
-Ref<Cell> DictionaryFixed::finish_create_fork(CellBuilder& cb, Ref<Cell> c1, Ref<Cell> c2, int n) const {
+inline Ref<Cell> DictionaryFixed::finish_create_fork(CellBuilder& cb, Ref<Cell> c1, Ref<Cell> c2, int n) const {
   assert(n > 0);
   if (!(cb.store_ref_bool(std::move(c1)) && cb.store_ref_bool(std::move(c2)))) {
     throw VmError{Excno::dict_err, "cannot store branch references into a dictionary fork cell"};
@@ -227,7 +227,7 @@ Ref<Cell> DictionaryFixed::finish_create_fork(CellBuilder& cb, Ref<Cell> c1, Ref
   return cb.finalize();
 }
 
-bool DictionaryFixed::check_fork_raw(Ref<CellSlice> cs_ref, int n) const {
+inline bool DictionaryFixed::check_fork_raw(Ref<CellSlice> cs_ref, int n) const {
   if (cs_ref.is_null()) {
     return false;
   }
@@ -244,7 +244,8 @@ bool DictionaryFixed::check_fork_raw(Ref<CellSlice> cs_ref, int n) const {
 
 namespace dict {
 
-LabelParser::LabelParser(Ref<CellSlice> &&cs, int max_label_len, int auto_validate) : remainder(), l_offs(0), l_same(0) {
+inline LabelParser::LabelParser(Ref<CellSlice>&& cs, int max_label_len, int auto_validate)
+    : remainder(), l_offs(0), l_same(0) {
   if (!parse_label(cs.write(), max_label_len)) {
     l_offs = 0;
   } else {
@@ -262,7 +263,8 @@ LabelParser::LabelParser(Ref<CellSlice> &&cs, int max_label_len, int auto_valida
   }
 }
 
-LabelParser::LabelParser(Ref<Cell> &&cell, int max_label_len, int auto_validate) : remainder(), l_offs(0), l_same(0) {
+inline LabelParser::LabelParser(Ref<Cell>&& cell, int max_label_len, int auto_validate)
+    : remainder(), l_offs(0), l_same(0) {
   Ref<CellSlice> cs = load_cell_slice_ref(std::move(cell));
   if (!parse_label(cs.unique_write(), max_label_len)) {
     l_offs = 0;
@@ -281,7 +283,7 @@ LabelParser::LabelParser(Ref<Cell> &&cell, int max_label_len, int auto_validate)
   }
 }
 
-bool LabelParser::parse_label(CellSlice& cs, int max_label_len) {
+inline bool LabelParser::parse_label(CellSlice& cs, int max_label_len) {
   int ltype = (int)cs.prefetch_ulong(2);
   // std::cerr << "parse_label of type " << ltype << " and maximal length " << max_label_len << " in ";
   // cs.dump_hex(std::cerr, 0, true);
@@ -333,13 +335,13 @@ bool LabelParser::parse_label(CellSlice& cs, int max_label_len) {
   }
 }
 
-void LabelParser::validate() const {
+inline void LabelParser::validate() const {
   if (!is_valid()) {
     throw VmError{Excno::cell_und, "error while parsing a dictionary node label"};
   }
 }
 
-void LabelParser::validate_ext(int n) const {
+inline void LabelParser::validate_ext(int n) const {
   validate();
   if (l_bits > n) {
     throw VmError{Excno::dict_err, "invalid dictionary node"};
@@ -348,7 +350,7 @@ void LabelParser::validate_ext(int n) const {
   }
 }
 
-void LabelParser::validate_simple(int n) const {
+inline void LabelParser::validate_simple(int n) const {
   validate();
   if (l_bits > n) {
     throw VmError{Excno::dict_err, "invalid dictionary node"};
@@ -357,7 +359,7 @@ void LabelParser::validate_simple(int n) const {
   }
 }
 
-bool LabelParser::is_prefix_of(td::ConstBitPtr key, int len) const {
+inline bool LabelParser::is_prefix_of(td::ConstBitPtr key, int len) const {
   if (l_bits > len) {
     return false;
   } else if (!l_same) {
@@ -369,11 +371,11 @@ bool LabelParser::is_prefix_of(td::ConstBitPtr key, int len) const {
   }
 }
 
-bool LabelParser::has_prefix(td::ConstBitPtr key, int len) const {
+inline bool LabelParser::has_prefix(td::ConstBitPtr key, int len) const {
   return len >= 0 && len <= l_bits && common_prefix_len(key, len) == len;
 }
 
-int LabelParser::common_prefix_len(td::ConstBitPtr key, int len) const {
+inline int LabelParser::common_prefix_len(td::ConstBitPtr key, int len) const {
   if (!l_same) {
     //std::cerr << "key is " << key.to_hex(len) << "; len = " << len << "; label_bits = " << l_bits << "; remainder = ";
     //remainder->dump_hex(std::cerr, 0, true);
@@ -383,7 +385,7 @@ int LabelParser::common_prefix_len(td::ConstBitPtr key, int len) const {
   }
 }
 
-int LabelParser::extract_label_to(td::BitPtr to) {
+inline int LabelParser::extract_label_to(td::BitPtr to) {
   if (!l_same) {
     to.copy_from(remainder->data_bits(), l_bits);
     remainder.write().advance(l_bits);
@@ -393,7 +395,7 @@ int LabelParser::extract_label_to(td::BitPtr to) {
   return l_bits;
 }
 
-int LabelParser::copy_label_prefix_to(td::BitPtr to, int max_len) const {
+inline int LabelParser::copy_label_prefix_to(td::BitPtr to, int max_len) const {
   if (max_len <= 0) {
     return max_len;
   }
@@ -416,7 +418,8 @@ int LabelParser::copy_label_prefix_to(td::BitPtr to, int max_len) const {
 
 using dict::LabelParser;
 
-BitSlice DictionaryFixed::integer_key(td::RefInt256 x, unsigned n, bool sgnd, unsigned char buffer[128], bool quiet) {
+inline BitSlice DictionaryFixed::integer_key(td::RefInt256 x, unsigned n, bool sgnd, unsigned char buffer[128],
+                                             bool quiet) {
   if (x.not_null() && x->fits_bits(n, sgnd)) {
     if (buffer) {
       if (x->export_bits(buffer, 0, n, sgnd)) {
@@ -435,7 +438,7 @@ BitSlice DictionaryFixed::integer_key(td::RefInt256 x, unsigned n, bool sgnd, un
   return {};
 }
 
-bool DictionaryFixed::integer_key_simple(td::RefInt256 x, unsigned n, bool sgnd, td::BitPtr buffer, bool quiet) {
+inline bool DictionaryFixed::integer_key_simple(td::RefInt256 x, unsigned n, bool sgnd, td::BitPtr buffer, bool quiet) {
   if (x.not_null() && x->fits_bits(n, sgnd) && x->export_bits(buffer, n, sgnd)) {
     return true;
   }
@@ -445,7 +448,7 @@ bool DictionaryFixed::integer_key_simple(td::RefInt256 x, unsigned n, bool sgnd,
   return false;
 }
 
-Ref<Cell> Dictionary::extract_value_ref(Ref<CellSlice> cs) {
+inline Ref<Cell> Dictionary::extract_value_ref(Ref<CellSlice> cs) {
   if (cs.is_null()) {
     return {};
   } else if (!cs->size() && cs->size_refs() == 1) {
@@ -455,7 +458,7 @@ Ref<Cell> Dictionary::extract_value_ref(Ref<CellSlice> cs) {
   }
 }
 
-Ref<CellSlice> DictionaryFixed::lookup(td::ConstBitPtr key, int key_len) {
+inline Ref<CellSlice> DictionaryFixed::lookup(td::ConstBitPtr key, int key_len) {
   force_validate();
   if (key_len != get_key_bits() || is_empty()) {
     return {};
@@ -483,11 +486,11 @@ Ref<CellSlice> DictionaryFixed::lookup(td::ConstBitPtr key, int key_len) {
   }
 }
 
-Ref<Cell> Dictionary::lookup_ref(td::ConstBitPtr key, int key_len) {
+inline Ref<Cell> Dictionary::lookup_ref(td::ConstBitPtr key, int key_len) {
   return extract_value_ref(lookup(key, key_len));
 }
 
-bool DictionaryFixed::has_common_prefix(td::ConstBitPtr prefix, int prefix_len) {
+inline bool DictionaryFixed::has_common_prefix(td::ConstBitPtr prefix, int prefix_len) {
   force_validate();
   if (is_empty() || prefix_len <= 0) {
     return true;
@@ -499,7 +502,7 @@ bool DictionaryFixed::has_common_prefix(td::ConstBitPtr prefix, int prefix_len) 
   return label.has_prefix(prefix, prefix_len);
 }
 
-int DictionaryFixed::get_common_prefix(td::BitPtr buffer, unsigned buffer_len) {
+inline int DictionaryFixed::get_common_prefix(td::BitPtr buffer, unsigned buffer_len) {
   force_validate();
   if (is_empty()) {
     return 0;
@@ -508,11 +511,11 @@ int DictionaryFixed::get_common_prefix(td::BitPtr buffer, unsigned buffer_len) {
   return label.copy_label_prefix_to(buffer, (int)buffer_len);
 }
 
-bool DictionaryFixed::key_exists(td::ConstBitPtr key, int key_len) {
+inline bool DictionaryFixed::key_exists(td::ConstBitPtr key, int key_len) {
   return lookup(key, key_len).not_null();
 }
 
-bool DictionaryFixed::int_key_exists(long long key) {
+inline bool DictionaryFixed::int_key_exists(long long key) {
   force_validate();
   int l = get_key_bits();
   if (is_empty() || l > 64) {
@@ -529,7 +532,7 @@ bool DictionaryFixed::int_key_exists(long long key) {
   return key_exists(a.cbits(), l);
 }
 
-bool DictionaryFixed::uint_key_exists(unsigned long long key) {
+inline bool DictionaryFixed::uint_key_exists(unsigned long long key) {
   force_validate();
   int l = get_key_bits();
   if (is_empty() || l > 64) {
@@ -543,9 +546,9 @@ bool DictionaryFixed::uint_key_exists(unsigned long long key) {
   return key_exists(a.cbits(), l);
 }
 
-namespace {
+//namespace {
 
-void append_dict_label_same(CellBuilder& cb, bool same, int len, int max_len) {
+inline void append_dict_label_same(CellBuilder& cb, bool same, int len, int max_len) {
   int k = 32 - td::count_leading_zeroes32(max_len);
   assert(len >= 0 && len <= max_len && max_len <= 1023);
   // options: mode '0', requires 2n+2 bits (always for n=0)
@@ -563,7 +566,7 @@ void append_dict_label_same(CellBuilder& cb, bool same, int len, int max_len) {
   }
 }
 
-void append_dict_label(CellBuilder& cb, td::ConstBitPtr label, int len, int max_len) {
+inline void append_dict_label(CellBuilder& cb, td::ConstBitPtr label, int len, int max_len) {
   assert(len <= max_len && max_len <= 1023);
   if (len > 0 && (int)td::bitstring::bits_memscan(label, len, *label) == len) {
     return append_dict_label_same(cb, *label, len, max_len);
@@ -582,7 +585,7 @@ void append_dict_label(CellBuilder& cb, td::ConstBitPtr label, int len, int max_
   cb.store_bits(label, len);
 }
 
-std::pair<Ref<Cell>, bool> dict_set(Ref<Cell> dict, td::ConstBitPtr key, int n,
+inline std::pair<Ref<Cell>, bool> dict_set(Ref<Cell> dict, td::ConstBitPtr key, int n,
                                     const Dictionary::store_value_func_t& store_val, Dictionary::SetMode mode) {
   //std::cerr << "dictionary modification for " << n << "-bit key = " << key.to_hex(n) << std::endl;
   if (dict.is_null()) {
@@ -684,7 +687,7 @@ std::pair<Ref<Cell>, bool> dict_set(Ref<Cell> dict, td::ConstBitPtr key, int n,
   return std::make_pair(cb.finalize(), true);
 }
 
-std::tuple<Ref<CellSlice>, Ref<Cell>, bool> dict_lookup_set(Ref<Cell> dict, td::ConstBitPtr key, int n,
+inline std::tuple<Ref<CellSlice>, Ref<Cell>, bool> dict_lookup_set(Ref<Cell> dict, td::ConstBitPtr key, int n,
                                                             const Dictionary::store_value_func_t& store_val,
                                                             Dictionary::SetMode mode) {
   //std::cerr << "dictionary lookup/modification for " << n << "-bit key = " << key.to_hex(n) << std::endl;
@@ -791,7 +794,7 @@ std::tuple<Ref<CellSlice>, Ref<Cell>, bool> dict_lookup_set(Ref<Cell> dict, td::
   return std::make_tuple<Ref<CellSlice>, Ref<Cell>, bool>(std::move(old_val), cb.finalize(), true);
 }
 
-std::pair<Ref<Cell>, bool> pfx_dict_set(Ref<Cell> dict, td::ConstBitPtr key, int m, int n,
+inline std::pair<Ref<Cell>, bool> pfx_dict_set(Ref<Cell> dict, td::ConstBitPtr key, int m, int n,
                                         const PrefixDictionary::store_value_func_t& store_val,
                                         Dictionary::SetMode mode) {
   // std::cerr << "up to " << n << "-bit prefix code dictionary modification for " << m << "-bit key = " << key.to_hex(m) << std::endl;
@@ -911,7 +914,7 @@ std::pair<Ref<Cell>, bool> pfx_dict_set(Ref<Cell> dict, td::ConstBitPtr key, int
   return std::make_pair(cb.finalize(), true);
 }
 
-std::pair<Ref<CellSlice>, Ref<Cell>> pfx_dict_lookup_delete(Ref<Cell> dict, td::ConstBitPtr key, int m, int n) {
+inline std::pair<Ref<CellSlice>, Ref<Cell>> pfx_dict_lookup_delete(Ref<Cell> dict, td::ConstBitPtr key, int m, int n) {
   //std::cerr << "up to " << n << "-bit prefix dictionary delete for " << m << "-bit key = " << key.to_hex(m) << std::endl;
   if (dict.is_null()) {
     // the dictionary is very empty
@@ -998,7 +1001,7 @@ std::pair<Ref<CellSlice>, Ref<Cell>> pfx_dict_lookup_delete(Ref<Cell> dict, td::
   return std::make_pair(std::move(old_val), cb.finalize());
 }
 
-Ref<Cell> dict_map(Ref<Cell> dict, td::BitPtr key_buffer, int n, int total_key_len,
+inline Ref<Cell> dict_map(Ref<Cell> dict, td::BitPtr key_buffer, int n, int total_key_len,
                    const Dictionary::map_func_t& map_func) {
   if (dict.is_null()) {
     // dictionary is empty
@@ -1057,9 +1060,9 @@ Ref<Cell> dict_map(Ref<Cell> dict, td::BitPtr key_buffer, int n, int total_key_l
   return cb.store_ref(std::move(c1)).store_ref(std::move(c2)).finalize();
 }
 
-}  // namespace
+//}  // namespace
 
-bool Dictionary::set_gen(td::ConstBitPtr key, int key_len, const std::function<bool(CellBuilder&)>& store_val,
+inline bool Dictionary::set_gen(td::ConstBitPtr key, int key_len, const std::function<bool(CellBuilder&)>& store_val,
                          SetMode mode) {
   force_validate();
   if (key_len != get_key_bits()) {
@@ -1072,23 +1075,23 @@ bool Dictionary::set_gen(td::ConstBitPtr key, int key_len, const std::function<b
   return res.second;
 }
 
-bool Dictionary::set(td::ConstBitPtr key, int key_len, Ref<CellSlice> value, SetMode mode) {
+inline bool Dictionary::set(td::ConstBitPtr key, int key_len, Ref<CellSlice> value, SetMode mode) {
   return set_gen(key, key_len, [value](CellBuilder& cb) { return cell_builder_add_slice_bool(cb, *value); }, mode);
 }
 
-bool Dictionary::set_ref(td::ConstBitPtr key, int key_len, Ref<Cell> val_ref, SetMode mode) {
+inline bool Dictionary::set_ref(td::ConstBitPtr key, int key_len, Ref<Cell> val_ref, SetMode mode) {
   return set_gen(key, key_len, [val_ref](CellBuilder& cb) { return cb.store_ref_bool(val_ref); }, mode);
 }
 
-bool Dictionary::set_builder(td::ConstBitPtr key, int key_len, Ref<CellBuilder> val_b, SetMode mode) {
+inline bool Dictionary::set_builder(td::ConstBitPtr key, int key_len, Ref<CellBuilder> val_b, SetMode mode) {
   return set_gen(key, key_len, [val_b](CellBuilder& cb) { return cb.append_builder_bool(val_b); }, mode);
 }
 
-bool Dictionary::set_builder(td::ConstBitPtr key, int key_len, const CellBuilder& val_b, SetMode mode) {
+inline bool Dictionary::set_builder(td::ConstBitPtr key, int key_len, const CellBuilder& val_b, SetMode mode) {
   return set_gen(key, key_len, [&val_b](CellBuilder& cb) { return cb.append_builder_bool(val_b); }, mode);
 }
 
-Ref<CellSlice> Dictionary::lookup_set_gen(td::ConstBitPtr key, int key_len, const store_value_func_t& store_val,
+inline Ref<CellSlice> Dictionary::lookup_set_gen(td::ConstBitPtr key, int key_len, const store_value_func_t& store_val,
                                           SetMode mode) {
   force_validate();
   if (key_len != get_key_bits()) {
@@ -1101,21 +1104,22 @@ Ref<CellSlice> Dictionary::lookup_set_gen(td::ConstBitPtr key, int key_len, cons
   return std::get<Ref<CellSlice>>(std::move(res));
 }
 
-Ref<CellSlice> Dictionary::lookup_set(td::ConstBitPtr key, int key_len, Ref<CellSlice> value, SetMode mode) {
+inline Ref<CellSlice> Dictionary::lookup_set(td::ConstBitPtr key, int key_len, Ref<CellSlice> value, SetMode mode) {
   return lookup_set_gen(key, key_len, [value](CellBuilder& cb) { return cell_builder_add_slice_bool(cb, *value); },
                         mode);
 }
 
-Ref<Cell> Dictionary::lookup_set_ref(td::ConstBitPtr key, int key_len, Ref<Cell> val_ref, SetMode mode) {
+inline Ref<Cell> Dictionary::lookup_set_ref(td::ConstBitPtr key, int key_len, Ref<Cell> val_ref, SetMode mode) {
   return extract_value_ref(
       lookup_set_gen(key, key_len, [val_ref](CellBuilder& cb) { return cb.store_ref_bool(val_ref); }, mode));
 }
 
-Ref<CellSlice> Dictionary::lookup_set_builder(td::ConstBitPtr key, int key_len, Ref<CellBuilder> val_b, SetMode mode) {
+inline Ref<CellSlice> Dictionary::lookup_set_builder(td::ConstBitPtr key, int key_len, Ref<CellBuilder> val_b,
+                                                     SetMode mode) {
   return lookup_set_gen(key, key_len, [val_b](CellBuilder& cb) { return cb.append_builder_bool(val_b); }, mode);
 }
 
-std::pair<Ref<CellSlice>, Ref<Cell>> DictionaryFixed::dict_lookup_delete(Ref<Cell> dict, td::ConstBitPtr key,
+inline std::pair<Ref<CellSlice>, Ref<Cell>> DictionaryFixed::dict_lookup_delete(Ref<Cell> dict, td::ConstBitPtr key,
                                                                          int n) const {
   // std::cerr << "dictionary delete for " << n << "-bit key = " << key.to_hex(n) << std::endl;
   if (dict.is_null()) {
@@ -1187,7 +1191,7 @@ std::pair<Ref<CellSlice>, Ref<Cell>> DictionaryFixed::dict_lookup_delete(Ref<Cel
   return std::make_pair(std::move(old_val), cb.finalize());
 }
 
-Ref<CellSlice> DictionaryFixed::lookup_delete(td::ConstBitPtr key, int key_len) {
+inline Ref<CellSlice> DictionaryFixed::lookup_delete(td::ConstBitPtr key, int key_len) {
   force_validate();
   if (key_len != get_key_bits()) {
     return {};
@@ -1199,11 +1203,12 @@ Ref<CellSlice> DictionaryFixed::lookup_delete(td::ConstBitPtr key, int key_len) 
   return std::move(res.first);
 }
 
-Ref<Cell> Dictionary::lookup_delete_ref(td::ConstBitPtr key, int key_len) {
+inline Ref<Cell> Dictionary::lookup_delete_ref(td::ConstBitPtr key, int key_len) {
   return extract_value_ref(lookup_delete(key, key_len));
 }
 
-Ref<CellSlice> DictionaryFixed::dict_lookup_minmax(Ref<Cell> dict, td::BitPtr key_buffer, int n, int mode) const {
+inline Ref<CellSlice> DictionaryFixed::dict_lookup_minmax(Ref<Cell> dict, td::BitPtr key_buffer, int n,
+                                                          int mode) const {
   if (dict.is_null()) {
     return {};
   }
@@ -1227,7 +1232,7 @@ Ref<CellSlice> DictionaryFixed::dict_lookup_minmax(Ref<Cell> dict, td::BitPtr ke
   }
 }
 
-Ref<CellSlice> DictionaryFixed::dict_lookup_nearest(Ref<Cell> dict, td::BitPtr key_buffer, int n, bool allow_eq,
+inline Ref<CellSlice> DictionaryFixed::dict_lookup_nearest(Ref<Cell> dict, td::BitPtr key_buffer, int n, bool allow_eq,
                                                     int mode) const {
   if (dict.is_null()) {
     return {};
@@ -1266,7 +1271,8 @@ Ref<CellSlice> DictionaryFixed::dict_lookup_nearest(Ref<Cell> dict, td::BitPtr k
   return dict_lookup_minmax(std::move(dict), key_buffer, n - 1, ~mode >> 1);
 }
 
-Ref<CellSlice> DictionaryFixed::lookup_nearest_key(td::BitPtr key_buffer, int key_len, bool fetch_next, bool allow_eq,
+inline Ref<CellSlice> DictionaryFixed::lookup_nearest_key(td::BitPtr key_buffer, int key_len, bool fetch_next,
+                                                          bool allow_eq,
                                                    bool invert_first) {
   force_validate();
   if (key_len != get_key_bits()) {
@@ -1276,7 +1282,8 @@ Ref<CellSlice> DictionaryFixed::lookup_nearest_key(td::BitPtr key_buffer, int ke
                              (-static_cast<int>(fetch_next)) ^ static_cast<int>(invert_first));
 }
 
-Ref<CellSlice> DictionaryFixed::get_minmax_key(td::BitPtr key_buffer, int key_len, bool fetch_max, bool invert_first) {
+inline Ref<CellSlice> DictionaryFixed::get_minmax_key(td::BitPtr key_buffer, int key_len, bool fetch_max,
+                                                      bool invert_first) {
   force_validate();
   if (key_len != get_key_bits()) {
     return {};
@@ -1285,11 +1292,11 @@ Ref<CellSlice> DictionaryFixed::get_minmax_key(td::BitPtr key_buffer, int key_le
                             (-static_cast<int>(fetch_max)) ^ static_cast<int>(invert_first));
 }
 
-Ref<Cell> Dictionary::get_minmax_key_ref(td::BitPtr key_buffer, int key_len, bool fetch_max, bool invert_first) {
+inline Ref<Cell> Dictionary::get_minmax_key_ref(td::BitPtr key_buffer, int key_len, bool fetch_max, bool invert_first) {
   return extract_value_ref(get_minmax_key(key_buffer, key_len, fetch_max, invert_first));
 }
 
-Ref<CellSlice> DictionaryFixed::extract_minmax_key(td::BitPtr key_buffer, int key_len, bool fetch_max,
+inline Ref<CellSlice> DictionaryFixed::extract_minmax_key(td::BitPtr key_buffer, int key_len, bool fetch_max,
                                                    bool invert_first) {
   force_validate();
   if (key_len != get_key_bits()) {
@@ -1305,7 +1312,8 @@ Ref<CellSlice> DictionaryFixed::extract_minmax_key(td::BitPtr key_buffer, int ke
   return val;
 }
 
-Ref<Cell> Dictionary::extract_minmax_key_ref(td::BitPtr key_buffer, int key_len, bool fetch_max, bool invert_first) {
+inline Ref<Cell> Dictionary::extract_minmax_key_ref(td::BitPtr key_buffer, int key_len, bool fetch_max,
+                                                    bool invert_first) {
   return extract_value_ref(extract_minmax_key(key_buffer, key_len, fetch_max, invert_first));
 }
 
@@ -1315,7 +1323,7 @@ Ref<Cell> Dictionary::extract_minmax_key_ref(td::BitPtr key_buffer, int key_len,
  *
  */
 
-bool DictIterator::prevalidate(int mode) {
+inline bool DictIterator::prevalidate(int mode) {
   if (key_bits_ <= 0 || key_bits_ > Dictionary::max_key_bits) {
     reset();
     flags_ &= ~f_valid;
@@ -1330,7 +1338,7 @@ bool DictIterator::prevalidate(int mode) {
   }
 }
 
-bool DictIterator::bind(const DictionaryFixed& dict, int do_rewind) {
+inline bool DictIterator::bind(const DictionaryFixed& dict, int do_rewind) {
   if (!is_valid() || !is_bound_to(dict)) {
     return false;
   }
@@ -1339,7 +1347,7 @@ bool DictIterator::bind(const DictionaryFixed& dict, int do_rewind) {
   return !do_rewind || rewind(do_rewind < 0);
 }
 
-bool DictIterator::rebind_to(const DictionaryFixed& dict, int do_rewind) {
+inline bool DictIterator::rebind_to(const DictionaryFixed& dict, int do_rewind) {
   reset();
   dict_ = &dict;
   label_mode_ = dict.label_mode();
@@ -1349,7 +1357,7 @@ bool DictIterator::rebind_to(const DictionaryFixed& dict, int do_rewind) {
   return prevalidate() && (!do_rewind || rewind(do_rewind < 0));
 }
 
-int DictIterator::compare_keys(td::ConstBitPtr a, td::ConstBitPtr b) const {
+inline int DictIterator::compare_keys(td::ConstBitPtr a, td::ConstBitPtr b) const {
   if (!key_bits_) {
     return 0;
   }
@@ -1361,7 +1369,7 @@ int DictIterator::compare_keys(td::ConstBitPtr a, td::ConstBitPtr b) const {
   return order_ >= 0 ? c : -c;
 }
 
-bool DictIterator::dive(int mode) {
+inline bool DictIterator::dive(int mode) {
   int n = key_bits_, m = 0;
   Ref<Cell> node = path_.empty() ? root_ : path_.back().next;
   if (!path_.empty()) {
@@ -1393,7 +1401,7 @@ bool DictIterator::dive(int mode) {
   }
 }
 
-bool DictIterator::rewind(bool to_end) {
+inline bool DictIterator::rewind(bool to_end) {
   if (!is_valid()) {
     return false;
   }
@@ -1421,7 +1429,7 @@ bool DictIterator::rewind(bool to_end) {
   return !eof() || dive(mode);
 }
 
-bool DictIterator::next(bool go_back) {
+inline bool DictIterator::next(bool go_back) {
   if (!is_valid() || root_.is_null() || eof()) {
     return false;
   }
@@ -1439,7 +1447,7 @@ bool DictIterator::next(bool go_back) {
   return false;
 }
 
-bool DictIterator::lookup(td::ConstBitPtr pos, int pos_bits, bool strict_after, bool backw) {
+inline bool DictIterator::lookup(td::ConstBitPtr pos, int pos_bits, bool strict_after, bool backw) {
   if (!is_valid() || root_.is_null() || pos_bits < 0 || pos_bits > key_bits_) {
     return false;
   }
@@ -1543,51 +1551,51 @@ bool DictIterator::lookup(td::ConstBitPtr pos, int pos_bits, bool strict_after, 
   return dive(mode);
 }
 
-DictIterator DictionaryFixed::null_iterator() {
+inline DictIterator DictionaryFixed::null_iterator() {
   force_validate();
   return DictIterator{*this};
 }
 
-DictIterator DictionaryFixed::make_iterator(int mode) {
+inline DictIterator DictionaryFixed::make_iterator(int mode) {
   force_validate();
   DictIterator it{*this, mode};
   it.rewind();
   return it;
 }
 
-DictIterator DictionaryFixed::init_iterator(bool backw, bool invert_first) {
+inline DictIterator DictionaryFixed::init_iterator(bool backw, bool invert_first) {
   return make_iterator((int)backw + 2 * (int)invert_first);
 }
 
-DictIterator DictionaryFixed::begin() {
+inline DictIterator DictionaryFixed::begin() {
   return init_iterator();
 }
 
-DictIterator DictionaryFixed::end() {
+inline DictIterator DictionaryFixed::end() {
   return null_iterator();
 }
 
-DictIterator DictionaryFixed::cbegin() {
+inline DictIterator DictionaryFixed::cbegin() {
   return begin();
 }
 
-DictIterator DictionaryFixed::cend() {
+inline DictIterator DictionaryFixed::cend() {
   return end();
 }
 
-DictIterator DictionaryFixed::rbegin() {
+inline DictIterator DictionaryFixed::rbegin() {
   return init_iterator(true);
 }
 
-DictIterator DictionaryFixed::rend() {
+inline DictIterator DictionaryFixed::rend() {
   return null_iterator();
 }
 
-DictIterator DictionaryFixed::crbegin() {
+inline DictIterator DictionaryFixed::crbegin() {
   return rbegin();
 }
 
-DictIterator DictionaryFixed::crend() {
+inline DictIterator DictionaryFixed::crend() {
   return rend();
 }
 
@@ -1597,7 +1605,8 @@ DictIterator DictionaryFixed::crend() {
  *
  */
 
-std::pair<Ref<Cell>, bool> DictionaryFixed::extract_prefix_subdict_internal(Ref<Cell> dict, td::ConstBitPtr prefix,
+inline std::pair<Ref<Cell>, bool> DictionaryFixed::extract_prefix_subdict_internal(Ref<Cell> dict,
+                                                                                   td::ConstBitPtr prefix,
                                                                             int prefix_len, bool remove_prefix) const {
   if (is_empty() || prefix_len <= 0) {
     return {{}, false};  // unchanged
@@ -1646,7 +1655,7 @@ std::pair<Ref<Cell>, bool> DictionaryFixed::extract_prefix_subdict_internal(Ref<
   }
 }
 
-bool DictionaryFixed::cut_prefix_subdict(td::ConstBitPtr prefix, int prefix_len, bool remove_prefix) {
+inline bool DictionaryFixed::cut_prefix_subdict(td::ConstBitPtr prefix, int prefix_len, bool remove_prefix) {
   force_validate();
   if (prefix_len < 0) {
     return false;
@@ -1664,13 +1673,14 @@ bool DictionaryFixed::cut_prefix_subdict(td::ConstBitPtr prefix, int prefix_len,
   return true;
 }
 
-Ref<vm::Cell> DictionaryFixed::extract_prefix_subdict_root(td::ConstBitPtr prefix, int prefix_len, bool remove_prefix) {
+inline Ref<vm::Cell> DictionaryFixed::extract_prefix_subdict_root(td::ConstBitPtr prefix, int prefix_len,
+                                                                  bool remove_prefix) {
   force_validate();
   auto res = extract_prefix_subdict_internal(get_root_cell(), prefix, prefix_len, remove_prefix);
   return res.second ? res.first : root_cell;
 }
 
-std::pair<Ref<Cell>, int> DictionaryFixed::dict_filter(Ref<Cell> dict, td::BitPtr key, int n,
+inline std::pair<Ref<Cell>, int> DictionaryFixed::dict_filter(Ref<Cell> dict, td::BitPtr key, int n,
                                                        const DictionaryFixed::filter_func_t& check_leaf,
                                                        int& skip_rest) const {
   // std::cerr << "dictionary filter for " << n << "-bit key = " << (key + n - key_bits).to_hex(key_bits - n)
@@ -1745,7 +1755,7 @@ std::pair<Ref<Cell>, int> DictionaryFixed::dict_filter(Ref<Cell> dict, td::BitPt
   return {cb.finalize(), changes};
 }
 
-int DictionaryFixed::filter(DictionaryFixed::filter_func_t check_leaf) {
+inline int DictionaryFixed::filter(DictionaryFixed::filter_func_t check_leaf) {
   force_validate();
   int skip_rest = -1;
   unsigned char buffer[DictionaryFixed::max_key_bytes];
@@ -1758,7 +1768,7 @@ int DictionaryFixed::filter(DictionaryFixed::filter_func_t check_leaf) {
   return res.second;
 }
 
-void Dictionary::map(const map_func_t& map_func) {
+inline void Dictionary::map(const map_func_t& map_func) {
   force_validate();
   int key_len = get_key_bits();
   unsigned char key_buffer[max_key_bytes];
@@ -1766,7 +1776,7 @@ void Dictionary::map(const map_func_t& map_func) {
   set_root_cell(std::move(res));
 }
 
-void Dictionary::map(const simple_map_func_t& simple_map_func) {
+inline void Dictionary::map(const simple_map_func_t& simple_map_func) {
   using namespace std::placeholders;
   map_func_t map_func = std::bind(simple_map_func, _1, _2);
   map(map_func);
@@ -1774,7 +1784,7 @@ void Dictionary::map(const simple_map_func_t& simple_map_func) {
 
 // mode: +1 = forbid empty dict1 with non-empty dict2
 //       +2 = forbid empty dict2 with non-empty dict1
-Ref<Cell> DictionaryFixed::dict_combine_with(Ref<Cell> dict1, Ref<Cell> dict2, td::BitPtr key_buffer, int n,
+inline Ref<Cell> DictionaryFixed::dict_combine_with(Ref<Cell> dict1, Ref<Cell> dict2, td::BitPtr key_buffer, int n,
                                              int total_key_len, const DictionaryFixed::combine_func_t& combine_func,
                                              int mode, int skip1, int skip2) const {
   if (dict1.is_null()) {
@@ -1974,7 +1984,7 @@ Ref<Cell> DictionaryFixed::dict_combine_with(Ref<Cell> dict1, Ref<Cell> dict2, t
   }
 }
 
-bool DictionaryFixed::combine_with(DictionaryFixed& dict2, const combine_func_t& combine_func, int mode) {
+inline bool DictionaryFixed::combine_with(DictionaryFixed& dict2, const combine_func_t& combine_func, int mode) {
   force_validate();
   dict2.force_validate();
   int key_len = get_key_bits();
@@ -1992,13 +2002,14 @@ bool DictionaryFixed::combine_with(DictionaryFixed& dict2, const combine_func_t&
   }
 }
 
-bool DictionaryFixed::combine_with(DictionaryFixed& dict2, const simple_combine_func_t& simple_combine_func, int mode) {
+inline bool DictionaryFixed::combine_with(DictionaryFixed& dict2, const simple_combine_func_t& simple_combine_func,
+                                          int mode) {
   using namespace std::placeholders;
   combine_func_t combine_func = std::bind(simple_combine_func, _1, _2, _3);
   return combine_with(dict2, combine_func, mode);
 }
 
-bool DictionaryFixed::combine_with(DictionaryFixed& dict2) {
+inline bool DictionaryFixed::combine_with(DictionaryFixed& dict2) {
   return combine_with(dict2,
                       [](CellBuilder&, Ref<CellSlice>, Ref<CellSlice>, td::ConstBitPtr key, int key_len) -> bool {
                         LOG(WARNING) << "dictionary merge conflict for key " << key.to_hex(key_len);
@@ -2006,7 +2017,7 @@ bool DictionaryFixed::combine_with(DictionaryFixed& dict2) {
                       });
 }
 
-bool DictionaryFixed::dict_check_for_each(Ref<Cell> dict, td::BitPtr key_buffer, int n, int total_key_len,
+inline bool DictionaryFixed::dict_check_for_each(Ref<Cell> dict, td::BitPtr key_buffer, int n, int total_key_len,
                                           const DictionaryFixed::foreach_func_t& foreach_func,
                                           bool invert_first, bool shuffle) const {
   if (dict.is_null()) {
@@ -2041,7 +2052,7 @@ bool DictionaryFixed::dict_check_for_each(Ref<Cell> dict, td::BitPtr key_buffer,
   return dict_check_for_each(std::move(c2), key_buffer, n - l - 1, total_key_len, foreach_func, false, shuffle);
 }
 
-bool DictionaryFixed::check_for_each(const foreach_func_t& foreach_func, bool invert_first, bool shuffle) {
+inline bool DictionaryFixed::check_for_each(const foreach_func_t& foreach_func, bool invert_first, bool shuffle) {
   force_validate();
   if (is_empty()) {
     return true;
@@ -2058,7 +2069,8 @@ static inline bool set_bit(td::BitPtr ptr, bool value = true) {
 }
 
 // mode: +1 = check augmentation of dict1, +2 = ... of dict2
-bool DictionaryFixed::dict_scan_diff(Ref<Cell> dict1, Ref<Cell> dict2, td::BitPtr key_buffer, int n, int total_key_len,
+inline bool DictionaryFixed::dict_scan_diff(Ref<Cell> dict1, Ref<Cell> dict2, td::BitPtr key_buffer, int n,
+                                            int total_key_len,
                                      const scan_diff_func_t& diff_func, int mode, int skip1, int skip2) const {
   // skip1: remove that much first bits from all keys in dictionary dict1 (its keys are actually n + skip1 bits long)
   // skip2: similar for dict2
@@ -2243,7 +2255,7 @@ bool DictionaryFixed::dict_scan_diff(Ref<Cell> dict1, Ref<Cell> dict2, td::BitPt
   }
 }
 
-bool DictionaryFixed::scan_diff(DictionaryFixed& dict2, const scan_diff_func_t& diff_func, int check_augm) {
+inline bool DictionaryFixed::scan_diff(DictionaryFixed& dict2, const scan_diff_func_t& diff_func, int check_augm) {
   force_validate();
   dict2.force_validate();
   int key_len = get_key_bits();
@@ -2259,7 +2271,7 @@ bool DictionaryFixed::scan_diff(DictionaryFixed& dict2, const scan_diff_func_t& 
   }
 }
 
-bool DictionaryFixed::dict_validate_check(Ref<Cell> dict, td::BitPtr key_buffer, int n, int total_key_len,
+inline bool DictionaryFixed::dict_validate_check(Ref<Cell> dict, td::BitPtr key_buffer, int n, int total_key_len,
                                           const DictionaryFixed::foreach_func_t& foreach_func,
                                           bool invert_first) const {
   //LOG(DEBUG) << "dict_validate_check for " << total_key_len - n << "-bit key prefix " << (key_buffer - n + total_key_len).to_hex(total_key_len - n);
@@ -2305,7 +2317,7 @@ bool DictionaryFixed::dict_validate_check(Ref<Cell> dict, td::BitPtr key_buffer,
   return dict_validate_check(std::move(c2), key_buffer, n, total_key_len, foreach_func);
 }
 
-bool DictionaryFixed::validate_check(const DictionaryFixed::foreach_func_t& foreach_func, bool invert_first) {
+inline bool DictionaryFixed::validate_check(const DictionaryFixed::foreach_func_t& foreach_func, bool invert_first) {
   if (!validate()) {
     return false;
   }
@@ -2317,7 +2329,7 @@ bool DictionaryFixed::validate_check(const DictionaryFixed::foreach_func_t& fore
   return dict_validate_check(get_root_cell(), td::BitPtr{key_buffer}, key_len, key_len, foreach_func, invert_first);
 }
 
-bool DictionaryFixed::validate_all() {
+inline bool DictionaryFixed::validate_all() {
   return validate_check([](Ref<CellSlice> value, td::ConstBitPtr key, int n) { return true; }) || invalidate();
 }
 
@@ -2327,7 +2339,7 @@ bool DictionaryFixed::validate_all() {
  * 
  */
 
-std::pair<Ref<CellSlice>, int> PrefixDictionary::lookup_prefix(td::ConstBitPtr key, int key_len) {
+inline std::pair<Ref<CellSlice>, int> PrefixDictionary::lookup_prefix(td::ConstBitPtr key, int key_len) {
   force_validate();
   int n = get_key_bits();
   if (is_empty()) {
@@ -2372,7 +2384,7 @@ std::pair<Ref<CellSlice>, int> PrefixDictionary::lookup_prefix(td::ConstBitPtr k
   }
 }
 
-Ref<CellSlice> PrefixDictionary::lookup(td::ConstBitPtr key, int key_len) {
+inline Ref<CellSlice> PrefixDictionary::lookup(td::ConstBitPtr key, int key_len) {
   force_validate();
   if (key_len > get_key_bits()) {
     return {};
@@ -2381,7 +2393,8 @@ Ref<CellSlice> PrefixDictionary::lookup(td::ConstBitPtr key, int key_len) {
   return res.second == key_len ? std::move(res.first) : Ref<CellSlice>{};
 }
 
-bool PrefixDictionary::set_gen(td::ConstBitPtr key, int key_len, const std::function<bool(CellBuilder&)>& store_val,
+inline bool PrefixDictionary::set_gen(td::ConstBitPtr key, int key_len,
+                                      const std::function<bool(CellBuilder&)>& store_val,
                                SetMode mode) {
   force_validate();
   if (key_len > get_key_bits() || key_len < 0) {
@@ -2394,15 +2407,15 @@ bool PrefixDictionary::set_gen(td::ConstBitPtr key, int key_len, const std::func
   return res.second;
 }
 
-bool PrefixDictionary::set(td::ConstBitPtr key, int key_len, Ref<CellSlice> value, SetMode mode) {
+inline bool PrefixDictionary::set(td::ConstBitPtr key, int key_len, Ref<CellSlice> value, SetMode mode) {
   return set_gen(key, key_len, [value](CellBuilder& cb) { return cell_builder_add_slice_bool(cb, *value); }, mode);
 }
 
-bool PrefixDictionary::set_builder(td::ConstBitPtr key, int key_len, Ref<CellBuilder> val_b, SetMode mode) {
+inline bool PrefixDictionary::set_builder(td::ConstBitPtr key, int key_len, Ref<CellBuilder> val_b, SetMode mode) {
   return set_gen(key, key_len, [val_b](CellBuilder& cb) { return cb.append_builder_bool(val_b); }, mode);
 }
 
-Ref<CellSlice> PrefixDictionary::lookup_delete(td::ConstBitPtr key, int key_len) {
+inline Ref<CellSlice> PrefixDictionary::lookup_delete(td::ConstBitPtr key, int key_len) {
   force_validate();
   if (key_len > get_key_bits() || key_len < 0) {
     return {};
@@ -2422,32 +2435,32 @@ Ref<CellSlice> PrefixDictionary::lookup_delete(td::ConstBitPtr key, int key_len)
 
 namespace dict {
 
-bool AugmentationData::check_empty(vm::CellSlice& cs) const {
+inline bool AugmentationData::check_empty(vm::CellSlice& cs) const {
   vm::CellBuilder cb;
   return eval_empty(cb) && cb.contents_equal(cs);
 }
 
-bool AugmentationData::check_leaf(vm::CellSlice& cs, vm::CellSlice& val_cs) const {
+inline bool AugmentationData::check_leaf(vm::CellSlice& cs, vm::CellSlice& val_cs) const {
   vm::CellBuilder cb;
   return eval_leaf(cb, val_cs) && cb.contents_equal(cs);
 }
 
-bool AugmentationData::check_fork(vm::CellSlice& cs, vm::CellSlice& left_cs, vm::CellSlice& right_cs) const {
+inline bool AugmentationData::check_fork(vm::CellSlice& cs, vm::CellSlice& left_cs, vm::CellSlice& right_cs) const {
   vm::CellBuilder cb;
   return eval_fork(cb, left_cs, right_cs) && cb.contents_equal(cs);
 }
 
-Ref<vm::CellSlice> AugmentationData::extract_extra(vm::CellSlice& cs) const {
+inline Ref<vm::CellSlice> AugmentationData::extract_extra(vm::CellSlice& cs) const {
   Ref<CellSlice> res{true, cs};
   return skip_extra(cs) && res.write().cut_tail(cs) ? std::move(res) : Ref<CellSlice>{};
 }
 
-Ref<vm::CellSlice> AugmentationData::extract_extra(Ref<vm::CellSlice> cs_ref) const {
+inline Ref<vm::CellSlice> AugmentationData::extract_extra(Ref<vm::CellSlice> cs_ref) const {
   CellSlice cs{*cs_ref};
   return skip_extra(cs) && cs_ref.write().cut_tail(cs) ? std::move(cs_ref) : Ref<CellSlice>{};
 }
 
-bool AugmentationData::extract_extra_to(vm::CellSlice& cs, vm::CellSlice& extra) const {
+inline bool AugmentationData::extract_extra_to(vm::CellSlice& cs, vm::CellSlice& extra) const {
   extra = cs;
   return cs.is_valid() && skip_extra(cs) && extra.cut_tail(cs);
 }
@@ -2457,28 +2470,30 @@ bool AugmentationData::extract_extra_to(vm::CellSlice& cs, vm::CellSlice& extra)
 using dict::AugmentationData;
 using dict::LabelParser;
 
-AugmentedDictionary::AugmentedDictionary(int _n, const AugmentationData& _aug, bool validate)
+inline AugmentedDictionary::AugmentedDictionary(int _n, const AugmentationData& _aug, bool validate)
     : DictionaryFixed(_n, false), aug(_aug) {
   if (validate) {
     force_validate();
   }
 }
 
-AugmentedDictionary::AugmentedDictionary(Ref<CellSlice> _root, int _n, const AugmentationData& _aug, bool validate)
+inline AugmentedDictionary::AugmentedDictionary(Ref<CellSlice> _root, int _n, const AugmentationData& _aug,
+                                                bool validate)
     : DictionaryFixed(std::move(_root), _n, false), aug(_aug) {
   if (validate) {
     force_validate();
   }
 }
 
-AugmentedDictionary::AugmentedDictionary(Ref<Cell> cell, int _n, const AugmentationData& _aug, bool validate)
+inline AugmentedDictionary::AugmentedDictionary(Ref<Cell> cell, int _n, const AugmentationData& _aug, bool validate)
     : DictionaryFixed(std::move(cell), _n, false), aug(_aug) {
   if (validate) {
     force_validate();
   }
 }
 
-AugmentedDictionary::AugmentedDictionary(DictNonEmpty, Ref<CellSlice> _root, int _n, const AugmentationData& _aug,
+inline AugmentedDictionary::AugmentedDictionary(DictNonEmpty, Ref<CellSlice> _root, int _n,
+                                                const AugmentationData& _aug,
                                          bool validate)
     : DictionaryFixed(DictNonEmpty{}, std::move(_root), _n, false), aug(_aug) {
   if (validate) {
@@ -2486,7 +2501,7 @@ AugmentedDictionary::AugmentedDictionary(DictNonEmpty, Ref<CellSlice> _root, int
   }
 }
 
-bool AugmentedDictionary::validate() {
+inline bool AugmentedDictionary::validate() {
   if (is_valid()) {
     return true;
   }
@@ -2529,14 +2544,14 @@ bool AugmentedDictionary::validate() {
   return true;
 }
 
-Ref<CellSlice> AugmentedDictionary::get_root() const {
+inline Ref<CellSlice> AugmentedDictionary::get_root() const {
   if (!(flags & f_root_cached) && !compute_root()) {
     return {};
   }
   return root;
 }
 
-Ref<CellSlice> AugmentedDictionary::extract_root() && {
+inline Ref<CellSlice> AugmentedDictionary::extract_root() && {
   if (!(flags & f_root_cached) && !compute_root()) {
     return {};
   }
@@ -2544,7 +2559,7 @@ Ref<CellSlice> AugmentedDictionary::extract_root() && {
   return std::move(root);
 }
 
-bool AugmentedDictionary::append_dict_to_bool(CellBuilder& cb) const & {
+inline bool AugmentedDictionary::append_dict_to_bool(CellBuilder& cb) const& {
   if (!is_valid()) {
     return false;
   }
@@ -2555,7 +2570,7 @@ bool AugmentedDictionary::append_dict_to_bool(CellBuilder& cb) const & {
   }
 }
 
-bool AugmentedDictionary::append_dict_to_bool(CellBuilder& cb) && {
+inline bool AugmentedDictionary::append_dict_to_bool(CellBuilder& cb) && {
   if (!is_valid()) {
     return false;
   }
@@ -2567,7 +2582,7 @@ bool AugmentedDictionary::append_dict_to_bool(CellBuilder& cb) && {
   }
 }
 
-bool AugmentedDictionary::compute_root() const {
+inline bool AugmentedDictionary::compute_root() const {
   if (!is_valid()) {
     return false;
   }
@@ -2586,13 +2601,13 @@ bool AugmentedDictionary::compute_root() const {
   }
 }
 
-Ref<CellSlice> AugmentedDictionary::get_empty_dictionary() const {
+inline Ref<CellSlice> AugmentedDictionary::get_empty_dictionary() const {
   CellBuilder cb;
   cb.store_long(0, 1);
   return aug.eval_empty(cb) ? Ref<CellSlice>{true, cb.finalize()} : Ref<CellSlice>{};
 }
 
-Ref<CellSlice> AugmentedDictionary::get_node_extra(Ref<Cell> cell_ref, int n) const {
+inline Ref<CellSlice> AugmentedDictionary::get_node_extra(Ref<Cell> cell_ref, int n) const {
   if (cell_ref.is_null()) {
     CellBuilder cb;
     if (!aug.eval_empty(cb)) {
@@ -2613,7 +2628,7 @@ Ref<CellSlice> AugmentedDictionary::get_node_extra(Ref<Cell> cell_ref, int n) co
   return {};
 }
 
-Ref<CellSlice> AugmentedDictionary::extract_leaf_value(Ref<CellSlice> leaf) const {
+inline Ref<CellSlice> AugmentedDictionary::extract_leaf_value(Ref<CellSlice> leaf) const {
   if (leaf.not_null() && aug.skip_extra(leaf.write())) {
     return std::move(leaf);
   } else {
@@ -2621,11 +2636,11 @@ Ref<CellSlice> AugmentedDictionary::extract_leaf_value(Ref<CellSlice> leaf) cons
   }
 }
 
-Ref<CellSlice> AugmentedDictionary::get_root_extra() const {
+inline Ref<CellSlice> AugmentedDictionary::get_root_extra() const {
   return get_node_extra(root_cell, key_bits);
 }
 
-Ref<CellSlice> AugmentedDictionary::extract_value(Ref<CellSlice> value_extra) const {
+inline Ref<CellSlice> AugmentedDictionary::extract_value(Ref<CellSlice> value_extra) const {
   if (value_extra.not_null() && aug.skip_extra(value_extra.write())) {
     return value_extra;
   } else {
@@ -2633,7 +2648,7 @@ Ref<CellSlice> AugmentedDictionary::extract_value(Ref<CellSlice> value_extra) co
   }
 }
 
-Ref<Cell> AugmentedDictionary::extract_value_ref(Ref<CellSlice> value_extra) const {
+inline Ref<Cell> AugmentedDictionary::extract_value_ref(Ref<CellSlice> value_extra) const {
   if (value_extra.not_null() && aug.skip_extra(value_extra.write()) && value_extra->size_ext() == 0x10000) {
     return value_extra->prefetch_ref();
   } else {
@@ -2641,7 +2656,8 @@ Ref<Cell> AugmentedDictionary::extract_value_ref(Ref<CellSlice> value_extra) con
   }
 }
 
-std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::decompose_value_extra(Ref<CellSlice> value_extra) const {
+inline std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::decompose_value_extra(
+    Ref<CellSlice> value_extra) const {
   if (value_extra.is_null()) {
     return {};
   }
@@ -2653,7 +2669,8 @@ std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::decompose_value_e
   }
 }
 
-std::pair<Ref<Cell>, Ref<CellSlice>> AugmentedDictionary::decompose_value_ref_extra(Ref<CellSlice> value_extra) const {
+inline std::pair<Ref<Cell>, Ref<CellSlice>> AugmentedDictionary::decompose_value_ref_extra(
+    Ref<CellSlice> value_extra) const {
   if (value_extra.is_null()) {
     return {};
   }
@@ -2665,48 +2682,49 @@ std::pair<Ref<Cell>, Ref<CellSlice>> AugmentedDictionary::decompose_value_ref_ex
   }
 }
 
-Ref<CellSlice> AugmentedDictionary::lookup_with_extra(td::ConstBitPtr key, int key_len) {
+inline Ref<CellSlice> AugmentedDictionary::lookup_with_extra(td::ConstBitPtr key, int key_len) {
   return DictionaryFixed::lookup(key, key_len);
 }
 
-Ref<CellSlice> AugmentedDictionary::lookup(td::ConstBitPtr key, int key_len) {
+inline Ref<CellSlice> AugmentedDictionary::lookup(td::ConstBitPtr key, int key_len) {
   return extract_value(lookup_with_extra(key, key_len));
 }
 
-Ref<Cell> AugmentedDictionary::lookup_ref(td::ConstBitPtr key, int key_len) {
+inline Ref<Cell> AugmentedDictionary::lookup_ref(td::ConstBitPtr key, int key_len) {
   return extract_value_ref(lookup_with_extra(key, key_len));
 }
 
-std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::lookup_extra(td::ConstBitPtr key, int key_len) {
+inline std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::lookup_extra(td::ConstBitPtr key, int key_len) {
   return decompose_value_extra(lookup_with_extra(key, key_len));
 }
 
-std::pair<Ref<Cell>, Ref<CellSlice>> AugmentedDictionary::lookup_ref_extra(td::ConstBitPtr key, int key_len) {
+inline std::pair<Ref<Cell>, Ref<CellSlice>> AugmentedDictionary::lookup_ref_extra(td::ConstBitPtr key, int key_len) {
   return decompose_value_ref_extra(lookup_with_extra(key, key_len));
 }
 
-Ref<CellSlice> AugmentedDictionary::lookup_delete_with_extra(td::ConstBitPtr key, int key_len) {
+inline Ref<CellSlice> AugmentedDictionary::lookup_delete_with_extra(td::ConstBitPtr key, int key_len) {
   return DictionaryFixed::lookup_delete(key, key_len);
 }
 
-Ref<CellSlice> AugmentedDictionary::lookup_delete(td::ConstBitPtr key, int key_len) {
+inline Ref<CellSlice> AugmentedDictionary::lookup_delete(td::ConstBitPtr key, int key_len) {
   return extract_value(lookup_delete_with_extra(key, key_len));
 }
 
-Ref<Cell> AugmentedDictionary::lookup_delete_ref(td::ConstBitPtr key, int key_len) {
+inline Ref<Cell> AugmentedDictionary::lookup_delete_ref(td::ConstBitPtr key, int key_len) {
   return extract_value_ref(lookup_delete_with_extra(key, key_len));
 }
 
-std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::lookup_delete_extra(td::ConstBitPtr key, int key_len) {
+inline std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::lookup_delete_extra(td::ConstBitPtr key,
+                                                                                          int key_len) {
   return decompose_value_extra(lookup_delete_with_extra(key, key_len));
 }
 
-bool AugmentedDictionary::check_leaf(CellSlice& cs, td::ConstBitPtr key, int key_len) const {
+inline bool AugmentedDictionary::check_leaf(CellSlice& cs, td::ConstBitPtr key, int key_len) const {
   vm::CellSlice extra;
   return aug.extract_extra_to(cs, extra) && aug.check_leaf_key_extra(cs, extra, key, key_len);
 }
 
-bool AugmentedDictionary::check_fork(CellSlice& cs, Ref<Cell> c1, Ref<Cell> c2, int n) const {
+inline bool AugmentedDictionary::check_fork(CellSlice& cs, Ref<Cell> c1, Ref<Cell> c2, int n) const {
   if (n <= 0) {
     return false;
   }
@@ -2715,7 +2733,7 @@ bool AugmentedDictionary::check_fork(CellSlice& cs, Ref<Cell> c1, Ref<Cell> c2, 
   return extra1.not_null() && extra2.not_null() && aug.check_fork(cs, extra1.write(), extra2.write());
 }
 
-Ref<Cell> AugmentedDictionary::finish_create_leaf(CellBuilder& cb, const CellSlice& value) const {
+inline Ref<Cell> AugmentedDictionary::finish_create_leaf(CellBuilder& cb, const CellSlice& value) const {
   CellSlice value_copy{value};
   if (!aug.eval_leaf(cb, value_copy)) {
     throw VmError{Excno::dict_err, "cannot compute and store extra value into an augmented dictionary cell"};
@@ -2726,7 +2744,7 @@ Ref<Cell> AugmentedDictionary::finish_create_leaf(CellBuilder& cb, const CellSli
   return cb.finalize();
 }
 
-Ref<Cell> AugmentedDictionary::finish_create_fork(CellBuilder& cb, Ref<Cell> c1, Ref<Cell> c2, int n) const {
+inline Ref<Cell> AugmentedDictionary::finish_create_fork(CellBuilder& cb, Ref<Cell> c1, Ref<Cell> c2, int n) const {
   assert(n > 0);
   if (!(cb.store_ref_bool(c1) && cb.store_ref_bool(c2))) {
     throw VmError{Excno::dict_err, "cannot store branch references into an augmented dictionary cell"};
@@ -2745,7 +2763,7 @@ Ref<Cell> AugmentedDictionary::finish_create_fork(CellBuilder& cb, Ref<Cell> c1,
   return cb.finalize();
 }
 
-std::pair<Ref<Cell>, bool> AugmentedDictionary::dict_set(Ref<Cell> dict, td::ConstBitPtr key, int n,
+inline std::pair<Ref<Cell>, bool> AugmentedDictionary::dict_set(Ref<Cell> dict, td::ConstBitPtr key, int n,
                                                          const CellSlice& value, Dictionary::SetMode mode) const {
   //std::cerr << "augmented dictionary modification for " << n << "-bit key = " << key.to_hex(n) << std::endl;
   if (dict.is_null()) {
@@ -2836,11 +2854,11 @@ std::pair<Ref<Cell>, bool> AugmentedDictionary::dict_set(Ref<Cell> dict, td::Con
   return std::make_pair(finish_create_fork(cb, std::move(c1), std::move(c2), n - label.l_bits), true);
 }
 
-bool AugmentedDictionary::set(td::ConstBitPtr key, int key_len, Ref<CellSlice> value, SetMode mode) {
+inline bool AugmentedDictionary::set(td::ConstBitPtr key, int key_len, Ref<CellSlice> value, SetMode mode) {
   return value.not_null() && set(key, key_len, *value, mode);
 }
 
-bool AugmentedDictionary::set(td::ConstBitPtr key, int key_len, const CellSlice& value, SetMode mode) {
+inline bool AugmentedDictionary::set(td::ConstBitPtr key, int key_len, const CellSlice& value, SetMode mode) {
   force_validate();
   if (key_len != get_key_bits()) {
     return false;
@@ -2855,7 +2873,7 @@ bool AugmentedDictionary::set(td::ConstBitPtr key, int key_len, const CellSlice&
   return res.second;
 }
 
-bool AugmentedDictionary::set_ref(td::ConstBitPtr key, int key_len, Ref<Cell> value_ref, SetMode mode) {
+inline bool AugmentedDictionary::set_ref(td::ConstBitPtr key, int key_len, Ref<Cell> value_ref, SetMode mode) {
   if (value_ref.not_null()) {
     CellBuilder cb;
     cb.store_ref(std::move(value_ref));
@@ -2865,11 +2883,12 @@ bool AugmentedDictionary::set_ref(td::ConstBitPtr key, int key_len, Ref<Cell> va
   }
 }
 
-bool AugmentedDictionary::set_builder(td::ConstBitPtr key, int key_len, const CellBuilder& value, SetMode mode) {
+inline bool AugmentedDictionary::set_builder(td::ConstBitPtr key, int key_len, const CellBuilder& value, SetMode mode) {
   return set(key, key_len, load_cell_slice(value.finalize_copy()));
 }
 
-bool AugmentedDictionary::check_for_each_extra(const foreach_extra_func_t& foreach_extra_func, bool invert_first) {
+inline bool AugmentedDictionary::check_for_each_extra(const foreach_extra_func_t& foreach_extra_func,
+                                                      bool invert_first) {
   force_validate();
   const auto& augm = aug;
   foreach_func_t foreach_func = [&foreach_extra_func, &augm](Ref<vm::CellSlice> value_extra, td::ConstBitPtr key,
@@ -2880,7 +2899,7 @@ bool AugmentedDictionary::check_for_each_extra(const foreach_extra_func_t& forea
   return DictionaryFixed::check_for_each(foreach_func, invert_first);
 }
 
-std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::dict_traverse_extra(
+inline std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::dict_traverse_extra(
     Ref<Cell> dict, td::BitPtr key_buffer, int n, const traverse_func_t& traverse_node) const {
   int m = get_key_bits();
   while (true) {
@@ -2934,7 +2953,8 @@ std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::dict_traverse_ext
   }
 }
 
-std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::traverse_extra(td::BitPtr key_buffer, int key_len,
+inline std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::traverse_extra(
+    td::BitPtr key_buffer, int key_len,
                                                                               const traverse_func_t& traverse_node) {
   force_validate();
   if (key_len != get_key_bits() || is_empty()) {
@@ -2943,7 +2963,7 @@ std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::traverse_extra(td
   return dict_traverse_extra(get_root_cell(), key_buffer, key_len, traverse_node);
 }
 
-bool AugmentedDictionary::validate_check_extra(const AugmentedDictionary::foreach_extra_func_t& foreach_extra_func,
+inline bool AugmentedDictionary::validate_check_extra(const AugmentedDictionary::foreach_extra_func_t& foreach_extra_func,
                                                bool invert_first) {
   const AugmentationData& augm = aug;
   int key_len = get_key_bits();

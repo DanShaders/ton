@@ -51,7 +51,6 @@ set(TON_CRYPTO_CORE_SOURCE
   keccak/keccak.h
   keccak/keccak.cpp
 
-  vm/dict.cpp
   vm/cells/Cell.cpp
   vm/cells/CellBuilder.cpp
   vm/cells/CellHash.cpp
@@ -64,6 +63,7 @@ set(TON_CRYPTO_CORE_SOURCE
   vm/cells/MerkleUpdate.cpp
 
   vm/dict.h
+  vm/dict.hpp
   vm/cells/Cell.h
   vm/cells/CellBuilder.h
   vm/cells/CellHash.h
