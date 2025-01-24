@@ -55,7 +55,6 @@ set(TON_CRYPTO_CORE_SOURCE
   vm/cells/Cell.cpp
   vm/cells/CellBuilder.cpp
   vm/cells/CellHash.cpp
-  vm/cells/CellSlice.cpp
   vm/cells/CellString.cpp
   vm/cells/CellTraits.cpp
   vm/cells/CellUsageTree.cpp
@@ -69,6 +68,7 @@ set(TON_CRYPTO_CORE_SOURCE
   vm/cells/CellBuilder.h
   vm/cells/CellHash.h
   vm/cells/CellSlice.h
+  vm/cells/CellSlice.inl
   vm/cells/CellString.h
   vm/cells/CellTraits.h
   vm/cells/CellUsageTree.h

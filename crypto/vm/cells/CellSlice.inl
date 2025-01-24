@@ -29,7 +29,7 @@ CellSlice::CellSlice(Ref<Cell>&& ref) : cell(std::move(ref)), bits_st(0), refs_s
 }
 */
 
-CellSlice::CellSlice(VirtualCell::LoadedCell loaded_cell)
+inline CellSlice::CellSlice(VirtualCell::LoadedCell loaded_cell)
     : virt(loaded_cell.virt)
     , cell(std::move(loaded_cell.data_cell))
     , tree_node(std::move(loaded_cell.tree_node))
@@ -40,11 +40,10 @@ CellSlice::CellSlice(VirtualCell::LoadedCell loaded_cell)
   init_bits_refs();
 }
 
-CellSlice::CellSlice() : bits_st(0), refs_st(0), bits_en(0), refs_en(0), ptr(0), zd(0) {
+inline CellSlice::CellSlice() : bits_st(0), refs_st(0), bits_en(0), refs_en(0), ptr(0), zd(0) {
 }
 
-namespace {
-Cell::LoadedCell load_cell_nothrow(const Ref<Cell>& ref) {
+inline Cell::LoadedCell load_cell_nothrow(const Ref<Cell>& ref) {
   auto res = ref->load_cell();
   if (res.is_ok()) {
     auto ld = res.move_as_ok();
@@ -54,7 +53,7 @@ Cell::LoadedCell load_cell_nothrow(const Ref<Cell>& ref) {
   return {};
 }
 
-Cell::LoadedCell load_cell_nothrow(const Ref<Cell>& ref, int mode) {
+inline Cell::LoadedCell load_cell_nothrow(const Ref<Cell>& ref, int mode) {
   auto res = ref->load_cell();
   if (res.is_ok()) {
     auto ld = res.move_as_ok();
@@ -66,19 +65,17 @@ Cell::LoadedCell load_cell_nothrow(const Ref<Cell>& ref, int mode) {
   return {};
 }
 
-}  // namespace
+inline CellSlice::CellSlice(NoVm, Ref<Cell> ref) : CellSlice(load_cell_nothrow(std::move(ref))) {
+}
+inline CellSlice::CellSlice(NoVmOrd, Ref<Cell> ref) : CellSlice(load_cell_nothrow(std::move(ref), 1)) {
+}
+inline CellSlice::CellSlice(NoVmSpec, Ref<Cell> ref) : CellSlice(load_cell_nothrow(std::move(ref), 2)) {
+}
+inline CellSlice::CellSlice(Ref<DataCell> ref) : CellSlice(VirtualCell::LoadedCell{std::move(ref), {}, {}}) {
+}
+inline CellSlice::CellSlice(const CellSlice& cs) = default;
 
-CellSlice::CellSlice(NoVm, Ref<Cell> ref) : CellSlice(load_cell_nothrow(std::move(ref))) {
-}
-CellSlice::CellSlice(NoVmOrd, Ref<Cell> ref) : CellSlice(load_cell_nothrow(std::move(ref), 1)) {
-}
-CellSlice::CellSlice(NoVmSpec, Ref<Cell> ref) : CellSlice(load_cell_nothrow(std::move(ref), 2)) {
-}
-CellSlice::CellSlice(Ref<DataCell> ref) : CellSlice(VirtualCell::LoadedCell{std::move(ref), {}, {}}) {
-}
-CellSlice::CellSlice(const CellSlice& cs) = default;
-
-bool CellSlice::load(VirtualCell::LoadedCell loaded_cell) {
+inline bool CellSlice::load(VirtualCell::LoadedCell loaded_cell) {
   virt = loaded_cell.virt;
   cell = std::move(loaded_cell.data_cell);
   tree_node = std::move(loaded_cell.tree_node);
@@ -90,16 +87,16 @@ bool CellSlice::load(VirtualCell::LoadedCell loaded_cell) {
   return cell.not_null();
 }
 
-bool CellSlice::load(NoVm, Ref<Cell> cell_ref) {
+inline bool CellSlice::load(NoVm, Ref<Cell> cell_ref) {
   return load(load_cell_nothrow(std::move(cell_ref)));
 }
-bool CellSlice::load(NoVmOrd, Ref<Cell> cell_ref) {
+inline bool CellSlice::load(NoVmOrd, Ref<Cell> cell_ref) {
   return load(load_cell_nothrow(std::move(cell_ref), 1));
 }
-bool CellSlice::load(NoVmSpec, Ref<Cell> cell_ref) {
+inline bool CellSlice::load(NoVmSpec, Ref<Cell> cell_ref) {
   return load(load_cell_nothrow(std::move(cell_ref), 2));
 }
-bool CellSlice::load(Ref<DataCell> dc_ref) {
+inline bool CellSlice::load(Ref<DataCell> dc_ref) {
   return load(VirtualCell::LoadedCell{std::move(dc_ref), {}, {}});
 }
 
@@ -124,7 +121,8 @@ CellSlice::CellSlice(Ref<DataCell> dc_ref, unsigned _bits_en, unsigned _refs_en,
 }
 */
 
-CellSlice::CellSlice(const CellSlice& cs, unsigned _bits_en, unsigned _refs_en, unsigned _bits_st, unsigned _refs_st)
+inline CellSlice::CellSlice(const CellSlice& cs, unsigned _bits_en, unsigned _refs_en, unsigned _bits_st,
+                            unsigned _refs_st)
     : virt(cs.virt)
     , cell(cs.cell)
     , tree_node(cs.tree_node)
@@ -141,7 +139,7 @@ CellSlice::CellSlice(const CellSlice& cs, unsigned _bits_en, unsigned _refs_en, 
   }
 }
 
-CellSlice::CellSlice(const CellSlice& cs, unsigned _bits_en, unsigned _refs_en)
+inline CellSlice::CellSlice(const CellSlice& cs, unsigned _bits_en, unsigned _refs_en)
     : virt(cs.virt)
     , cell(cs.cell)
     , tree_node(cs.tree_node)
@@ -157,13 +155,13 @@ CellSlice::CellSlice(const CellSlice& cs, unsigned _bits_en, unsigned _refs_en)
   }
 }
 
-Cell::LoadedCell CellSlice::move_as_loaded_cell() {
+inline Cell::LoadedCell CellSlice::move_as_loaded_cell() {
   Cell::LoadedCell res{std::move(cell), std::move(virt), std::move(tree_node)};
   clear();
   return res;
 }
 
-void CellSlice::init_bits_refs() {
+inline void CellSlice::init_bits_refs() {
   if (cell.is_null()) {
     bits_en = 0;
     refs_en = 0;
@@ -176,7 +174,7 @@ void CellSlice::init_bits_refs() {
   }
 }
 
-void CellSlice::init_preload() const {
+inline void CellSlice::init_preload() const {
   if (bits_st >= bits_en) {
     zd = 0;
     return;
@@ -187,7 +185,7 @@ void CellSlice::init_preload() const {
   zd = std::min(t, size());
 }
 
-void CellSlice::clear() {
+inline void CellSlice::clear() {
   zd = 0;
   bits_en = bits_st = 0;
   refs_st = refs_en = 0;
@@ -202,11 +200,11 @@ void CellSlice::error() {
 }
 */
 
-unsigned CellSlice::get_cell_level() const {
+inline unsigned CellSlice::get_cell_level() const {
   return cell->get_level_mask().apply(virt.get_level()).get_level();
 }
 
-unsigned CellSlice::get_level() const {
+inline unsigned CellSlice::get_level() const {
   unsigned l = 0;
   for (unsigned i = refs_st; i < refs_en; i++) {
     auto res = cell->get_ref(i)->virtualize(child_virt());
@@ -219,7 +217,7 @@ unsigned CellSlice::get_level() const {
   return l;
 }
 
-Ref<Cell> CellSlice::get_base_cell() const {
+inline Ref<Cell> CellSlice::get_base_cell() const {
   if (cell.is_null()) {
     return {};
   }
@@ -230,7 +228,7 @@ Ref<Cell> CellSlice::get_base_cell() const {
   return res;
 }
 
-bool CellSlice::advance(unsigned bits) {
+inline bool CellSlice::advance(unsigned bits) {
   if (have(bits)) {
     bits_st += bits;
     if (zd <= bits) {  // NB: if we write here zd < bits, we obtain bug with z <<= 64
@@ -245,7 +243,7 @@ bool CellSlice::advance(unsigned bits) {
   }
 }
 
-bool CellSlice::advance_refs(unsigned refs = 1) {
+inline bool CellSlice::advance_refs(unsigned refs = 1) {
   if (have_refs(refs)) {
     refs_st += refs;
     return true;
@@ -254,7 +252,7 @@ bool CellSlice::advance_refs(unsigned refs = 1) {
   }
 }
 
-bool CellSlice::advance_ext(unsigned bits, unsigned refs) {
+inline bool CellSlice::advance_ext(unsigned bits, unsigned refs) {
   if (have(bits) && have_refs(refs)) {
     refs_st += refs;
     return advance(bits);
@@ -263,13 +261,13 @@ bool CellSlice::advance_ext(unsigned bits, unsigned refs) {
   }
 }
 
-bool CellSlice::advance_ext(unsigned bits_refs) {
+inline bool CellSlice::advance_ext(unsigned bits_refs) {
   return advance_ext(bits_refs >> 16, bits_refs & 0xffff);
 }
 
 // (PRIVATE)
 // assume: at least `req_bits` bits can be preloaded
-void CellSlice::preload_at_least(unsigned req_bits) const {
+inline void CellSlice::preload_at_least(unsigned req_bits) const {
   assert(req_bits <= 64 && have(req_bits) && ptr);
   if (req_bits <= zd) {
     return;
@@ -300,7 +298,7 @@ void CellSlice::preload_at_least(unsigned req_bits) const {
   }
 }
 
-int CellSlice::prefetch_octet() const {
+inline int CellSlice::prefetch_octet() const {
   if (!have(8)) {
     return -1;
   } else {
@@ -309,7 +307,7 @@ int CellSlice::prefetch_octet() const {
   }
 }
 
-int CellSlice::fetch_octet() {
+inline int CellSlice::fetch_octet() {
   if (!have(8)) {
     return -1;
   } else {
@@ -321,7 +319,7 @@ int CellSlice::fetch_octet() {
   }
 }
 
-unsigned long long CellSlice::fetch_ulong(unsigned bits) {
+inline unsigned long long CellSlice::fetch_ulong(unsigned bits) {
   if (!have(bits) || bits > 64) {
     return fetch_ulong_eof;
   } else if (!bits) {
@@ -342,7 +340,7 @@ unsigned long long CellSlice::fetch_ulong(unsigned bits) {
   }
 }
 
-unsigned long long CellSlice::prefetch_ulong(unsigned bits) const {
+inline unsigned long long CellSlice::prefetch_ulong(unsigned bits) const {
   if (!have(bits) || bits > 64) {
     return fetch_ulong_eof;
   } else if (!bits) {
@@ -353,7 +351,7 @@ unsigned long long CellSlice::prefetch_ulong(unsigned bits) const {
   }
 }
 
-unsigned long long CellSlice::prefetch_ulong_top(unsigned& bits) const {
+inline unsigned long long CellSlice::prefetch_ulong_top(unsigned& bits) const {
   if (bits > size()) {
     bits = size();
   }
@@ -364,7 +362,7 @@ unsigned long long CellSlice::prefetch_ulong_top(unsigned& bits) const {
   return z;
 }
 
-long long CellSlice::fetch_long(unsigned bits) {
+inline long long CellSlice::fetch_long(unsigned bits) {
   if (!have(bits) || bits > 64) {
     return fetch_long_eof;
   } else if (!bits) {
@@ -385,7 +383,7 @@ long long CellSlice::fetch_long(unsigned bits) {
   }
 }
 
-long long CellSlice::prefetch_long(unsigned bits) const {
+inline long long CellSlice::prefetch_long(unsigned bits) const {
   if (!have(bits) || bits > 64) {
     return fetch_long_eof;
   } else if (!bits) {
@@ -396,7 +394,7 @@ long long CellSlice::prefetch_long(unsigned bits) const {
   }
 }
 
-bool CellSlice::fetch_long_bool(unsigned bits, long long& res) {
+inline bool CellSlice::fetch_long_bool(unsigned bits, long long& res) {
   if (bits > 64 || !have(bits)) {
     return false;
   }
@@ -404,7 +402,7 @@ bool CellSlice::fetch_long_bool(unsigned bits, long long& res) {
   return true;
 }
 
-bool CellSlice::prefetch_long_bool(unsigned bits, long long& res) const {
+inline bool CellSlice::prefetch_long_bool(unsigned bits, long long& res) const {
   if (bits > 64 || !have(bits)) {
     return false;
   }
@@ -412,7 +410,7 @@ bool CellSlice::prefetch_long_bool(unsigned bits, long long& res) const {
   return true;
 }
 
-bool CellSlice::fetch_ulong_bool(unsigned bits, unsigned long long& res) {
+inline bool CellSlice::fetch_ulong_bool(unsigned bits, unsigned long long& res) {
   if (bits > 64 || !have(bits)) {
     return false;
   }
@@ -420,7 +418,7 @@ bool CellSlice::fetch_ulong_bool(unsigned bits, unsigned long long& res) {
   return true;
 }
 
-bool CellSlice::prefetch_ulong_bool(unsigned bits, unsigned long long& res) const {
+inline bool CellSlice::prefetch_ulong_bool(unsigned bits, unsigned long long& res) const {
   if (bits > 64 || !have(bits)) {
     return false;
   }
@@ -428,7 +426,7 @@ bool CellSlice::prefetch_ulong_bool(unsigned bits, unsigned long long& res) cons
   return true;
 }
 
-bool CellSlice::fetch_bool_to(bool& res) {
+inline bool CellSlice::fetch_bool_to(bool& res) {
   if (!have(1)) {
     return false;
   } else {
@@ -437,7 +435,7 @@ bool CellSlice::fetch_bool_to(bool& res) {
   }
 }
 
-bool CellSlice::fetch_bool_to(int& res) {
+inline bool CellSlice::fetch_bool_to(int& res) {
   if (!have(1)) {
     return false;
   } else {
@@ -446,7 +444,7 @@ bool CellSlice::fetch_bool_to(int& res) {
   }
 }
 
-bool CellSlice::fetch_bool_to(int& res, int mask) {
+inline bool CellSlice::fetch_bool_to(int& res, int mask) {
   if (!have(1)) {
     return false;
   } else if (fetch_ulong(1)) {
@@ -457,7 +455,7 @@ bool CellSlice::fetch_bool_to(int& res, int mask) {
   return true;
 }
 
-bool CellSlice::fetch_uint_to(unsigned bits, unsigned long long& res) {
+inline bool CellSlice::fetch_uint_to(unsigned bits, unsigned long long& res) {
   if (bits > 64 || !have(bits)) {
     return false;
   } else {
@@ -466,7 +464,7 @@ bool CellSlice::fetch_uint_to(unsigned bits, unsigned long long& res) {
   }
 }
 
-bool CellSlice::fetch_uint_to(unsigned bits, long long& res) {
+inline bool CellSlice::fetch_uint_to(unsigned bits, long long& res) {
   if (bits > 64 || !have(bits)) {
     return false;
   } else {
@@ -475,7 +473,7 @@ bool CellSlice::fetch_uint_to(unsigned bits, long long& res) {
   }
 }
 
-bool CellSlice::fetch_uint_to(unsigned bits, unsigned long& res) {
+inline bool CellSlice::fetch_uint_to(unsigned bits, unsigned long& res) {
   if (bits > 8 * sizeof(unsigned long) || !have(bits)) {
     return false;
   } else {
@@ -484,7 +482,7 @@ bool CellSlice::fetch_uint_to(unsigned bits, unsigned long& res) {
   }
 }
 
-bool CellSlice::fetch_uint_to(unsigned bits, long& res) {
+inline bool CellSlice::fetch_uint_to(unsigned bits, long& res) {
   if (bits > 8 * sizeof(long) || !have(bits)) {
     return false;
   } else {
@@ -493,7 +491,7 @@ bool CellSlice::fetch_uint_to(unsigned bits, long& res) {
   }
 }
 
-bool CellSlice::fetch_uint_to(unsigned bits, unsigned& res) {
+inline bool CellSlice::fetch_uint_to(unsigned bits, unsigned& res) {
   if (bits > 32 || !have(bits)) {
     return false;
   } else {
@@ -502,7 +500,7 @@ bool CellSlice::fetch_uint_to(unsigned bits, unsigned& res) {
   }
 }
 
-bool CellSlice::fetch_uint_to(unsigned bits, int& res) {
+inline bool CellSlice::fetch_uint_to(unsigned bits, int& res) {
   if (bits > 32 || !have(bits)) {
     return false;
   } else {
@@ -511,7 +509,7 @@ bool CellSlice::fetch_uint_to(unsigned bits, int& res) {
   }
 }
 
-bool CellSlice::fetch_int_to(unsigned bits, long long& res) {
+inline bool CellSlice::fetch_int_to(unsigned bits, long long& res) {
   if (bits > 64 || !have(bits)) {
     return false;
   } else {
@@ -520,7 +518,7 @@ bool CellSlice::fetch_int_to(unsigned bits, long long& res) {
   }
 }
 
-bool CellSlice::fetch_int_to(unsigned bits, int& res) {
+inline bool CellSlice::fetch_int_to(unsigned bits, int& res) {
   if (bits > 32 || !have(bits)) {
     return false;
   } else {
@@ -529,7 +527,7 @@ bool CellSlice::fetch_int_to(unsigned bits, int& res) {
   }
 }
 
-bool CellSlice::fetch_uint_less(unsigned upper_bound, int& res) {
+inline bool CellSlice::fetch_uint_less(unsigned upper_bound, int& res) {
   unsigned bits = 32 - td::count_leading_zeroes32(upper_bound - 1);
   if (!upper_bound || bits > 31 || !have(bits)) {
     return false;
@@ -539,7 +537,7 @@ bool CellSlice::fetch_uint_less(unsigned upper_bound, int& res) {
   }
 }
 
-bool CellSlice::fetch_uint_less(unsigned upper_bound, unsigned& res) {
+inline bool CellSlice::fetch_uint_less(unsigned upper_bound, unsigned& res) {
   unsigned bits = 32 - td::count_leading_zeroes32(upper_bound - 1);
   if (!upper_bound || bits > 32 || !have(bits)) {
     return false;
@@ -549,7 +547,7 @@ bool CellSlice::fetch_uint_less(unsigned upper_bound, unsigned& res) {
   }
 }
 
-bool CellSlice::fetch_uint_leq(unsigned upper_bound, int& res) {
+inline bool CellSlice::fetch_uint_leq(unsigned upper_bound, int& res) {
   unsigned bits = 32 - td::count_leading_zeroes32(upper_bound);
   if (bits > 31 || !have(bits)) {
     return false;
@@ -559,7 +557,7 @@ bool CellSlice::fetch_uint_leq(unsigned upper_bound, int& res) {
   }
 }
 
-bool CellSlice::fetch_uint_leq(unsigned upper_bound, unsigned& res) {
+inline bool CellSlice::fetch_uint_leq(unsigned upper_bound, unsigned& res) {
   unsigned bits = 32 - td::count_leading_zeroes32(upper_bound);
   if (bits > 32 || !have(bits)) {
     return false;
@@ -569,7 +567,7 @@ bool CellSlice::fetch_uint_leq(unsigned upper_bound, unsigned& res) {
   }
 }
 
-int CellSlice::bselect(unsigned bits, unsigned long long mask) const {
+inline int CellSlice::bselect(unsigned bits, unsigned long long mask) const {
   if (bits > 6 || !have(bits)) {
     return -1;
   } else {
@@ -578,7 +576,7 @@ int CellSlice::bselect(unsigned bits, unsigned long long mask) const {
   }
 }
 
-int CellSlice::bselect_ext(unsigned bits, unsigned long long mask) const {
+inline int CellSlice::bselect_ext(unsigned bits, unsigned long long mask) const {
   if (bits > 6) {
     return -1;
   }
@@ -591,7 +589,7 @@ int CellSlice::bselect_ext(unsigned bits, unsigned long long mask) const {
   return td::count_bits64(mask & ((2ULL << n) - 1)) - 1;
 }
 
-td::RefInt256 CellSlice::fetch_int256(unsigned bits, bool sgnd) {
+inline td::RefInt256 CellSlice::fetch_int256(unsigned bits, bool sgnd) {
   if (!have(bits)) {
     return {};
   } else if (bits < td::BigInt256::word_shift) {
@@ -604,7 +602,7 @@ td::RefInt256 CellSlice::fetch_int256(unsigned bits, bool sgnd) {
   }
 }
 
-td::RefInt256 CellSlice::prefetch_int256(unsigned bits, bool sgnd) const {
+inline td::RefInt256 CellSlice::prefetch_int256(unsigned bits, bool sgnd) const {
   if (!have(bits)) {
     return {};
   } else if (bits < td::BigInt256::word_shift) {
@@ -616,7 +614,7 @@ td::RefInt256 CellSlice::prefetch_int256(unsigned bits, bool sgnd) const {
   }
 }
 
-td::RefInt256 CellSlice::prefetch_int256_zeroext(unsigned bits, bool sgnd) const {
+inline td::RefInt256 CellSlice::prefetch_int256_zeroext(unsigned bits, bool sgnd) const {
   if (bits > 256u + sgnd) {
     return td::make_refint();
   } else {
@@ -634,7 +632,7 @@ td::RefInt256 CellSlice::prefetch_int256_zeroext(unsigned bits, bool sgnd) const
   }
 }
 
-td::BitSlice CellSlice::fetch_bits(unsigned bits) {
+inline td::BitSlice CellSlice::fetch_bits(unsigned bits) {
   if (!have(bits)) {
     return {};
   } else {
@@ -644,7 +642,7 @@ td::BitSlice CellSlice::fetch_bits(unsigned bits) {
   }
 }
 
-td::BitSlice CellSlice::prefetch_bits(unsigned bits) const {
+inline td::BitSlice CellSlice::prefetch_bits(unsigned bits) const {
   if (!have(bits)) {
     return {};
   } else {
@@ -652,7 +650,7 @@ td::BitSlice CellSlice::prefetch_bits(unsigned bits) const {
   }
 }
 
-bool CellSlice::fetch_bits_to(td::BitPtr buffer, unsigned bits) {
+inline bool CellSlice::fetch_bits_to(td::BitPtr buffer, unsigned bits) {
   if (!have(bits)) {
     return false;
   }
@@ -660,7 +658,7 @@ bool CellSlice::fetch_bits_to(td::BitPtr buffer, unsigned bits) {
   return true;
 }
 
-bool CellSlice::prefetch_bits_to(td::BitPtr buffer, unsigned bits) const {
+inline bool CellSlice::prefetch_bits_to(td::BitPtr buffer, unsigned bits) const {
   if (!have(bits)) {
     return false;
   }
@@ -668,7 +666,7 @@ bool CellSlice::prefetch_bits_to(td::BitPtr buffer, unsigned bits) const {
   return true;
 }
 
-td::Ref<CellSlice> CellSlice::fetch_subslice(unsigned bits, unsigned refs) {
+inline td::Ref<CellSlice> CellSlice::fetch_subslice(unsigned bits, unsigned refs) {
   if (!have(bits, refs)) {
     return {};
   } else {
@@ -679,7 +677,7 @@ td::Ref<CellSlice> CellSlice::fetch_subslice(unsigned bits, unsigned refs) {
   }
 }
 
-td::Ref<CellSlice> CellSlice::prefetch_subslice(unsigned bits, unsigned refs) const {
+inline td::Ref<CellSlice> CellSlice::prefetch_subslice(unsigned bits, unsigned refs) const {
   if (!have(bits, refs)) {
     return {};
   } else {
@@ -687,15 +685,15 @@ td::Ref<CellSlice> CellSlice::prefetch_subslice(unsigned bits, unsigned refs) co
   }
 }
 
-td::Ref<CellSlice> CellSlice::fetch_subslice_ext(unsigned size) {
+inline td::Ref<CellSlice> CellSlice::fetch_subslice_ext(unsigned size) {
   return fetch_subslice(size & 0xffff, size >> 16);
 }
 
-td::Ref<CellSlice> CellSlice::prefetch_subslice_ext(unsigned size) const {
+inline td::Ref<CellSlice> CellSlice::prefetch_subslice_ext(unsigned size) const {
   return prefetch_subslice(size & 0xffff, size >> 16);
 }
 
-td::Ref<td::BitString> CellSlice::prefetch_bitstring(unsigned bits) const {
+inline td::Ref<td::BitString> CellSlice::prefetch_bitstring(unsigned bits) const {
   if (!have(bits)) {
     return {};
   } else {
@@ -703,7 +701,7 @@ td::Ref<td::BitString> CellSlice::prefetch_bitstring(unsigned bits) const {
   }
 }
 
-td::Ref<td::BitString> CellSlice::fetch_bitstring(unsigned bits) {
+inline td::Ref<td::BitString> CellSlice::fetch_bitstring(unsigned bits) {
   if (!have(bits)) {
     return {};
   } else {
@@ -711,7 +709,7 @@ td::Ref<td::BitString> CellSlice::fetch_bitstring(unsigned bits) {
   }
 }
 
-bool CellSlice::prefetch_bytes(unsigned char* buffer, unsigned bytes) const {
+inline bool CellSlice::prefetch_bytes(unsigned char* buffer, unsigned bytes) const {
   if (!have(bytes * 8)) {
     return false;
   } else {
@@ -720,11 +718,11 @@ bool CellSlice::prefetch_bytes(unsigned char* buffer, unsigned bytes) const {
   }
 }
 
-bool CellSlice::fetch_bytes(td::MutableSlice slice) {
+inline bool CellSlice::fetch_bytes(td::MutableSlice slice) {
   return fetch_bytes(slice.ubegin(), td::narrow_cast<unsigned>(slice.size()));
 }
 
-bool CellSlice::fetch_bytes(unsigned char* buffer, unsigned bytes) {
+inline bool CellSlice::fetch_bytes(unsigned char* buffer, unsigned bytes) {
   if (prefetch_bytes(buffer, bytes)) {
     advance(bytes * 8);
     return true;
@@ -733,11 +731,11 @@ bool CellSlice::fetch_bytes(unsigned char* buffer, unsigned bytes) {
   }
 }
 
-bool CellSlice::prefetch_bytes(td::MutableSlice slice) const {
+inline bool CellSlice::prefetch_bytes(td::MutableSlice slice) const {
   return prefetch_bytes(slice.ubegin(), td::narrow_cast<unsigned>(slice.size()));
 }
 
-Ref<Cell> CellSlice::prefetch_ref(unsigned offset) const {
+inline Ref<Cell> CellSlice::prefetch_ref(unsigned offset) const {
   if (offset < size_refs()) {
     auto ref_id = refs_st + offset;
     auto res = cell->get_ref(ref_id)->virtualize(child_virt());
@@ -750,7 +748,7 @@ Ref<Cell> CellSlice::prefetch_ref(unsigned offset) const {
   }
 }
 
-bool CellSlice::prefetch_maybe_ref(Ref<vm::Cell>& res) const {
+inline bool CellSlice::prefetch_maybe_ref(Ref<vm::Cell>& res) const {
   auto z = prefetch_ulong(1);
   if (!z) {
     res.clear();
@@ -760,7 +758,7 @@ bool CellSlice::prefetch_maybe_ref(Ref<vm::Cell>& res) const {
   }
 }
 
-bool CellSlice::fetch_maybe_ref(Ref<vm::Cell>& res) {
+inline bool CellSlice::fetch_maybe_ref(Ref<vm::Cell>& res) {
   auto z = prefetch_ulong(1);
   if (!z) {
     res.clear();
@@ -770,7 +768,7 @@ bool CellSlice::fetch_maybe_ref(Ref<vm::Cell>& res) {
   }
 }
 
-td::uint16 CellSlice::get_depth() const {
+inline td::uint16 CellSlice::get_depth() const {
   int d = 0;
   for (unsigned i = 0; i < size_refs(); ++i) {
     d = std::max(d, prefetch_ref(i)->get_depth() + 1);
@@ -778,19 +776,19 @@ td::uint16 CellSlice::get_depth() const {
   return static_cast<td::uint16>(d);
 }
 
-bool CellSlice::begins_with(unsigned bits, unsigned long long value) const {
+inline bool CellSlice::begins_with(unsigned bits, unsigned long long value) const {
   return have(bits) && !((prefetch_ulong(bits) ^ value) & ((1ULL << bits) - 1));
 }
 
-bool CellSlice::begins_with(unsigned long long value) const {
+inline bool CellSlice::begins_with(unsigned long long value) const {
   return begins_with(63 - td::count_leading_zeroes_non_zero64(value), value);
 }
 
-bool CellSlice::begins_with_skip(unsigned long long value) {
+inline bool CellSlice::begins_with_skip(unsigned long long value) {
   return begins_with_skip(63 - td::count_leading_zeroes_non_zero64(value), value);
 }
 
-bool CellSlice::only_first(unsigned bits, unsigned refs) {
+inline bool CellSlice::only_first(unsigned bits, unsigned refs) {
   if (!have(bits, refs)) {
     return false;
   }
@@ -799,11 +797,11 @@ bool CellSlice::only_first(unsigned bits, unsigned refs) {
   return true;
 }
 
-bool CellSlice::only_ext(unsigned size) {
+inline bool CellSlice::only_ext(unsigned size) {
   return only_first(size & 0xffff, size >> 16);
 }
 
-bool CellSlice::skip_first(unsigned bits, unsigned refs) {
+inline bool CellSlice::skip_first(unsigned bits, unsigned refs) {
   if (!have(bits, refs)) {
     return false;
   }
@@ -811,11 +809,11 @@ bool CellSlice::skip_first(unsigned bits, unsigned refs) {
   return advance(bits);
 }
 
-bool CellSlice::skip_ext(unsigned size) {
+inline bool CellSlice::skip_ext(unsigned size) {
   return skip_first(size & 0xffff, size >> 16);
 }
 
-bool CellSlice::only_last(unsigned bits, unsigned refs) {
+inline bool CellSlice::only_last(unsigned bits, unsigned refs) {
   if (!have(bits, refs)) {
     return false;
   }
@@ -823,7 +821,7 @@ bool CellSlice::only_last(unsigned bits, unsigned refs) {
   return advance(size() - bits);
 }
 
-bool CellSlice::skip_last(unsigned bits, unsigned refs) {
+inline bool CellSlice::skip_last(unsigned bits, unsigned refs) {
   if (!have(bits, refs)) {
     return false;
   }
@@ -832,15 +830,15 @@ bool CellSlice::skip_last(unsigned bits, unsigned refs) {
   return true;
 }
 
-bool CellSlice::cut_tail(const CellSlice& tail_cs) {
+inline bool CellSlice::cut_tail(const CellSlice& tail_cs) {
   return skip_last(tail_cs.size(), tail_cs.size_refs());
 }
 
-int CellSlice::lex_cmp(const CellSlice& cs2) const {
+inline int CellSlice::lex_cmp(const CellSlice& cs2) const {
   return td::bitstring::bits_lexcmp(data(), bits_st, size(), cs2.data(), cs2.bits_st, cs2.size());
 }
 
-bool CellSlice::contents_equal(const CellSlice& cs2) const {
+inline bool CellSlice::contents_equal(const CellSlice& cs2) const {
   if (size() != cs2.size() || size_refs() != cs2.size_refs()) {
     return false;
   }
@@ -855,11 +853,11 @@ bool CellSlice::contents_equal(const CellSlice& cs2) const {
   return true;
 }
 
-bool CellSlice::is_prefix_of(const CellSlice& cs2) const {
+inline bool CellSlice::is_prefix_of(const CellSlice& cs2) const {
   return size() <= cs2.size() && !td::bitstring::bits_memcmp(data_bits(), cs2.data_bits(), size(), 0);
 }
 
-bool CellSlice::is_prefix_of(td::ConstBitPtr bs, unsigned len) const {
+inline bool CellSlice::is_prefix_of(td::ConstBitPtr bs, unsigned len) const {
   return size() <= len && !td::bitstring::bits_memcmp(data_bits(), bs, size(), 0);
 }
 
@@ -871,34 +869,34 @@ bool CellSlice::is_prefix_of(const td::BitSlice& bs, unsigned offs, unsigned max
 }
 */
 
-bool CellSlice::is_suffix_of(const CellSlice& cs2) const {
+inline bool CellSlice::is_suffix_of(const CellSlice& cs2) const {
   return size() <= cs2.size() &&
          !td::bitstring::bits_memcmp(data_bits(), cs2.data_bits() + (cs2.size() - size()), size(), 0);
 }
 
-bool CellSlice::has_prefix(const CellSlice& cs2) const {
+inline bool CellSlice::has_prefix(const CellSlice& cs2) const {
   return size() >= cs2.size() && !td::bitstring::bits_memcmp(data_bits(), cs2.data_bits(), cs2.size(), 0);
 }
 
-bool CellSlice::has_prefix(td::ConstBitPtr bs, unsigned len) const {
+inline bool CellSlice::has_prefix(td::ConstBitPtr bs, unsigned len) const {
   return size() >= len && !td::bitstring::bits_memcmp(data_bits(), bs, len, 0);
 }
 
-bool CellSlice::has_suffix(const CellSlice& cs2) const {
+inline bool CellSlice::has_suffix(const CellSlice& cs2) const {
   return size() >= cs2.size() &&
          !td::bitstring::bits_memcmp(data_bits() + (size() - cs2.size()), cs2.data_bits(), cs2.size(), 0);
 }
 
-bool CellSlice::is_proper_prefix_of(const CellSlice& cs2) const {
+inline bool CellSlice::is_proper_prefix_of(const CellSlice& cs2) const {
   return size() < cs2.size() && !td::bitstring::bits_memcmp(data_bits(), cs2.data_bits(), size(), 0);
 }
 
-bool CellSlice::is_proper_suffix_of(const CellSlice& cs2) const {
+inline bool CellSlice::is_proper_suffix_of(const CellSlice& cs2) const {
   return size() < cs2.size() &&
          !td::bitstring::bits_memcmp(data_bits(), cs2.data_bits() + (cs2.size() - size()), size(), 0);
 }
 
-int CellSlice::common_prefix_len(const CellSlice& cs2) const {
+inline int CellSlice::common_prefix_len(const CellSlice& cs2) const {
   std::size_t same_upto = 0;
   td::bitstring::bits_memcmp(data_bits(), cs2.data_bits(), std::min(size(), cs2.size()), &same_upto);
   return (int)same_upto;
@@ -910,21 +908,21 @@ int CellSlice::common_prefix_len(const td::BitSlice& bs, unsigned offs, unsigned
 }
 */
 
-int CellSlice::common_prefix_len(td::ConstBitPtr bs, unsigned len) const {
+inline int CellSlice::common_prefix_len(td::ConstBitPtr bs, unsigned len) const {
   std::size_t same_upto = 0;
   td::bitstring::bits_memcmp(data_bits(), bs, std::min(size(), len), &same_upto);
   return (int)same_upto;
 }
 
-int CellSlice::count_leading(bool bit) const {
+inline int CellSlice::count_leading(bool bit) const {
   return (int)td::bitstring::bits_memscan(data_bits(), size(), bit);
 }
 
-int CellSlice::count_trailing(bool bit) const {
+inline int CellSlice::count_trailing(bool bit) const {
   return (int)td::bitstring::bits_memscan_rev(data_bits(), size(), bit);
 }
 
-int CellSlice::remove_trailing() {
+inline int CellSlice::remove_trailing() {
   if (bits_st == bits_en) {
     return 0;
   }
@@ -939,7 +937,7 @@ int CellSlice::remove_trailing() {
   return trailing;
 }
 
-bool cell_builder_add_slice_bool(CellBuilder& cb, const CellSlice& cs) {
+inline bool cell_builder_add_slice_bool(CellBuilder& cb, const CellSlice& cs) {
   if (!cb.can_extend_by(cs.size(), cs.size_refs())) {
     return false;
   }
@@ -950,11 +948,11 @@ bool cell_builder_add_slice_bool(CellBuilder& cb, const CellSlice& cs) {
   return true;
 }
 
-CellBuilder& cell_builder_add_slice(CellBuilder& cb, const CellSlice& cs) {
+inline CellBuilder& cell_builder_add_slice(CellBuilder& cb, const CellSlice& cs) {
   return cb.ensure_pass(cell_builder_add_slice_bool(cb, cs));
 }
 
-void CellSlice::dump(std::ostream& os, int level, bool endl) const {
+inline void CellSlice::dump(std::ostream& os, int level, bool endl) const {
   os << "Cell";
   if (level > 0) {
     os << "{" << cell->to_hex() << "}";
@@ -972,7 +970,7 @@ void CellSlice::dump(std::ostream& os, int level, bool endl) const {
   }
 }
 
-void CellSlice::dump_hex(std::ostream& os, int mode, bool endl) const {
+inline void CellSlice::dump_hex(std::ostream& os, int mode, bool endl) const {
   os << "x" << as_bitslice().to_hex();
   if (have_refs() && (mode & 1)) {
     os << "," << size_refs();
@@ -982,7 +980,7 @@ void CellSlice::dump_hex(std::ostream& os, int mode, bool endl) const {
   }
 }
 
-bool CellSlice::print_rec(std::ostream& os, int* limit, int indent) const {
+inline bool CellSlice::print_rec(std::ostream& os, int* limit, int indent) const {
   for (int i = 0; i < indent; i++) {
     os << ' ';
   }
@@ -1008,27 +1006,27 @@ bool CellSlice::print_rec(std::ostream& os, int* limit, int indent) const {
   return true;
 }
 
-bool CellSlice::print_rec(std::ostream& os, int indent) const {
+inline bool CellSlice::print_rec(std::ostream& os, int indent) const {
   int limit = default_recursive_print_limit;
   return print_rec(os, &limit, indent);
 }
 
-bool CellSlice::print_rec(int limit, std::ostream& os, int indent) const {
+inline bool CellSlice::print_rec(int limit, std::ostream& os, int indent) const {
   return print_rec(os, &limit, indent);
 }
 
-td::StringBuilder& operator<<(td::StringBuilder& sb, const CellSlice& cs) {
+inline td::StringBuilder& operator<<(td::StringBuilder& sb, const CellSlice& cs) {
   std::ostringstream os;
   cs.dump_hex(os, 1, false);
   return sb << os.str();
 }
 
-std::ostream& operator<<(std::ostream& os, CellSlice cs) {
+inline std::ostream& operator<<(std::ostream& os, CellSlice cs) {
   cs.dump_hex(os, 1, false);
   return os;
 }
 
-std::ostream& operator<<(std::ostream& os, Ref<CellSlice> cs_ref) {
+inline std::ostream& operator<<(std::ostream& os, Ref<CellSlice> cs_ref) {
   if (cs_ref.is_null()) {
     os << "(null)";
   } else {
@@ -1042,7 +1040,7 @@ std::ostream& operator<<(std::ostream& os, Ref<CellSlice> cs_ref) {
 
 // If can_be_special is not null, then it is allowed to load special cell
 // Flag whether loaded cell is actually special will be stored into can_be_special
-VirtualCell::LoadedCell load_cell_slice_impl(Ref<Cell> cell, bool* can_be_special) {
+inline VirtualCell::LoadedCell load_cell_slice_impl(Ref<Cell> cell, bool* can_be_special) {
   auto* vm_state_interface = VmStateInterface::get();
   bool library_loaded = false;
   while (true) {
@@ -1092,48 +1090,48 @@ VirtualCell::LoadedCell load_cell_slice_impl(Ref<Cell> cell, bool* can_be_specia
   }
 }
 
-CellSlice load_cell_slice(const Ref<Cell>& cell) {
+inline CellSlice load_cell_slice(const Ref<Cell>& cell) {
   return CellSlice{load_cell_slice_impl(cell, nullptr)};
 }
 
-CellSlice load_cell_slice_special(const Ref<Cell>& cell, bool& special) {
+inline CellSlice load_cell_slice_special(const Ref<Cell>& cell, bool& special) {
   return CellSlice{load_cell_slice_impl(cell, &special)};
 }
 
-Ref<CellSlice> load_cell_slice_ref(const Ref<Cell>& cell) {
+inline Ref<CellSlice> load_cell_slice_ref(const Ref<Cell>& cell) {
   return Ref<CellSlice>{true, CellSlice(load_cell_slice_impl(cell, nullptr))};
 }
 
-Ref<CellSlice> load_cell_slice_ref_special(const Ref<Cell>& cell, bool& special) {
+inline Ref<CellSlice> load_cell_slice_ref_special(const Ref<Cell>& cell, bool& special) {
   return Ref<CellSlice>{true, CellSlice(load_cell_slice_impl(cell, &special))};
 }
 
-CellSlice load_cell_slice(Ref<Cell> &&cell) {
+inline CellSlice load_cell_slice(Ref<Cell>&& cell) {
   return CellSlice{load_cell_slice_impl(std::move(cell), nullptr)};
 }
 
-CellSlice load_cell_slice_special(Ref<Cell>&& cell, bool& special) {
+inline CellSlice load_cell_slice_special(Ref<Cell>&& cell, bool& special) {
   return CellSlice{load_cell_slice_impl(std::move(cell), &special)};
 }
 
-Ref<CellSlice> load_cell_slice_ref(Ref<Cell>&& cell) {
+inline Ref<CellSlice> load_cell_slice_ref(Ref<Cell>&& cell) {
   return Ref<CellSlice>{true, CellSlice(load_cell_slice_impl(std::move(cell), nullptr))};
 }
 
-Ref<CellSlice> load_cell_slice_ref_special(Ref<Cell>&& cell, bool& special) {
+inline Ref<CellSlice> load_cell_slice_ref_special(Ref<Cell>&& cell, bool& special) {
   return Ref<CellSlice>{true, CellSlice(load_cell_slice_impl(std::move(cell), &special))};
 }
 
-void print_load_cell(std::ostream& os, Ref<Cell> cell, int indent) {
+inline void print_load_cell(std::ostream& os, Ref<Cell> cell, int indent) {
   auto cs = load_cell_slice(cell);
   cs.print_rec(os, indent);
 }
 
-bool CellSlice::load(Ref<Cell> cell) {
+inline bool CellSlice::load(Ref<Cell> cell) {
   return load(load_cell_slice_impl(std::move(cell), nullptr));
 }
 
-bool CellSlice::load_ord(Ref<Cell> cell) {
+inline bool CellSlice::load_ord(Ref<Cell> cell) {
   return load(load_cell_slice_impl(std::move(cell), nullptr));
 }
 

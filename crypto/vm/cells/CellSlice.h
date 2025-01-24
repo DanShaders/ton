@@ -365,3 +365,5 @@ Ref<CellSlice> load_cell_slice_ref_special(Ref<Cell>&& cell, bool& is_special);
 void print_load_cell(std::ostream& os, Ref<Cell> cell, int indent = 0);
 
 }  // namespace vm
+
+#include "CellSlice.inl"
