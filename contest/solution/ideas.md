@@ -9,7 +9,7 @@
 ## ? Everything "loopy"
 
 ## ? Everything "map"y
-into unordered_map.
+into unordered_map. Seems to not improve performance significantly.
 Or maybe even to third-party map data structures:
 - https://github.com/martinus/unordered_dense
 
@@ -51,6 +51,11 @@ bBad:
 	processBadBCase2
 	return
 ```
+
+Replace `  return reject`
+by `  [[unlikely]] return reject`
+doesn't improve performance (at least substantially);
+
 
 ## Optimize common primitives
 

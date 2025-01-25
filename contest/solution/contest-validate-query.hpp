@@ -10,8 +10,45 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <unordered_map>
 #include "common/global-version.h"
 #include "tonlib/tonlib/ExtClient.h"
+
+#include "multithreading-guard.hpp"
+
+
+// For std::unordered_map
+// From: https://stackoverflow.com/a/17017281
+template <>
+struct std::hash<ton::RootHash>
+{
+  std::size_t operator()(const ton::RootHash& k) const
+  {
+    auto data = k.data();
+    std::size_t h = 0;
+
+    for (int i = 0; i < 256/8; i++)
+      h = h * 1000007 + data[i];
+    return h;
+  }
+};
+
+
+template <>
+struct std::hash<std::pair<ton::StdSmcAddress, td::uint64>>
+{
+  std::size_t operator()(const std::pair<ton::StdSmcAddress, td::uint64>& k) const
+  {
+    return std::hash<ton::StdSmcAddress>()(k.first) * 1000000007 + k.second;
+  }
+};
+// ??TODO: reverse unordered_map?
+
+
+
+
+
+
 
 namespace solution {
 
@@ -81,6 +118,8 @@ inline ErrorCtxSet ErrorCtx::set_guard(std::vector<std::string> str_list) {
   return ErrorCtxSet(*this, std::move(str_list));
 }
 
+class MultithreadingGuard;
+
 class ContestValidateQuery : public td::actor::Actor {
   static constexpr int supported_version() {
     return SUPPORTED_VERSION;
@@ -94,7 +133,8 @@ class ContestValidateQuery : public td::actor::Actor {
   ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice collated_data,
                        td::Promise<td::BufferSlice> promise);
 
- private:
+//  private: // !!TODO: reverse
+public:
   int verbosity{0};
   int pending{0};
   const ShardIdFull shard_;
@@ -131,7 +171,7 @@ class ContestValidateQuery : public td::actor::Actor {
 
   Ref<vm::Cell> block_root_;
   std::vector<Ref<vm::Cell>> collated_roots_;
-  std::map<RootHash, Ref<vm::Cell>> virt_roots_;
+  std::unordered_map<RootHash, Ref<vm::Cell>> virt_roots_;
   std::unique_ptr<vm::Dictionary> top_shard_descr_dict_;
   block::gen::ExtraCollatedData::Record extra_collated_data_;
   bool have_extra_collated_data_ = false;
@@ -170,7 +210,7 @@ class ContestValidateQuery : public td::actor::Actor {
   td::RefInt256 masterchain_create_fee_, basechain_create_fee_;
 
   std::vector<block::McShardDescr> neighbors_;
-  std::map<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
+  std::unordered_map<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
 
   block::ShardState ps_;
   block::ShardState ns_;
@@ -178,7 +218,7 @@ class ContestValidateQuery : public td::actor::Actor {
   std::unique_ptr<vm::AugmentedDictionary> sibling_out_msg_queue_;
   std::shared_ptr<block::MsgProcessedUptoCollection> sibling_processed_upto_;
 
-  std::map<td::Bits256, int> block_create_count_;
+  std::unordered_map<td::Bits256, int> block_create_count_;
   unsigned block_create_total_{0};
 
   std::unique_ptr<vm::AugmentedDictionary> in_msg_dict_, out_msg_dict_, account_blocks_dict_;
@@ -192,8 +232,8 @@ class ContestValidateQuery : public td::actor::Actor {
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_proc_lt_;
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_emitted_lt_;
 
-  std::map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;
-  std::map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> new_dispatch_queue_messages_;
+  std::unordered_map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;
+  std::unordered_map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> new_dispatch_queue_messages_;
   std::set<StdSmcAddress> account_expected_defer_all_messages_;
   td::uint64 old_out_msg_queue_size_ = 0;
   bool out_msg_queue_size_known_ = false;
@@ -336,6 +376,21 @@ class ContestValidateQuery : public td::actor::Actor {
 
   bool store_master_ref(vm::CellBuilder& cb);
   bool build_state_update();
+
+ private:
+  int testIndex;
+  static int globalTestIndex;
+  int doesItCreateNewInstancePerTest = 0;
+
+  std::thread::id main_thread_id = std::this_thread::get_id();
+  bool in_main_thread();
+
+  bool in_multithreading = false;
+  void enter_multithreading();
+  void leave_multithreading();
+
+  friend class MultithreadingGuard;
 };
+
 
 }  // namespace solution

@@ -12,6 +12,13 @@ void run_contest_solution(ton::BlockIdExt block_id, td::BufferSlice block_data, 
     return promise.set_error(td::Status::Error("failed to unpack block"));
   }
   TRY_RESULT_PROMISE(promise, res, vm::std_boc_serialize(rec.state_update));
-  td::actor::create_actor<solution::ContestValidateQuery>(
+
+  // sleep(2); 
+  // promise.set_error(td::Status::Error("Zhuk"));
+  // try {
+    td::actor::create_actor<solution::ContestValidateQuery>(
       "validate", block_id, std::move(block_data), std::move(colldated_data), std::move(promise)).release();
+  // } catch (...) {
+  //   LOG(ERROR) << "Luk";
+  // }
 }
