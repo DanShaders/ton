@@ -11,6 +11,8 @@
 #include <string>
 #include <map>
 #include <unordered_map>
+#include <mutex>
+
 #include "common/global-version.h"
 #include "tonlib/tonlib/ExtClient.h"
 
@@ -212,6 +214,7 @@ public:
   std::vector<block::McShardDescr> neighbors_;
   std::unordered_map<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
 
+  std::mutex ns_mutex_;
   block::ShardState ps_;
   block::ShardState ns_;
   bool processed_upto_updated_{false};
@@ -230,6 +233,7 @@ public:
   ton::Bits256 proc_hash_ = ton::Bits256::zero(), claimed_proc_hash_, min_enq_hash_;
 
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_proc_lt_;
+  std::mutex msg_proc_lt_mutex_;
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_emitted_lt_;
 
   std::unordered_map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;

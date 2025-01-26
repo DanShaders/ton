@@ -133,20 +133,20 @@ CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_i
 }
 
 CellUsageTree::NodeId CellUsageTree::create_node(NodeId parent) {
-  NodeId res = static_cast<NodeId>(nodes_.size());
+  // NodeId res = static_cast<NodeId>(nodes_.size());
+  // nodes_.emplace_back();
+  // nodes_.back().parent = parent;
 
-  // NodeId res;
-  // {
-  //   // std::lock_guard<std::mutex> g(mt);
-  //   res = static_cast<NodeId>(nodes_.size());
-  //   if (res >= 90000) {
-  //     LOG(ERROR) << "CellUsageTree reached 90 000 elements!"; 
-  //   }
-  //   // CellUsageTree::Node& newNode = nodes_.emplace_back();
-  //   // newNode.parent = parent;
-  // }
-  nodes_.emplace_back();
-  nodes_.back().parent = parent;
+  NodeId res;
+  {
+    std::lock_guard<std::mutex> g(mt);
+    res = static_cast<NodeId>(nodes_.size());
+    if (res >= 160000) {
+      LOG(ERROR) << "CellUsageTree reached 160 000 elements!"; 
+    }
+    CellUsageTree::Node& newNode = nodes_.emplace_back();
+    newNode.parent = parent;
+  }
   return res;
 }
 

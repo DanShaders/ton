@@ -14,11 +14,11 @@ MultithreadingGuard::~MultithreadingGuard() {
 }
 
 void MultithreadingGuard::guard() {
-  LOG(ERROR) << name << ": MultithreadingGuard::guard obtained at thread " << render_thread_id(std::this_thread::get_id());
+  // LOG(ERROR) << name << ": MultithreadingGuard::guard obtained at thread " << render_thread_id(std::this_thread::get_id());
   cvq.enter_multithreading();
 }
 void MultithreadingGuard::release() {
-  LOG(ERROR) << name << ": MultithreadingGuard::release performed at thread " << render_thread_id(std::this_thread::get_id());
+  // LOG(ERROR) << name << ": MultithreadingGuard::release performed at thread " << render_thread_id(std::this_thread::get_id());
   cvq.leave_multithreading();
 }
 
