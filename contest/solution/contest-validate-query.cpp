@@ -17,9 +17,14 @@
 #include <ctime>
 #include <thread>
 #include <future>
+#include <string>
 #include <vector>
 #include <atomic>
 #include <functional>
+#include <sstream>
+#include <fstream>
+#include <filesystem>
+#include <unordered_map>
 
 #include "various.hpp"
 #include "multithreading-guard.hpp"
@@ -1027,7 +1032,7 @@ bool ContestValidateQuery::compute_prev_state() {
     }
   }
   state_usage_tree_ = std::make_shared<vm::CellUsageTree>();
-  prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr());
+  prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr()); // !TEMP_THREAD likely breaks Merkle Update
   return true;
 }
 
@@ -4489,12 +4494,42 @@ bool ContestValidateQuery::check_in_queue() {
 std::unique_ptr<block::Account> ContestValidateQuery::make_account_from(td::ConstBitPtr addr,
                                                                         Ref<vm::CellSlice> account) {
   auto ptr = std::make_unique<block::Account>(workchain(), addr);
+
   if (account.is_null()) {
+    // return {}; // !TEMP_THREAD
     if (!ptr->init_new(now_)) {
       return nullptr;
     }
-  } else if (!ptr->unpack(std::move(account), now_, false)) {
-    return nullptr;
+  } else {
+    LOG(ERROR) << "Test index #" << testIndex << " account->tree_node.empty(): "; // !DEBUG_BAD_THREAD_SEARCH
+
+    std::stringstream ss;
+    // td::StringBuilder sb;
+    account->print_rec(ss.flush());
+    // return {}; // !TEMP_THREAD
+
+    auto quick_hash = std::hash<std::string>{}(ss.str());
+
+    /*
+    auto directoryPath = "temp_accounts/" + std::to_string(testIndex);
+    std::filesystem::create_directories(directoryPath);
+    std::ofstream fo(directoryPath + "/" + addr.to_hex(32) + ".txt");
+    fo << "[(" << quick_hash << ")" << std::endl;
+    // account->print_rec(fo);
+    fo << ss.str();
+    fo << "]" << std::endl;
+    fo.flush();
+    //*/
+
+    LOG(ERROR) << "Test index #" << testIndex << " before !ptr->unpack(std::move(account), now_, false) {"; // << ss.str() << "}"; // !DEBUG_BAD_THREAD_SEARCH
+    // auto temp = !ptr->unpack(Ref(account->clone()), now_, false);
+    // return {}; // !TEMP_THREAD
+    auto temp = !ptr->unpack(std::move(account), now_, false);
+    LOG(ERROR) << "Test index #" << testIndex << " after !ptr->unpack(std::move(account), now_, false)"; // !DEBUG_BAD_THREAD_SEARCH
+
+    if (temp) {
+      return nullptr;
+    }
   }
   ptr->block_lt = start_lt_;
   return ptr;
@@ -4513,6 +4548,7 @@ std::unique_ptr<block::Account> ContestValidateQuery::make_account_from(td::Cons
 std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBitPtr addr) {
   auto dict_entry = ps_.account_dict_->lookup_extra(addr, 256);
   auto new_acc = make_account_from(addr, std::move(dict_entry.first));
+  // return {}; // !TEMP_THREAD
   if (!new_acc) {
     reject_query("cannot load state of account "s + addr.to_hex(256) + " from previous shardchain state");
     return {};
@@ -4539,13 +4575,16 @@ std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBi
  */
 bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::LogicalTime lt, Ref<vm::Cell> trans_root,
                                                  bool is_first, bool is_last) {
-  // LOG(ERROR) << "check_one_transaction, current thread id: "<< render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
+  // return true; // !TEMP_THREAD_TEST
+  LOG(ERROR) << "Test index #" << testIndex << ": check_one_transaction, current thread id: "<< render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   LOG(DEBUG) << "checking transaction " << lt << " of account " << account.addr.to_hex();
   const StdSmcAddress& addr = account.addr;
   block::gen::Transaction::Record trans;
   block::gen::HASH_UPDATE::Record hash_upd;
   CHECK(tlb::unpack_cell(trans_root, trans) &&
         tlb::type_unpack_cell(std::move(trans.state_update), block::gen::t_HASH_UPDATE_Account, hash_upd));
+  LOG(ERROR) << "Test index #" << testIndex << ": after tlb::type_unpack_cell"; // !TEMP_THREAD
+
   auto in_msg_root = trans.r1.in_msg->prefetch_ref();
   bool external{false}, ihr_delivered{false}, need_credit_phase{false};
   // check input message
@@ -4576,23 +4615,26 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
                                     << " has an invalid InMsg record (not one of msg_import_ext, msg_import_fin, "
                                        "msg_import_imm, msg_import_ihr or msg_import_deferred_fin)");
     }
+    // return true; // !TEMP_THREAD_TEST
     is_special_tx = is_special_in_msg(*in_descr_cs);
     // once we know there is a InMsg with correct hash, we already know that it contains a message with this hash (by the verification of InMsg), so it is our message
     // have still to check its destination address and imported value
     // and that it refers to this transaction
     Ref<vm::CellSlice> dest;
-    // return true; // !TEMP_THREAD_TEST
+    LOG(ERROR) << "Test index #" << testIndex << " before if (in_msg_tag == block::gen::InMsg::msg_import_ext) "; // !DEBUG_BAD_THREAD_SEARCH
     if (in_msg_tag == block::gen::InMsg::msg_import_ext) {
+      LOG(ERROR) << "Test index #" << testIndex << " inside if (in_msg_tag == block::gen::InMsg::msg_import_ext) "; // !DEBUG_BAD_THREAD_SEARCH
       block::gen::CommonMsgInfo::Record_ext_in_msg_info info;
+      // return true; // !TEMP_THREAD_TEST
       CHECK(tlb::unpack_cell_inexact(in_msg_root, info));
       dest = std::move(info.dest);
       external = true;
-      // return true; // !TEMP_THREAD_TEST
     } else {
+      // return true; // !TEMP_THREAD_TEST
+      LOG(ERROR) << "Test index #" << testIndex << " inside else (in_msg_tag == block::gen::InMsg::msg_import_ext) "; // !DEBUG_BAD_THREAD_SEARCH
       
       block::gen::CommonMsgInfo::Record_int_msg_info info;
       CHECK(tlb::unpack_cell_inexact(in_msg_root, info));
-      return true; // !TEMP_THREAD_TEST
       if (info.created_lt >= lt) {
         return reject_query(PSTRING() << "transaction " << lt << " of " << addr.to_hex()
                                       << " processed inbound message created later at logical time "
@@ -4625,7 +4667,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
       }
       CHECK(money_imported.is_valid());
     }
-    return true; // !TEMP_THREAD_TEST
+    // return true; // !TEMP_THREAD_TEST
 
     WorkchainId d_wc;
     StdSmcAddress d_addr;
@@ -4642,7 +4684,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
                                     << " refers to a different processing transaction");
     }
   }
-  return true; // !TEMP_THREAD_TEST
+  // return true; // !TEMP_THREAD_TEST
 
   // check output messages
   td::optional<block::MsgMetadata> new_msg_metadata;
@@ -5045,13 +5087,19 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
  * @returns True if the account transactions are valid, false otherwise.
  */
 bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root) {
+  LOG(ERROR) << "Test index #" << testIndex << " entered check_account_transactionS"; // !DEBUG_BAD_THREAD_SEARCH
+
   block::gen::AccountBlock::Record acc_blk;
-  CHECK(tlb::csr_unpack(std::move(acc_blk_root), acc_blk) && acc_blk.account_addr == acc_addr);
+  // CHECK(tlb::csr_unpack(std::move(acc_blk_root), acc_blk) && acc_blk.account_addr == acc_addr); // !REMOVE_DEBUG_TEMP
   // CHECK(tlb::csr_unpack(std::move(acc_blk_root), acc_blk) && ((LOG(ERROR) << acc_blk.account_addr << " " << acc_addr), 1) && acc_blk.account_addr == acc_addr);
+
+  LOG(ERROR) << "Test index #" << testIndex << " about to unpack_account(acc_addr.cbits()): " << acc_addr; // !DEBUG_BAD_THREAD_SEARCH
   auto account_p = unpack_account(acc_addr.cbits());
+  // return true; // !TEMP_THREAD // double free or corruption (!prev)
   if (!account_p) {
     return reject_query("cannot unpack old state of account "s + acc_addr.to_hex());
   }
+  // return true; // !TEMP_THREAD // double free or corruption (!prev)
   auto& account = *account_p;
   CHECK(account.addr == acc_addr);
   vm::AugmentedDictionary trans_dict{vm::DictNonEmpty(), std::move(acc_blk.transactions), 64,
@@ -5059,17 +5107,21 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
   td::BitArray<64> min_trans, max_trans;
   CHECK(trans_dict.get_minmax_key(min_trans).not_null() && trans_dict.get_minmax_key(max_trans, true).not_null());
   ton::LogicalTime min_trans_lt = min_trans.to_ulong(), max_trans_lt = max_trans.to_ulong();
+  LOG(ERROR) << "Test index #" << testIndex << " before trans_dict.check_for_each_extra"; // !DEBUG_BAD_THREAD_SEARCH
+  // return true; // !TEMP_THREAD // double free or corruption (out)
   if (!trans_dict.check_for_each_extra([this, &account, min_trans_lt, max_trans_lt](Ref<vm::CellSlice> value,
                                                                                     Ref<vm::CellSlice> extra,
                                                                                     td::ConstBitPtr key, int key_len) {
+        LOG(ERROR) << "Test index #" << testIndex << " entered trans_dict.check_for_each_extra"; // !DEBUG_BAD_THREAD_SEARCH
         CHECK(key_len == 64);
         ton::LogicalTime lt = key.get_uint(64);
+        // return true; // !TEMP_THREAD
         extra.clear();
         return check_one_transaction(account, lt, value->prefetch_ref(), lt == min_trans_lt, lt == max_trans_lt);
       })) {
     return reject_query("at least one Transaction of account "s + acc_addr.to_hex() + " is invalid");
   }
-  return true; // !TEMP_THREAD_TEST
+  // return true; // !TEMP_THREAD_TEST
 
   // See Collator::combine_account_trabsactions
   if (account.total_state->get_hash() != account.orig_total_state->get_hash()) {
@@ -5204,15 +5256,17 @@ bool ContestValidateQuery::check_transactions() {
 
   // }
 
-  // for (int i = 0; i < keys.size(); i++) {
-  //   if (!check_account_transactions((td::ConstBitPtr)keys[i], td::Ref<vm::CellSlice>(&values[i])))
-  //     return false;
-  // }
-  // return true;
-
 
   //*
+  for (int i = 0; i < keys.size(); i++) {
+    if (!check_account_transactions((td::ConstBitPtr)keys[i], td::Ref<vm::CellSlice>(&values[i])))
+      return false;
+  }
+  return true;
+  //*/
 
+
+  /*
   MultithreadingGuard mg(this, std::string("Test index #") + std::to_string(testIndex));
 
   bool check_account_transactions_result = true;
@@ -5233,7 +5287,13 @@ bool ContestValidateQuery::check_transactions() {
         return check_account_transactions((td::ConstBitPtr)keys[i], td::Ref<vm::CellSlice>(&values[i]));
       }
     ));
+    // try { results.back().get(); }
+    // catch (std::string error) {
+    //   LOG(ERROR) << "Test index #" << testIndex << ": caught string in thread " << render_thread_id(std::this_thread::get_id());
+    //   return reject_query(error);
+    // }
   }
+  // return true;
 
   // sleep(1);
 

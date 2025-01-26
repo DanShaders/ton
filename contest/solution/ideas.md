@@ -83,4 +83,5 @@ Compiler stuff:
 
 # Might be usefull, will check out later
 - https://kernelnewbies.org/FAQ/down
+- (finally implementation) https://dev.to/pauljlucas/finally-4ke2
 

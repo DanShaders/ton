@@ -23,6 +23,7 @@
 #include "td/utils/int_types.h"
 #include "td/utils/logging.h"
 #include <functional>
+#include <mutex>
 
 namespace vm {
 
@@ -31,6 +32,10 @@ class DataCell;
 class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
  public:
   using NodeId = td::uint32;
+
+  // CellUsageTree() {
+  //   nodes_.reserve(100000); // !TEMP_THREAD
+  // }
 
   struct NodePtr {
    public:
@@ -80,5 +85,7 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
 
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);
   NodeId create_node(NodeId parent);
+
+  // std::mutex mt;
 };
 }  // namespace vm
