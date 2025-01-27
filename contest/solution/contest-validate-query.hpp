@@ -350,7 +350,6 @@ public:
 
   bool check_utime_lt();
   bool prepare_out_msg_queue_size();
-  void got_out_queue_size(size_t i, td::Result<td::uint64> res);
 
   bool fix_one_processed_upto(block::MsgProcessedUpto& proc, ton::ShardIdFull owner, bool allow_cur = false);
   bool fix_processed_upto(block::MsgProcessedUptoCollection& upto, bool allow_cur = false);

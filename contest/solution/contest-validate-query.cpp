@@ -926,13 +926,14 @@ bool ContestValidateQuery::request_neighbor_queues() {
   {
     for (block::McShardDescr& descr : neighbors_) {
       LOG(DEBUG) << "requesting outbound queue of neighbor #" << i << " : " << descr.blk_.to_str();
-      ++pending;
+      // ++pending;
       auto r_state = fetch_block_state(descr.blk_);
       if (r_state.is_error()) {
         return fatal_error(r_state.move_as_error());
       }
-      td::actor::send_closure(actor_id(this), &ContestValidateQuery::got_neighbor_out_queue, i,
-                              r_state.ok()->message_queue());
+      got_neighbor_out_queue(i, r_state.ok()->message_queue());
+      // td::actor::send_closure(actor_id(this), &ContestValidateQuery::got_neighbor_out_queue, i,
+      //                         r_state.ok()->message_queue());
       ++i;
     }
   }
@@ -947,7 +948,7 @@ bool ContestValidateQuery::request_neighbor_queues() {
  * @param res The obtained outbound queue.
  */
 void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQueue>> res) {
-  --pending; // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
+  // --pending; // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   if (res.is_error()) {
     fatal_error(res.move_as_error());
     return;
@@ -1005,10 +1006,11 @@ void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQ
       }
     }
   } while (false);
-  if (!pending) {
-    LOG(INFO) << "all neighbor output queues fetched";
-    try_validate();
-  }
+
+  // if (!pending) {
+  //   LOG(INFO) << "all neighbor output queues fetched";
+  //   try_validate();
+  // }
 }
 
 /**
@@ -1074,9 +1076,10 @@ bool ContestValidateQuery::request_aux_mc_state(BlockSeqno seqno, Ref<Masterchai
   }
   CHECK(blkid.is_valid_ext() && blkid.is_masterchain());
   LOG(DEBUG) << "sending auxiliary wait_block_state() query for " << blkid.to_str() << " to Manager";
-  ++pending;
-  td::actor::send_closure_later(actor_id(this), &ContestValidateQuery::after_get_aux_shard_state, blkid,
-                                fetch_block_state(blkid));
+  // ++pending;
+  after_get_aux_shard_state(blkid, fetch_block_state(blkid));
+  // td::actor::send_closure_later(actor_id(this), &ContestValidateQuery::after_get_aux_shard_state, blkid,
+  //                               fetch_block_state(blkid));
   state.clear();
   return true;
 }
@@ -1108,7 +1111,7 @@ Ref<MasterchainStateQ> ContestValidateQuery::get_aux_mc_state(BlockSeqno seqno) 
  */
 void ContestValidateQuery::after_get_aux_shard_state(ton::BlockIdExt blkid, td::Result<Ref<ShardState>> res) {
   LOG(DEBUG) << "in ContestValidateQuery::after_get_aux_shard_state(" << blkid.to_str() << ")";
-  --pending; // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
+  // --pending; // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   if (res.is_error()) {
     fatal_error("cannot load auxiliary masterchain state for "s + blkid.to_str() + " : " +
                 res.move_as_error().to_string());
@@ -1128,7 +1131,7 @@ void ContestValidateQuery::after_get_aux_shard_state(ton::BlockIdExt blkid, td::
     fatal_error("cannot register auxiliary masterchain state for "s + blkid.to_str());
     return;
   }
-  try_validate();
+  // try_validate();
 }
 
 /**
@@ -1194,26 +1197,6 @@ bool ContestValidateQuery::prepare_out_msg_queue_size() {
   return fatal_error("unknown queue sizes");
 }
 
-/**
- * Handles the result of obtaining the size of the outbound message queue.
- *
- * If the block is after merge then the two sizes are added.
- *
- * @param i The index of the previous block (0 or 1).
- * @param res The result object containing the size of the queue.
- */
-void ContestValidateQuery::got_out_queue_size(size_t i, td::Result<td::uint64> res) {
-  --pending; // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
-  if (res.is_error()) {
-    fatal_error(
-        res.move_as_error_prefix(PSTRING() << "failed to get message queue size from prev block #" << i << ": "));
-    return;
-  }
-  td::uint64 size = res.move_as_ok();
-  LOG(DEBUG) << "got outbound queue size from prev block #" << i << ": " << size;
-  old_out_msg_queue_size_ += size;
-  try_validate();
-}
 
 /*
  *
