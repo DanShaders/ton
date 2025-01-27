@@ -100,8 +100,12 @@ void ContestValidateQuery::fatal_throw(td::Status error) {
   throw "aborting validation of block candidate for " + shard_.to_str() + " : " + error.to_string();
 }
 void ContestValidateQuery::fatal_throw(std::string err_msg, int err_code) {
-	fatal_throw(td::Status::Error(err_code, error_ctx() + err_msg));
+  fatal_throw(td::Status::Error(err_code, error_ctx() + err_msg));
 }
+void ContestValidateQuery::fatal_throw(int err_code, std::string err_msg) {
+  fatal_throw(td::Status::Error(err_code, error_ctx() + err_msg));
+}
+
 
 
 /**

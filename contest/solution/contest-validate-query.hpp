@@ -310,6 +310,7 @@ public:
 
   void fatal_throw(td::Status error);
   void fatal_throw(std::string err_msg, int err_code = -666);
+  void fatal_throw(int err_code, std::string err_msg);
 
   bool fatal_error(td::Status error);
   bool fatal_error(int err_code, std::string err_msg);
@@ -382,45 +383,45 @@ public:
   tuple<block::ValueFlow, td::RefInt256> unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
   bool compute_minted_amount(block::CurrencyCollection& to_mint);
   bool postcheck_one_account_update(td::ConstBitPtr acc_id, Ref<vm::CellSlice> old_value, Ref<vm::CellSlice> new_value);
-  bool postcheck_account_updates();
+  void postcheck_account_updates();
   bool precheck_one_transaction(td::ConstBitPtr acc_id, ton::LogicalTime trans_lt, Ref<vm::CellSlice> trans_csr,
                                 ton::Bits256& prev_trans_hash, ton::LogicalTime& prev_trans_lt,
                                 unsigned& prev_trans_lt_len, ton::Bits256& acc_state_hash);
   bool precheck_one_account_block(td::ConstBitPtr acc_id, Ref<vm::CellSlice> acc_blk);
-  bool precheck_account_transactions();
+  void precheck_account_transactions();
   Ref<vm::Cell> lookup_transaction(const ton::StdSmcAddress& addr, ton::LogicalTime lt) const;
   bool is_valid_transaction_ref(Ref<vm::Cell> trans_ref) const;
 
-  bool build_new_message_queue();
+  void build_new_message_queue();
   bool precheck_one_message_queue_update(td::ConstBitPtr out_msg_id, Ref<vm::CellSlice> old_value,
                                          Ref<vm::CellSlice> new_value);
-  bool precheck_message_queue_update();
+  void precheck_message_queue_update();
   bool check_account_dispatch_queue_update(td::Bits256 addr, Ref<vm::CellSlice> old_queue_csr,
                                            Ref<vm::CellSlice> new_queue_csr);
-  bool unpack_dispatch_queue_update();
+  void unpack_dispatch_queue_update();
   bool update_max_processed_lt_hash(ton::LogicalTime lt, const ton::Bits256& hash);
   bool update_min_enqueued_lt_hash(ton::LogicalTime lt, const ton::Bits256& hash);
-  bool check_imported_message(Ref<vm::Cell> msg_env);
+  void check_imported_message(Ref<vm::Cell> msg_env);
   bool is_special_in_msg(const vm::CellSlice& in_msg) const;
-  bool check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> in_msg);
-  bool check_in_msg_descr();
-  bool check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice> out_msg);
-  bool check_out_msg_descr();
-  bool check_dispatch_queue_update();
-  bool check_processed_upto();
-  bool check_neighbor_outbound_message(Ref<vm::CellSlice> enq_msg, ton::LogicalTime lt, td::ConstBitPtr key,
+  void check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> in_msg);
+  void check_in_msg_descr();
+  void check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice> out_msg);
+  void check_out_msg_descr();
+  void check_dispatch_queue_update();
+  void check_processed_upto();
+  void check_neighbor_outbound_message(Ref<vm::CellSlice> enq_msg, ton::LogicalTime lt, td::ConstBitPtr key,
                                        const block::McShardDescr& src_nb, bool& unprocessed, bool& processed_here,
                                        td::Bits256& msg_hash);
-  bool check_in_queue();
+  void check_in_queue();
   std::unique_ptr<block::Account> make_account_from(td::ConstBitPtr addr, Ref<vm::CellSlice> account);
   std::unique_ptr<block::Account> unpack_account(td::ConstBitPtr addr);
-  bool check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first,
+  void check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first,
                              bool is_last);
-  bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr);
-  bool check_transactions();
-  bool check_message_processing_order();
-  bool check_new_state(const block::ValueFlow& value_flow_);
-  bool postcheck_value_flow(const block::ValueFlow& value_flow_, const td::RefInt256& import_fees_);
+  void check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr);
+  void check_transactions();
+  void check_message_processing_order();
+  void check_new_state(const block::ValueFlow& value_flow_);
+  void postcheck_value_flow(const block::ValueFlow& value_flow_, const td::RefInt256& import_fees_);
 
   Ref<vm::Cell> get_virt_state_root(td::Bits256 block_root_hash);
 

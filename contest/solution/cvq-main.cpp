@@ -148,50 +148,20 @@ void ContestValidateQuery::start_up() {
     DEST2(value_flow_, import_fees_, unpack_block_data());
     // reject_query("cannot unpack block data: " + error);
 
-    if (!precheck_account_transactions()) {
-      reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
-    }
-    if (!build_new_message_queue()) {
-      reject_query("cannot build a new message queue"); return;
-    }
-    if (!precheck_message_queue_update()) {
-      reject_query("invalid OutMsgQueue update"); return;
-    }
-    if (!unpack_dispatch_queue_update()) {
-      reject_query("invalid DispatchQueue update"); return;
-    }
-    if (!check_in_msg_descr()) {
-      reject_query("invalid InMsgDescr"); return;
-    }
-    if (!check_out_msg_descr()) {
-      reject_query("invalid OutMsgDescr"); return;
-    }
-    if (!check_dispatch_queue_update()) {
-      reject_query("invalid OutMsgDescr"); return;
-    }
-    if (!check_processed_upto()) {
-      reject_query("invalid ProcessedInfo"); return;
-    }
-    if (!check_in_queue()) {
-      reject_query("cannot check inbound message queues"); return;
-    }
-    if (!check_transactions()) {
-      // LOG(ERROR) << "Test index #" << testIndex << ": another reject_query here";
-      reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
-    }
-    if (!postcheck_account_updates()) {
-      reject_query("invalid AccountState update"); return;
-    }
-    if (!check_message_processing_order()) {
-      reject_query("some messages have been processed by transactions in incorrect order"); return;
-    }
-    if (!check_new_state(value_flow_)) {
-      reject_query("the header of the new shardchain state is invalid"); return;
-    }
-    if (!postcheck_value_flow(value_flow_, import_fees_)) {
-      reject_query("new ValueFlow is invalid"); return;
-    }
-
+    precheck_account_transactions(); // reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
+    build_new_message_queue(); // reject_query("cannot build a new message queue"); return;
+    precheck_message_queue_update(); // reject_query("invalid OutMsgQueue update"); return;
+    unpack_dispatch_queue_update(); // reject_query("invalid DispatchQueue update"); return;
+    check_in_msg_descr(); // reject_query("invalid InMsgDescr"); return;
+    check_out_msg_descr(); // reject_query("invalid OutMsgDescr"); return;
+    check_dispatch_queue_update(); // reject_query("invalid OutMsgDescr"); return;
+    check_processed_upto(); // reject_query("invalid ProcessedInfo"); return;
+    check_in_queue(); // reject_query("cannot check inbound message queues"); return;
+    check_transactions(); // // LOG(ERROR) << "Test index #" << testIndex << ": another reject_query here"; reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
+    postcheck_account_updates(); // reject_query("invalid AccountState update"); return;
+    check_message_processing_order(); // reject_query("some messages have been processed by transactions in incorrect order"); return;
+    check_new_state(value_flow_); // reject_query("the header of the new shardchain state is invalid"); return;
+    postcheck_value_flow(value_flow_, import_fees_); // reject_query("new ValueFlow is invalid"); return;
     td::BufferSlice result_state_update_ = build_state_update(); // reject_query("cannot build state update"); return;
 
     finish_query(result_state_update_);
