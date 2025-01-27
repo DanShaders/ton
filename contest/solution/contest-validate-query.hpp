@@ -308,6 +308,7 @@ public:
 
 
   void reject_throw(std::string error, td::BufferSlice reason = {});
+  void reject_throw(std::string err_msg, td::Status error, td::BufferSlice reason = {});
 
   void finish_query(td::BufferSlice& result_state_update_);
   void abort_query(td::Status error);
@@ -355,26 +356,26 @@ public:
 
   void after_get_mc_state(td::Result<Ref<ShardState>> res);
   void after_get_shard_state(int idx, td::Result<Ref<ShardState>> res);
-  bool process_mc_state(Ref<MasterchainState> mc_state);
-  bool try_unpack_mc_state();
-  bool fetch_config_params();
-  bool check_prev_block(const BlockIdExt& listed, const BlockIdExt& prev, bool chk_chain_len = true);
-  bool check_prev_block_exact(const BlockIdExt& listed, const BlockIdExt& prev);
-  bool check_this_shard_mc_info();
-  bool init_parse();
-  bool unpack_block_candidate();
-  bool extract_collated_data_from(Ref<vm::Cell> croot, int idx);
-  bool extract_collated_data();
+  void process_mc_state(Ref<MasterchainState> mc_state);
+  void try_unpack_mc_state();
+  void fetch_config_params();
+  void check_prev_block(const BlockIdExt& listed, const BlockIdExt& prev, bool chk_chain_len = true);
+  void check_prev_block_exact(const BlockIdExt& listed, const BlockIdExt& prev);
+  void check_this_shard_mc_info();
+  void init_parse();
+  void unpack_block_candidate();
+  void extract_collated_data_from(Ref<vm::Cell> croot, int idx);
+  void extract_collated_data();
   void compute_prev_state();
   void unpack_merge_prev_state();
   void unpack_prev_state();
   void init_next_state();
   void unpack_one_prev_state(block::ShardState& ss, BlockIdExt blkid, Ref<vm::Cell> prev_state_root);
-  bool split_prev_state(block::ShardState& ss);
+  void split_prev_state(block::ShardState& ss);
   void request_neighbor_queues();
   void got_neighbor_out_queue(int i, td::Result<Ref<MessageQueue>> res);
 
-  bool register_mc_state(Ref<MasterchainStateQ> other_mc_state);
+  void register_mc_state(Ref<MasterchainStateQ> other_mc_state);
   bool request_aux_mc_state(BlockSeqno seqno, Ref<MasterchainStateQ>& state);
   Ref<MasterchainStateQ> get_aux_mc_state(BlockSeqno seqno) const;
   void after_get_aux_shard_state(ton::BlockIdExt blkid, td::Result<Ref<ShardState>> res);
@@ -389,28 +390,29 @@ public:
   void add_trivial_neighbor();
   tuple<block::ValueFlow, td::RefInt256> unpack_block_data();
   tuple<block::ValueFlow, td::RefInt256> unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
-  bool compute_minted_amount(block::CurrencyCollection& to_mint);
-  bool postcheck_one_account_update(td::ConstBitPtr acc_id, Ref<vm::CellSlice> old_value, Ref<vm::CellSlice> new_value);
+  void compute_minted_amount(block::CurrencyCollection& to_mint);
+  void postcheck_one_account_update(td::ConstBitPtr acc_id, Ref<vm::CellSlice> old_value, Ref<vm::CellSlice> new_value);
   void postcheck_account_updates();
-  bool precheck_one_transaction(td::ConstBitPtr acc_id, ton::LogicalTime trans_lt, Ref<vm::CellSlice> trans_csr,
+  void precheck_one_transaction(td::ConstBitPtr acc_id, ton::LogicalTime trans_lt, Ref<vm::CellSlice> trans_csr,
                                 ton::Bits256& prev_trans_hash, ton::LogicalTime& prev_trans_lt,
                                 unsigned& prev_trans_lt_len, ton::Bits256& acc_state_hash);
-  bool precheck_one_account_block(td::ConstBitPtr acc_id, Ref<vm::CellSlice> acc_blk);
+  void precheck_one_account_block(td::ConstBitPtr acc_id, Ref<vm::CellSlice> acc_blk);
   void precheck_account_transactions();
   Ref<vm::Cell> lookup_transaction(const ton::StdSmcAddress& addr, ton::LogicalTime lt) const;
-  bool is_valid_transaction_ref(Ref<vm::Cell> trans_ref) const;
+
+  bool is_valid_transaction_ref(Ref<vm::Cell> trans_ref) const; // Legit bool
 
   void build_new_message_queue();
-  bool precheck_one_message_queue_update(td::ConstBitPtr out_msg_id, Ref<vm::CellSlice> old_value,
+  void precheck_one_message_queue_update(td::ConstBitPtr out_msg_id, Ref<vm::CellSlice> old_value,
                                          Ref<vm::CellSlice> new_value);
   void precheck_message_queue_update();
-  bool check_account_dispatch_queue_update(td::Bits256 addr, Ref<vm::CellSlice> old_queue_csr,
+  void check_account_dispatch_queue_update(td::Bits256 addr, Ref<vm::CellSlice> old_queue_csr,
                                            Ref<vm::CellSlice> new_queue_csr);
   void unpack_dispatch_queue_update();
-  bool update_max_processed_lt_hash(ton::LogicalTime lt, const ton::Bits256& hash);
-  bool update_min_enqueued_lt_hash(ton::LogicalTime lt, const ton::Bits256& hash);
+  bool update_max_processed_lt_hash(ton::LogicalTime lt, const ton::Bits256& hash); // Useless return value
+  bool update_min_enqueued_lt_hash(ton::LogicalTime lt, const ton::Bits256& hash); // Useless return value
   void check_imported_message(Ref<vm::Cell> msg_env);
-  bool is_special_in_msg(const vm::CellSlice& in_msg) const;
+  bool is_special_in_msg(const vm::CellSlice& in_msg) const; // Legit bool
   void check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> in_msg);
   void check_in_msg_descr();
   void check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice> out_msg);

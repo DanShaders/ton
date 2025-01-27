@@ -27,6 +27,13 @@ void ContestValidateQuery::reject_throw(std::string error, td::BufferSlice reaso
   throw error;
 }
 
+void ContestValidateQuery::reject_throw(std::string err_msg, td::Status error, td::BufferSlice reason) {
+  error.ensure_error();
+  reject_throw(err_msg + " : " + error.to_string(), std::move(reason));
+}
+
+
+
 /**
  * Aborts the validation with the given error.
  *

@@ -65,10 +65,8 @@ void ContestValidateQuery::start_up() {
     td::uint64 x = td::lower_bit64(shard_.shard);
     SoftRejectIfWithComment(x < 8, "a shard cannot be split more than 60 times");
     // 3. unpack block candidate (while necessary data is being loaded)
-    if (!unpack_block_candidate()) {
-      reject_query("error unpacking block candidate");
-      return;
-    }
+    unpack_block_candidate(); // reject_query("error unpacking block candidate");
+
     SoftRejectIfWithComment(prev_blocks.size() > 2, "cannot have more than two previous blocks");
     SoftRejectIfWithComment(!prev_blocks.size(), "must have one or two previous blocks to generate a next block");
 
@@ -120,7 +118,7 @@ void ContestValidateQuery::start_up() {
     init_next_state(); // fatal_error("cannot unpack previous state"); return;
     check_utime_lt(); // reject_query("creation utime/lt of the new block is invalid"); return;
     prepare_out_msg_queue_size(); // reject_query("cannot request out msg queue size"); return;
-    
+
     LOG(INFO) << "try_validate stage 1";
     LOG(INFO) << "running automated validity checks for block candidate " << id_.to_str();
     if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
