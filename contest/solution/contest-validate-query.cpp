@@ -815,7 +815,8 @@ void ContestValidateQuery::unpack_one_prev_state(block::ShardState& ss, BlockIdE
   auto res = ss.unpack_state_ext(blkid, std::move(prev_state_root), global_id_, mc_seqno_, after_split_,
                                  after_split_ | after_merge_, [this](ton::BlockSeqno mc_seqno) {
                                    Ref<MasterchainStateQ> state;
-                                   return request_aux_mc_state(mc_seqno, state);
+                                   request_aux_mc_state(mc_seqno, state);
+                                   return true;
                                  });
   if (res.is_error()) {
     fatal_throw(std::move(res));
@@ -968,9 +969,7 @@ void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQ
     // ..
     for (const auto& entry : descr.processed_upto->list) {
       Ref<MasterchainStateQ> state;
-      if (!request_aux_mc_state(entry.mc_seqno, state)) {
-        return;
-      }
+      request_aux_mc_state(entry.mc_seqno, state); // { return; }
     }
   } while (false);
 }
@@ -1015,23 +1014,23 @@ void ContestValidateQuery::register_mc_state(Ref<MasterchainStateQ> other_mc_sta
  *
  * @returns True if the auxiliary masterchain state is successfully requested, false otherwise.
  */
-bool ContestValidateQuery::request_aux_mc_state(BlockSeqno seqno, Ref<MasterchainStateQ>& state) {
+void ContestValidateQuery::request_aux_mc_state(BlockSeqno seqno, Ref<MasterchainStateQ>& state) {
   if (mc_state_.is_null()) {
-    return fatal_error(PSTRING() << "cannot find masterchain block with seqno " << seqno
+    fatal_throw(PSTRING() << "cannot find masterchain block with seqno " << seqno
                                  << " to load corresponding state because no masterchain state is known yet");
   }
   if (seqno > mc_state_->get_seqno()) {
     state = mc_state_;
-    return true;
+    return;
   }
   auto res = aux_mc_states_.insert(std::make_pair(seqno, Ref<MasterchainStateQ>{}));
   if (!res.second) {
     state = res.first->second;
-    return true;
+    return;
   }
   BlockIdExt blkid;
   if (!mc_state_->get_old_mc_block_id(seqno, blkid)) {
-    return fatal_error(PSTRING() << "cannot find masterchain block with seqno " << seqno
+    fatal_throw(PSTRING() << "cannot find masterchain block with seqno " << seqno
                                  << " to load corresponding state as required");
   }
   CHECK(blkid.is_valid_ext() && blkid.is_masterchain());
@@ -1040,7 +1039,6 @@ bool ContestValidateQuery::request_aux_mc_state(BlockSeqno seqno, Ref<Masterchai
   after_get_aux_shard_state(blkid, fetch_block_state(blkid));
 
   state.clear();
-  return true;
 }
 
 /**

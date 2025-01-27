@@ -376,7 +376,7 @@ public:
   void got_neighbor_out_queue(int i, td::Result<Ref<MessageQueue>> res);
 
   void register_mc_state(Ref<MasterchainStateQ> other_mc_state);
-  bool request_aux_mc_state(BlockSeqno seqno, Ref<MasterchainStateQ>& state);
+  void request_aux_mc_state(BlockSeqno seqno, Ref<MasterchainStateQ>& state);
   Ref<MasterchainStateQ> get_aux_mc_state(BlockSeqno seqno) const;
   void after_get_aux_shard_state(ton::BlockIdExt blkid, td::Result<Ref<ShardState>> res);
 
