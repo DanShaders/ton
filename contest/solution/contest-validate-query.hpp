@@ -46,10 +46,6 @@ struct std::hash<std::pair<ton::StdSmcAddress, td::uint64>>
 };
 // ??TODO: reverse unordered_map?
 
-template <typename K, typename V>
-using MyMap = std::unordered_map<K, V>;
-
-
 
 
 
@@ -60,8 +56,30 @@ using namespace ton::validator;
 
 using td::Ref;
 
+
+template <typename K, typename V>
+using MyMap = std::unordered_map<K, V>;
+
+using std::tuple;
+// template <typename... Args>
+// using tup = std::tuple<... Args>;
+
+template <typename... Args>
+auto t(Args&&... args) -> decltype(f(std::forward<Args>(args)...)) {
+  return std::make_tuple(std::forward<Args>(args)...);
+}
+
+
+#define DEST2(a, b, v) \
+  auto temp##__LINE__ = v; \
+  auto a = std::get<0>(temp##__LINE__); \
+  auto b = std::get<1>(temp##__LINE__);
+
+
+
 class ErrorCtxAdd;
 class ErrorCtxSet;
+
 
 struct ErrorCtx {
  protected:
@@ -228,7 +246,7 @@ public:
   std::unique_ptr<vm::AugmentedDictionary> in_msg_dict_, out_msg_dict_, account_blocks_dict_;
   // block::ValueFlow value_flow_;
   block::CurrencyCollection import_created_, transaction_fees_, total_burned_{0}, fees_burned_{0};
-  td::RefInt256 import_fees_;
+  // td::RefInt256 import_fees_;
 
   ton::LogicalTime proc_lt_{0}, claimed_proc_lt_{0}, min_enq_lt_{~0ULL};
   ton::Bits256 proc_hash_ = ton::Bits256::zero(), claimed_proc_hash_, min_enq_hash_;
@@ -339,8 +357,8 @@ public:
   bool fix_all_processed_upto();
   bool add_trivial_neighbor_after_merge();
   bool add_trivial_neighbor();
-  block::ValueFlow unpack_block_data();
-  block::ValueFlow unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
+  tuple<block::ValueFlow, td::RefInt256> unpack_block_data();
+  tuple<block::ValueFlow, td::RefInt256> unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
   bool compute_minted_amount(block::CurrencyCollection& to_mint);
   bool postcheck_one_account_update(td::ConstBitPtr acc_id, Ref<vm::CellSlice> old_value, Ref<vm::CellSlice> new_value);
   bool postcheck_account_updates();
@@ -381,7 +399,7 @@ public:
   bool check_transactions();
   bool check_message_processing_order();
   bool check_new_state(const block::ValueFlow& value_flow_);
-  bool postcheck_value_flow(const block::ValueFlow& value_flow_);
+  bool postcheck_value_flow(const block::ValueFlow& value_flow_, const td::RefInt256& import_fees_);
 
   Ref<vm::Cell> get_virt_state_root(td::Bits256 block_root_hash);
 

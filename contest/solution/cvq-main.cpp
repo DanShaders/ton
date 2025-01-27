@@ -1,0 +1,266 @@
+#include "contest-validate-query.hpp"
+
+#include <string>
+
+
+namespace solution {
+
+using namespace ton;
+using namespace ton::validator;
+
+using namespace std::literals::string_literals;
+
+/**
+ * Constructs a ContestValidateQuery object.
+ *
+ * @param block_id Id of the block
+ * @param block_data Block data, but without state update
+ * @param collated_data Collated data (proofs of shard states)
+ * @param promise The Promise to return the serialized state update to
+ */
+ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data,
+                                           td::BufferSlice collated_data, td::Promise<td::BufferSlice> promise)
+    : shard_(block_id.shard_full())
+    , id_(block_id)
+    , block_data(std::move(block_data))
+    , collated_data(std::move(collated_data))
+    , main_promise(std::move(promise))
+    , shard_pfx_(shard_.shard)
+    , shard_pfx_len_(ton::shard_prefix_length(shard_)) {
+
+  testIndex = ++globalTestIndex;
+  // msg_proc_lt_.reserve(100000); // !TEMP_BAD_THREAD
+}
+
+
+/**
+ * Starts the validation process.
+ *
+ * This function performs various checks on the validation parameters and the block candidate.
+ * Then the function also sends requests to the ValidatorManager to fetch blocks and shard stated.
+ */
+void ContestValidateQuery::start_up() {
+  LOG(INFO) << "validate query for " << id_.to_str() << " started";
+  rand_seed_.set_zero();
+
+  // if (main_thread_id == std::this_thread::get_id()) {
+  //   LOG(ERROR) << "testIndex #" << testIndex << ": ---------------------------------- thread_ids equal: " << render_thread_id(main_thread_id);
+  // }
+  // LOG(ERROR) << "Test index #" << testIndex << ": Stored main_thread_id: " << render_thread_id(main_thread_id)
+  //            << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
+  main_thread_id = std::this_thread::get_id();
+
+  doesItCreateNewInstancePerTest++;
+  // LOG(ERROR) << "start_up: doesItCreateNewInstancePerTest = " << doesItCreateNewInstancePerTest;
+  CHECK(doesItCreateNewInstancePerTest == 1);
+
+  if (ShardIdFull(id_) != shard_) {
+    soft_reject_query(PSTRING() << "block candidate belongs to shard " << ShardIdFull(id_).to_str()
+                                << " different from current shard " << shard_.to_str());
+    return;
+  }
+  if (workchain() != ton::basechainId) {
+    soft_reject_query("only basechain is supported");
+    return;
+  }
+  if (!shard_.is_valid_ext()) {
+    reject_query("requested to validate a block for an invalid shard");
+    return;
+  }
+  td::uint64 x = td::lower_bit64(shard_.shard);
+  if (x < 8) {
+    reject_query("a shard cannot be split more than 60 times");
+    return;
+  }
+  // 3. unpack block candidate (while necessary data is being loaded)
+  if (!unpack_block_candidate()) {
+    reject_query("error unpacking block candidate");
+    return;
+  }
+  if (prev_blocks.size() > 2) {
+    soft_reject_query("cannot have more than two previous blocks");
+    return;
+  }
+  if (!prev_blocks.size()) {
+    soft_reject_query("must have one or two previous blocks to generate a next block");
+    return;
+  }
+  if (prev_blocks.size() == 2) {
+    if (!(shard_is_parent(shard_, ShardIdFull(prev_blocks[0])) &&
+          shard_is_parent(shard_, ShardIdFull(prev_blocks[1])) && prev_blocks[0].id.shard < prev_blocks[1].id.shard)) {
+      soft_reject_query(
+          "the two previous blocks for a merge operation are not siblings or are not children of current shard");
+      return;
+    }
+    for (const auto& blk : prev_blocks) {
+      if (!blk.id.seqno) {
+        soft_reject_query("previous blocks for a block merge operation must have non-zero seqno");
+        return;
+      }
+    }
+    // soft_reject_query("merging shards is not implemented yet");
+    // return;
+  } else {
+    CHECK(prev_blocks.size() == 1);
+    // creating next block
+    if (!ShardIdFull(prev_blocks[0]).is_valid_ext()) {
+      soft_reject_query("previous block does not have a valid id");
+      return;
+    }
+    if (ShardIdFull(prev_blocks[0]) != shard_) {
+      if (!shard_is_parent(ShardIdFull(prev_blocks[0]), shard_)) {
+        soft_reject_query("previous block does not belong to the shard we are generating a new block for");
+        return;
+      }
+    }
+    if (after_split_) {
+      // soft_reject_query("splitting shards not implemented yet");
+      // return;
+    }
+  }
+
+  try {
+    // ++pending;
+    // 4. load state(s) corresponding to previous block(s)
+    prev_states.resize(prev_blocks.size());
+    for (int i = 0; (unsigned)i < prev_blocks.size(); i++) {
+      // 4.1. load state
+      LOG(DEBUG) << "sending wait_block_state() query #" << i << " for " << prev_blocks[i].to_str() << " to Manager";
+      // ++pending;
+      after_get_shard_state(i, fetch_block_state(prev_blocks[i]));
+      // td::actor::send_closure_later(actor_id(this), &ContestValidateQuery::after_get_shard_state, i,
+      //                               fetch_block_state(prev_blocks[i]));
+    }
+    // 5. request masterchain state referred to in the block
+    after_get_mc_state(fetch_block_state(mc_blkid_));
+    // td::actor::send_closure_later(actor_id(this), &ContestValidateQuery::after_get_mc_state,
+    //                               fetch_block_state(mc_blkid_));
+    // ...
+  } catch (std::string error) {
+    reject_query(error);
+    return;
+  }
+
+  // CHECK(pending); // !TEMP commented for sequential code
+  if (!try_validate()) {
+    fatal_error("cannot validate new block");
+  }
+}
+
+
+
+
+
+
+/**
+ * MAIN VALIDATOR FUNCTION (invokes other methods in a suitable order).
+ *
+ * @returns True if the validation is successful, False otherwise.
+ */
+bool ContestValidateQuery::try_validate() {
+  if (pending) {
+    return true;
+  }
+  try {
+    if (!stage_) {
+      LOG(INFO) << "try_validate stage 0";
+      if (!compute_prev_state()) {
+        return fatal_error(-666, "cannot compute previous state");
+      }
+      if (!request_neighbor_queues()) {
+        return fatal_error("cannot request neighbor output queues");
+      }
+      if (!unpack_prev_state()) {
+        return fatal_error("cannot unpack previous state");
+      }
+      if (!init_next_state()) {
+        return fatal_error("cannot unpack previous state");
+      }
+      if (!check_utime_lt()) {
+        return reject_query("creation utime/lt of the new block is invalid");
+      }
+      if (!prepare_out_msg_queue_size()) {
+        return reject_query("cannot request out msg queue size");
+      }
+      stage_ = 1;
+      if (pending) {
+        return true;
+      }
+    }
+
+    LOG(INFO) << "try_validate stage 1";
+    LOG(INFO) << "running automated validity checks for block candidate " << id_.to_str();
+    if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
+      return reject_query("block "s + id_.to_str() + " failed to pass automated validity checks");
+    }
+    if (!fix_all_processed_upto()) {
+      return fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks");
+    }
+    if (!add_trivial_neighbor()) {
+      return fatal_error("cannot add previous block as a trivial neighbor");
+    }
+
+    DEST2(value_flow_, import_fees_, unpack_block_data());
+    // return reject_query("cannot unpack block data: " + error);
+
+    if (!precheck_account_transactions()) {
+      return reject_query("invalid collection of account transactions in ShardAccountBlocks");
+    }
+    if (!build_new_message_queue()) {
+      return reject_query("cannot build a new message queue");
+    }
+    if (!precheck_message_queue_update()) {
+      return reject_query("invalid OutMsgQueue update");
+    }
+    if (!unpack_dispatch_queue_update()) {
+      return reject_query("invalid DispatchQueue update");
+    }
+    if (!check_in_msg_descr()) {
+      return reject_query("invalid InMsgDescr");
+    }
+    if (!check_out_msg_descr()) {
+      return reject_query("invalid OutMsgDescr");
+    }
+    if (!check_dispatch_queue_update()) {
+      return reject_query("invalid OutMsgDescr");
+    }
+    if (!check_processed_upto()) {
+      return reject_query("invalid ProcessedInfo");
+    }
+    if (!check_in_queue()) {
+      return reject_query("cannot check inbound message queues");
+    }
+    if (!check_transactions()) {
+      // LOG(ERROR) << "Test index #" << testIndex << ": another reject_query here";
+      return reject_query("invalid collection of account transactions in ShardAccountBlocks");
+    }
+    if (!postcheck_account_updates()) {
+      return reject_query("invalid AccountState update");
+    }
+    if (!check_message_processing_order()) {
+      return reject_query("some messages have been processed by transactions in incorrect order");
+    }
+    if (!check_new_state(value_flow_)) {
+      return reject_query("the header of the new shardchain state is invalid");
+    }
+    if (!postcheck_value_flow(value_flow_, import_fees_)) {
+      return reject_query("new ValueFlow is invalid");
+    }
+    if (!build_state_update()) {
+      return reject_query("cannot build state update");
+    }
+  } catch (std::string error) {
+    return reject_query(error);
+  } catch (vm::VmError& err) {
+    return fatal_error(-666, err.get_msg());
+  } catch (vm::VmVirtError& err) {
+    return reject_query(err.get_msg());
+  }
+  finish_query();
+  return true;
+}
+
+
+
+}
+

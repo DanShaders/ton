@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
 add_library(contest-solution STATIC
   solution.hpp solution.cpp
-  contest-validate-query.hpp contest-validate-query.cpp
+  contest-validate-query.hpp contest-validate-query.cpp cvq-main.cpp cvq-query.cpp
   various.hpp various.cpp
   multithreading-guard.hpp multithreading-guard.cpp
 )
