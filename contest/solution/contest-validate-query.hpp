@@ -46,7 +46,8 @@ struct std::hash<std::pair<ton::StdSmcAddress, td::uint64>>
 };
 // ??TODO: reverse unordered_map?
 
-
+template <typename K, typename V>
+using MyMap = std::unordered_map<K, V>;
 
 
 
@@ -173,7 +174,7 @@ public:
 
   Ref<vm::Cell> block_root_;
   std::vector<Ref<vm::Cell>> collated_roots_;
-  std::unordered_map<RootHash, Ref<vm::Cell>> virt_roots_;
+  MyMap<RootHash, Ref<vm::Cell>> virt_roots_;
   std::unique_ptr<vm::Dictionary> top_shard_descr_dict_;
   block::gen::ExtraCollatedData::Record extra_collated_data_;
   bool have_extra_collated_data_ = false;
@@ -212,7 +213,7 @@ public:
   td::RefInt256 masterchain_create_fee_, basechain_create_fee_;
 
   std::vector<block::McShardDescr> neighbors_;
-  std::unordered_map<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
+  MyMap<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
 
   std::mutex ns_mutex_;
   block::ShardState ps_;
@@ -221,11 +222,11 @@ public:
   std::unique_ptr<vm::AugmentedDictionary> sibling_out_msg_queue_;
   std::shared_ptr<block::MsgProcessedUptoCollection> sibling_processed_upto_;
 
-  std::unordered_map<td::Bits256, int> block_create_count_;
+  MyMap<td::Bits256, int> block_create_count_;
   unsigned block_create_total_{0};
 
   std::unique_ptr<vm::AugmentedDictionary> in_msg_dict_, out_msg_dict_, account_blocks_dict_;
-  block::ValueFlow value_flow_;
+  // block::ValueFlow value_flow_;
   block::CurrencyCollection import_created_, transaction_fees_, total_burned_{0}, fees_burned_{0};
   td::RefInt256 import_fees_;
 
@@ -236,8 +237,8 @@ public:
   std::mutex msg_proc_lt_mutex_;
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_emitted_lt_;
 
-  std::unordered_map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;
-  std::unordered_map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> new_dispatch_queue_messages_;
+  MyMap<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;
+  MyMap<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> new_dispatch_queue_messages_;
   std::set<StdSmcAddress> account_expected_defer_all_messages_;
   td::uint64 old_out_msg_queue_size_ = 0;
   bool out_msg_queue_size_known_ = false;
@@ -253,6 +254,14 @@ public:
   WorkchainId workchain() const {
     return shard_.workchain;
   }
+
+
+
+
+
+
+
+  void reject_throw(std::string error, td::BufferSlice reason = {});
 
   void finish_query();
   void abort_query(td::Status error);
@@ -330,8 +339,8 @@ public:
   bool fix_all_processed_upto();
   bool add_trivial_neighbor_after_merge();
   bool add_trivial_neighbor();
-  bool unpack_block_data();
-  bool unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
+  block::ValueFlow unpack_block_data();
+  block::ValueFlow unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
   bool compute_minted_amount(block::CurrencyCollection& to_mint);
   bool postcheck_one_account_update(td::ConstBitPtr acc_id, Ref<vm::CellSlice> old_value, Ref<vm::CellSlice> new_value);
   bool postcheck_account_updates();
@@ -371,8 +380,8 @@ public:
   bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr);
   bool check_transactions();
   bool check_message_processing_order();
-  bool check_new_state();
-  bool postcheck_value_flow();
+  bool check_new_state(const block::ValueFlow& value_flow_);
+  bool postcheck_value_flow(const block::ValueFlow& value_flow_);
 
   Ref<vm::Cell> get_virt_state_root(td::Bits256 block_root_hash);
 

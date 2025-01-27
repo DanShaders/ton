@@ -88,6 +88,12 @@ void ContestValidateQuery::enter_multithreading() {
 }
 
 
+
+void ContestValidateQuery::reject_throw(std::string error, td::BufferSlice reason) {
+  error = error_ctx() + error;
+  throw error;
+}
+
 /**
  * Aborts the validation with the given error.
  *
@@ -1748,25 +1754,25 @@ bool ContestValidateQuery::add_trivial_neighbor() {
  *
  * @returns True if the block data is successfully unpacked and passes all validation checks, false otherwise.
  */
-bool ContestValidateQuery::unpack_block_data() {
+block::ValueFlow ContestValidateQuery::unpack_block_data() {
   LOG(DEBUG) << "unpacking block structures";
   block::gen::Block::Record blk;
   block::gen::BlockExtra::Record extra;
   if (!(tlb::unpack_cell(block_root_, blk) && tlb::unpack_cell(blk.extra, extra))) {
-    return reject_query("cannot unpack Block header");
+    reject_throw("cannot unpack Block header");
   }
   auto inmsg_cs = vm::load_cell_slice_ref(std::move(extra.in_msg_descr));
   auto outmsg_cs = vm::load_cell_slice_ref(std::move(extra.out_msg_descr));
   // run some hand-written checks from block::tlb::
   // (automatic tests from block::gen:: have been already run for the entire block)
   if (!block::tlb::t_InMsgDescr.validate_upto(10000000, *inmsg_cs)) {
-    return reject_query("InMsgDescr of the new block failed to pass handwritten validity tests");
+    reject_throw("InMsgDescr of the new block failed to pass handwritten validity tests");
   }
   if (!block::tlb::t_OutMsgDescr.validate_upto(10000000, *outmsg_cs)) {
-    return reject_query("OutMsgDescr of the new block failed to pass handwritten validity tests");
+    reject_throw("OutMsgDescr of the new block failed to pass handwritten validity tests");
   }
   if (!block::tlb::t_ShardAccountBlocks.validate_ref(10000000, extra.account_blocks)) {
-    return reject_query("ShardAccountBlocks of the new block failed to pass handwritten validity tests");
+    reject_throw("ShardAccountBlocks of the new block failed to pass handwritten validity tests");
   }
   in_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(inmsg_cs), 256, block::tlb::aug_InMsgDescr);
   out_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(outmsg_cs), 256, block::tlb::aug_OutMsgDescr);
@@ -1774,17 +1780,19 @@ bool ContestValidateQuery::unpack_block_data() {
       vm::load_cell_slice_ref(std::move(extra.account_blocks)), 256, block::tlb::aug_ShardAccountBlocks);
   LOG(DEBUG) << "validating InMsgDescr";
   if (!in_msg_dict_->validate_all()) {
-    return reject_query("InMsgDescr dictionary is invalid");
+    reject_throw("InMsgDescr dictionary is invalid");
   }
   LOG(DEBUG) << "validating OutMsgDescr";
   if (!out_msg_dict_->validate_all()) {
-    return reject_query("OutMsgDescr dictionary is invalid");
+    reject_throw("OutMsgDescr dictionary is invalid");
   }
   LOG(DEBUG) << "validating ShardAccountBlocks";
   if (!account_blocks_dict_->validate_all()) {
-    return reject_query("ShardAccountBlocks dictionary is invalid");
+    reject_throw("ShardAccountBlocks dictionary is invalid");
   }
-  return unpack_precheck_value_flow(std::move(blk.value_flow));
+
+  block::ValueFlow value_flow_ = unpack_precheck_value_flow(std::move(blk.value_flow));
+  return value_flow_;
 }
 
 /**
@@ -1794,102 +1802,104 @@ bool ContestValidateQuery::unpack_block_data() {
  *
  * @returns True if the value flow is valid and unpacked successfully, false otherwise.
  */
-bool ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root) {
+block::ValueFlow ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root) {
+  block::ValueFlow value_flow_;
+
   vm::CellSlice cs{vm::NoVmOrd(), value_flow_root};
   if (!(cs.is_valid() && value_flow_.fetch(cs) && cs.empty_ext())) {
-    return reject_query("cannot unpack ValueFlow of the new block "s + id_.to_str());
+    reject_throw("cannot unpack ValueFlow of the new block "s + id_.to_str());
   }
   std::ostringstream os;
   value_flow_.show(os);
   LOG(DEBUG) << "value flow: " << os.str();
   if (!value_flow_.validate()) {
     LOG(INFO) << "invalid value flow: " << os.str();
-    return reject_query("ValueFlow of block "s + id_.to_str() + " is invalid (in-balance is not equal to out-balance)");
+    reject_throw("ValueFlow of block "s + id_.to_str() + " is invalid (in-balance is not equal to out-balance)");
   }
   if (!value_flow_.minted.is_zero()) {
     LOG(INFO) << "invalid value flow: " << os.str();
-    return reject_query("ValueFlow of block "s + id_.to_str() +
+    reject_throw("ValueFlow of block "s + id_.to_str() +
                         " is invalid (non-zero minted value in a non-masterchain block)");
   }
   if (!value_flow_.recovered.is_zero()) {
     LOG(INFO) << "invalid value flow: " << os.str();
-    return reject_query("ValueFlow of block "s + id_.to_str() +
+    reject_throw("ValueFlow of block "s + id_.to_str() +
                         " is invalid (non-zero recovered value in a non-masterchain block)");
   }
   if (!value_flow_.burned.is_zero()) {
     LOG(INFO) << "invalid value flow: " << os.str();
-    return reject_query("ValueFlow of block "s + id_.to_str() +
+    reject_throw("ValueFlow of block "s + id_.to_str() +
                         " is invalid (non-zero burned value in a non-masterchain block)");
   }
   if (!value_flow_.recovered.is_zero() && recover_create_msg_.is_null()) {
-    return reject_query("ValueFlow of block "s + id_.to_str() +
+    reject_throw("ValueFlow of block "s + id_.to_str() +
                         " has a non-zero recovered fees value, but there is no recovery InMsg");
   }
   if (value_flow_.recovered.is_zero() && recover_create_msg_.not_null()) {
-    return reject_query("ValueFlow of block "s + id_.to_str() +
+    reject_throw("ValueFlow of block "s + id_.to_str() +
                         " has a zero recovered fees value, but there is a recovery InMsg");
   }
   if (!value_flow_.minted.is_zero() && mint_msg_.is_null()) {
-    return reject_query("ValueFlow of block "s + id_.to_str() +
+    reject_throw("ValueFlow of block "s + id_.to_str() +
                         " has a non-zero minted value, but there is no mint InMsg");
   }
   if (value_flow_.minted.is_zero() && mint_msg_.not_null()) {
-    return reject_query("ValueFlow of block "s + id_.to_str() + " has a zero minted value, but there is a mint InMsg");
+    reject_throw("ValueFlow of block "s + id_.to_str() + " has a zero minted value, but there is a mint InMsg");
   }
   if (!value_flow_.minted.is_zero()) {
     block::CurrencyCollection to_mint;
     if (!compute_minted_amount(to_mint) || !to_mint.is_valid()) {
-      return reject_query("cannot compute the correct amount of extra currencies to be minted");
+      reject_throw("cannot compute the correct amount of extra currencies to be minted");
     }
     if (value_flow_.minted != to_mint) {
-      return reject_query("invalid extra currencies amount to be minted: declared "s + value_flow_.minted.to_str() +
+      reject_throw("invalid extra currencies amount to be minted: declared "s + value_flow_.minted.to_str() +
                           ", expected " + to_mint.to_str());
     }
   }
   td::RefInt256 create_fee;
   create_fee = (basechain_create_fee_ >> ton::shard_prefix_length(shard_));
   if (value_flow_.created != block::CurrencyCollection{create_fee}) {
-    return reject_query("ValueFlow of block "s + id_.to_str() + " declares block creation fee " +
+    reject_throw("ValueFlow of block "s + id_.to_str() + " declares block creation fee " +
                         value_flow_.created.to_str() + ", but the current configuration expects it to be " +
                         td::dec_string(create_fee));
   }
   if (!value_flow_.fees_imported.is_zero()) {
     LOG(INFO) << "invalid value flow: " << os.str();
-    return reject_query("ValueFlow of block "s + id_.to_str() +
+    reject_throw("ValueFlow of block "s + id_.to_str() +
                         " is invalid (non-zero fees_imported in a non-masterchain block)");
   }
   auto accounts_extra = ps_.account_dict_->get_root_extra();
   block::CurrencyCollection cc;
   if (!(accounts_extra.write().advance(5) && cc.unpack(std::move(accounts_extra)))) {
-    return reject_query("cannot unpack CurrencyCollection from the root of old accounts dictionary");
+    reject_throw("cannot unpack CurrencyCollection from the root of old accounts dictionary");
   }
   if (cc != value_flow_.from_prev_blk) {
-    return reject_query("ValueFlow for "s + id_.to_str() +
+    reject_throw("ValueFlow for "s + id_.to_str() +
                         " declares from_prev_blk=" + value_flow_.from_prev_blk.to_str() +
                         " but the sum over all accounts present in the previous state is " + cc.to_str());
   }
   auto msg_extra = in_msg_dict_->get_root_extra();
   // block::gen::t_ImportFees.print(std::cerr, msg_extra);
   if (!(block::tlb::t_Grams.as_integer_skip_to(msg_extra.write(), import_fees_) && cc.unpack(std::move(msg_extra)))) {
-    return reject_query("cannot unpack ImportFees from the augmentation of the InMsgDescr dictionary");
+    reject_throw("cannot unpack ImportFees from the augmentation of the InMsgDescr dictionary");
   }
   if (cc != value_flow_.imported) {
-    return reject_query("ValueFlow for "s + id_.to_str() + " declares imported=" + value_flow_.imported.to_str() +
+    reject_throw("ValueFlow for "s + id_.to_str() + " declares imported=" + value_flow_.imported.to_str() +
                         " but the sum over all inbound messages listed in InMsgDescr is " + cc.to_str());
   }
   if (!cc.unpack(out_msg_dict_->get_root_extra())) {
-    return reject_query("cannot unpack CurrencyCollection from the augmentation of the InMsgDescr dictionary");
+    reject_throw("cannot unpack CurrencyCollection from the augmentation of the InMsgDescr dictionary");
   }
   if (cc != value_flow_.exported) {
-    return reject_query("ValueFlow for "s + id_.to_str() + " declares exported=" + value_flow_.exported.to_str() +
+    reject_throw("ValueFlow for "s + id_.to_str() + " declares exported=" + value_flow_.exported.to_str() +
                         " but the sum over all outbound messages listed in OutMsgDescr is " + cc.to_str());
   }
   if (!transaction_fees_.validate_unpack(account_blocks_dict_->get_root_extra())) {
-    return reject_query(
+    reject_throw(
         "cannot unpack CurrencyCollection with total transaction fees from the augmentation of the ShardAccountBlocks "
         "dictionary");
   }
-  return true;
+  return value_flow_;
 }
 
 /**
@@ -5430,7 +5440,7 @@ bool ContestValidateQuery::check_message_processing_order() {
  *
  * @returns True if the new state is valid, false otherwise.
  */
-bool ContestValidateQuery::check_new_state() {
+bool ContestValidateQuery::check_new_state(const block::ValueFlow& value_flow_) {
   // shard_state#9023afe2 global_id:int32 -> checked in unpack_next_state()
   // shard_id:ShardIdent -> checked in unpack_next_state()
   // seq_no:uint32 vert_seq_no:# -> checked in unpack_next_state()
@@ -5484,7 +5494,7 @@ bool ContestValidateQuery::check_new_state() {
  *
  * @returns True if the value flow is valid, False otherwise.
  */
-bool ContestValidateQuery::postcheck_value_flow() {
+bool ContestValidateQuery::postcheck_value_flow(const block::ValueFlow& value_flow_) {
   auto accounts_extra = ns_.account_dict_->get_root_extra();
   block::CurrencyCollection cc;
   if (!(accounts_extra.write().advance(5) && cc.unpack(std::move(accounts_extra)))) {
@@ -5566,6 +5576,7 @@ bool ContestValidateQuery::try_validate() {
         return true;
       }
     }
+
     LOG(INFO) << "try_validate stage 1";
     LOG(INFO) << "running automated validity checks for block candidate " << id_.to_str();
     if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
@@ -5577,9 +5588,10 @@ bool ContestValidateQuery::try_validate() {
     if (!add_trivial_neighbor()) {
       return fatal_error("cannot add previous block as a trivial neighbor");
     }
-    if (!unpack_block_data()) {
-      return reject_query("cannot unpack block data");
-    }
+
+    block::ValueFlow value_flow_ = unpack_block_data();
+    // return reject_query("cannot unpack block data: " + error);
+
     if (!precheck_account_transactions()) {
       return reject_query("invalid collection of account transactions in ShardAccountBlocks");
     }
@@ -5617,15 +5629,17 @@ bool ContestValidateQuery::try_validate() {
     if (!check_message_processing_order()) {
       return reject_query("some messages have been processed by transactions in incorrect order");
     }
-    if (!check_new_state()) {
+    if (!check_new_state(value_flow_)) {
       return reject_query("the header of the new shardchain state is invalid");
     }
-    if (!postcheck_value_flow()) {
+    if (!postcheck_value_flow(value_flow_)) {
       return reject_query("new ValueFlow is invalid");
     }
     if (!build_state_update()) {
       return reject_query("cannot build state update");
     }
+  } catch (std::string error) {
+    return reject_query(error);
   } catch (vm::VmError& err) {
     return fatal_error(-666, err.get_msg());
   } catch (vm::VmVirtError& err) {
