@@ -211,9 +211,11 @@ void ContestValidateQuery::start_up() {
     if (!postcheck_value_flow(value_flow_, import_fees_)) {
       reject_query("new ValueFlow is invalid"); return;
     }
-    if (!build_state_update()) {
-      reject_query("cannot build state update"); return;
-    }
+
+    td::BufferSlice result_state_update_ = build_state_update(); // reject_query("cannot build state update"); return;
+    finish_query(result_state_update_);
+    return;
+
   } catch (std::string error) {
     reject_query(error); return;
   } catch (vm::VmError& err) {
@@ -221,7 +223,6 @@ void ContestValidateQuery::start_up() {
   } catch (vm::VmVirtError& err) {
     reject_query(err.get_msg()); return;
   }
-  finish_query();
 }
 
 

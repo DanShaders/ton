@@ -93,6 +93,17 @@ bool ContestValidateQuery::soft_reject_query(std::string error, td::BufferSlice 
   return false;
 }
 
+
+
+void ContestValidateQuery::fatal_throw(td::Status error) {
+  error.ensure_error();
+  throw "aborting validation of block candidate for " + shard_.to_str() + " : " + error.to_string();
+}
+void ContestValidateQuery::fatal_throw(std::string err_msg, int err_code) {
+	fatal_throw(td::Status::Error(err_code, error_ctx() + err_msg));
+}
+
+
 /**
  * Handles a fatal error during validation.
  *
@@ -157,7 +168,7 @@ bool ContestValidateQuery::fatal_error(std::string err_msg, int err_code) {
 /**
  * Finishes the query and sends the result to the promise.
  */
-void ContestValidateQuery::finish_query() {
+void ContestValidateQuery::finish_query(td::BufferSlice& result_state_update_) {
   if (main_promise) {
     LOG(WARNING) << "validate query done";
     main_promise.set_result(std::move(result_state_update_));

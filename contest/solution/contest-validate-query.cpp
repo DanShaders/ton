@@ -5239,28 +5239,23 @@ Ref<vm::Cell> ContestValidateQuery::get_virt_state_root(td::Bits256 block_root_h
  *
  * @return True on success, False on error.
  */
-bool ContestValidateQuery::build_state_update() {
+td::BufferSlice ContestValidateQuery::build_state_update() {
   td::Ref<vm::Cell> msg_q_info;
   {
     vm::CellBuilder cb;
     // out_msg_queue_extra#0 dispatch_queue:DispatchQueue out_queue_size:(Maybe uint48) = OutMsgQueueExtra;
     // ... extra:(Maybe OutMsgQueueExtra)
-    if (!(cb.store_long_bool(1, 1) && cb.store_long_bool(0, 4) && ns_.dispatch_queue_->append_dict_to_bool(cb))) {
-      return false;
-    }
-    if (!(cb.store_bool_bool(true) && ns_.out_msg_queue_size_ &&
-          cb.store_long_bool(ns_.out_msg_queue_size_.value(), 48))) {
-      return false;
-    }
+    RejectIf(!(cb.store_long_bool(1, 1) && cb.store_long_bool(0, 4) && ns_.dispatch_queue_->append_dict_to_bool(cb)));
+    RejectIf(!(cb.store_bool_bool(true) && ns_.out_msg_queue_size_ &&
+          cb.store_long_bool(ns_.out_msg_queue_size_.value(), 48)));
+
     vm::CellSlice maybe_extra = cb.as_cellslice();
     cb.reset();
     bool ok = ns_.out_msg_queue_->append_dict_to_bool(cb)                  // _ out_queue:OutMsgQueue
               && cb.append_cellslice_bool(extra_collated_data_.proc_info)  // proc_info:ProcessedInfo
               && cb.append_cellslice_bool(maybe_extra)                     // extra:(Maybe OutMsgQueueExtra)
               && cb.finalize_to(msg_q_info);
-    if (!ok) {
-      return false;
-    }
+    RejectIf(!ok);
   }
 
   td::Ref<vm::Cell> state_root;
@@ -5288,15 +5283,15 @@ bool ContestValidateQuery::build_state_update() {
         && cb.store_ref_bool(cb2.finalize())                   // ]
         && cb.store_bool_bool(false)                           // custom:(Maybe ^McStateExtra)
         && cb.finalize_to(state_root))) {
-    return fatal_error("cannot create new ShardState");
+    fatal_throw("cannot create new ShardState");
   }
 
   auto state_update = vm::MerkleUpdate::generate(prev_state_root_, state_root, state_usage_tree_.get());
   if (state_update.is_null()) {
-    return fatal_error("failed to generate Merkle update");
+    fatal_throw("failed to generate Merkle update");
   }
-  result_state_update_ = vm::std_boc_serialize(state_update).move_as_ok();
-  return true;
+  td::BufferSlice result_state_update_ = vm::std_boc_serialize(state_update).move_as_ok();
+  return result_state_update_;
 }
 
 /**

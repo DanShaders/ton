@@ -70,6 +70,13 @@ auto t(Args&&... args) -> decltype(f(std::forward<Args>(args)...)) {
 }
 
 
+
+#define RejectIf(cond) \
+  if (cond) { \
+    reject_throw(#cond); \
+  }
+
+
 #define DEST2(a, b, v) \
   auto temp##__LINE__ = v; \
   auto a = std::get<0>(temp##__LINE__); \
@@ -280,12 +287,15 @@ public:
 
   void reject_throw(std::string error, td::BufferSlice reason = {});
 
-  void finish_query();
+  void finish_query(td::BufferSlice& result_state_update_);
   void abort_query(td::Status error);
   bool reject_query(std::string error, td::BufferSlice reason = {});
   bool reject_query(std::string err_msg, td::Status error, td::BufferSlice reason = {});
   bool soft_reject_query(std::string error, td::BufferSlice reason = {});
   void start_up() override;
+
+  void fatal_throw(td::Status error);
+  void fatal_throw(std::string err_msg, int err_code = -666);
 
   bool fatal_error(td::Status error);
   bool fatal_error(int err_code, std::string err_msg);
@@ -400,10 +410,10 @@ public:
 
   Ref<vm::Cell> get_virt_state_root(td::Bits256 block_root_hash);
 
-  td::BufferSlice result_state_update_;
+  // td::BufferSlice result_state_update_;
 
   bool store_master_ref(vm::CellBuilder& cb);
-  bool build_state_update();
+  td::BufferSlice build_state_update();
 
  private:
   int testIndex;
