@@ -75,6 +75,20 @@ auto t(Args&&... args) -> decltype(f(std::forward<Args>(args)...)) {
   if (cond) { \
     reject_throw(#cond); \
   }
+#define RejectIfWithComment(cond, comment) \
+  if (cond) { \
+    reject_throw(#cond ": " comment); \
+  }
+
+// No idea why we need these, but I'll keep it in-line with the original code
+#define SoftRejectIf(cond) \
+  if (cond) { \
+    reject_throw(#cond " SOFT"); \
+  }
+#define SoftRejectIfWithComment(cond, comment) \
+  if (cond) { \
+    reject_throw(#cond " SOFT: " comment); \
+  }
 
 
 #define DEST2(a, b, v) \

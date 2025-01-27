@@ -49,77 +49,56 @@ void ContestValidateQuery::start_up() {
   // LOG(ERROR) << "Test index #" << testIndex << ": Stored main_thread_id: " << render_thread_id(main_thread_id)
   //            << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   main_thread_id = std::this_thread::get_id();
-
   doesItCreateNewInstancePerTest++;
   // LOG(ERROR) << "start_up: doesItCreateNewInstancePerTest = " << doesItCreateNewInstancePerTest;
   CHECK(doesItCreateNewInstancePerTest == 1);
 
-  if (ShardIdFull(id_) != shard_) {
-    soft_reject_query(PSTRING() << "block candidate belongs to shard " << ShardIdFull(id_).to_str()
-                                << " different from current shard " << shard_.to_str());
-    return;
-  }
-  if (workchain() != ton::basechainId) {
-    soft_reject_query("only basechain is supported");
-    return;
-  }
-  if (!shard_.is_valid_ext()) {
-    reject_query("requested to validate a block for an invalid shard");
-    return;
-  }
-  td::uint64 x = td::lower_bit64(shard_.shard);
-  if (x < 8) {
-    reject_query("a shard cannot be split more than 60 times");
-    return;
-  }
-  // 3. unpack block candidate (while necessary data is being loaded)
-  if (!unpack_block_candidate()) {
-    reject_query("error unpacking block candidate");
-    return;
-  }
-  if (prev_blocks.size() > 2) {
-    soft_reject_query("cannot have more than two previous blocks");
-    return;
-  }
-  if (!prev_blocks.size()) {
-    soft_reject_query("must have one or two previous blocks to generate a next block");
-    return;
-  }
-  if (prev_blocks.size() == 2) {
-    if (!(shard_is_parent(shard_, ShardIdFull(prev_blocks[0])) &&
-          shard_is_parent(shard_, ShardIdFull(prev_blocks[1])) && prev_blocks[0].id.shard < prev_blocks[1].id.shard)) {
-      soft_reject_query(
-          "the two previous blocks for a merge operation are not siblings or are not children of current shard");
-      return;
-    }
-    for (const auto& blk : prev_blocks) {
-      if (!blk.id.seqno) {
-        soft_reject_query("previous blocks for a block merge operation must have non-zero seqno");
-        return;
-      }
-    }
-    // soft_reject_query("merging shards is not implemented yet");
-    // return;
-  } else {
-    CHECK(prev_blocks.size() == 1);
-    // creating next block
-    if (!ShardIdFull(prev_blocks[0]).is_valid_ext()) {
-      soft_reject_query("previous block does not have a valid id");
-      return;
-    }
-    if (ShardIdFull(prev_blocks[0]) != shard_) {
-      if (!shard_is_parent(ShardIdFull(prev_blocks[0]), shard_)) {
-        soft_reject_query("previous block does not belong to the shard we are generating a new block for");
-        return;
-      }
-    }
-    if (after_split_) {
-      // soft_reject_query("splitting shards not implemented yet");
-      // return;
-    }
-  }
 
+
+  // ------------------- CHECKS -------------------
   try {
+    SoftRejectIf(ShardIdFull(id_) != shard_);
+    // PSTRING() << "block candidate belongs to shard " << ShardIdFull(id_).to_str()
+    //           << " different from current shard " << shard_.to_str()
+    SoftRejectIfWithComment(workchain() != ton::basechainId, "only basechain is supported");
+    SoftRejectIfWithComment(!shard_.is_valid_ext(), "requested to validate a block for an invalid shard");
+    td::uint64 x = td::lower_bit64(shard_.shard);
+    SoftRejectIfWithComment(x < 8, "a shard cannot be split more than 60 times");
+    // 3. unpack block candidate (while necessary data is being loaded)
+    if (!unpack_block_candidate()) {
+      reject_query("error unpacking block candidate");
+      return;
+    }
+    SoftRejectIfWithComment(prev_blocks.size() > 2, "cannot have more than two previous blocks");
+    SoftRejectIfWithComment(!prev_blocks.size(), "must have one or two previous blocks to generate a next block");
+
+    if (prev_blocks.size() == 2) {
+      SoftRejectIfWithComment(
+        !(shard_is_parent(shard_, ShardIdFull(prev_blocks[0])) &&
+          shard_is_parent(shard_, ShardIdFull(prev_blocks[1])) && prev_blocks[0].id.shard < prev_blocks[1].id.shard),
+          "the two previous blocks for a merge operation are not siblings or are not children of current shard"
+      );
+      for (const auto& blk : prev_blocks) {
+        SoftRejectIfWithComment(!blk.id.seqno, "previous blocks for a block merge operation must have non-zero seqno");
+      }
+      // soft_reject_query("merging shards is not implemented yet");
+      // return;
+    } else {
+      CHECK(prev_blocks.size() == 1);
+      // creating next block
+      SoftRejectIfWithComment(!ShardIdFull(prev_blocks[0]).is_valid_ext(), "previous block does not have a valid id");
+      if (ShardIdFull(prev_blocks[0]) != shard_) {
+        SoftRejectIfWithComment(!shard_is_parent(ShardIdFull(prev_blocks[0]), shard_),
+          "previous block does not belong to the shard we are generating a new block for"
+        );
+      }
+      if (after_split_) {
+        // soft_reject_query("splitting shards not implemented yet");
+        // return;
+      }
+    }
+
+
     // 4. load state(s) corresponding to previous block(s)
     prev_states.resize(prev_blocks.size());
     for (int i = 0; (unsigned)i < prev_blocks.size(); i++) {
@@ -132,6 +111,7 @@ void ContestValidateQuery::start_up() {
 
 
     // MAIN VALIDATOR SEQUENCE (invokes other methods in a suitable order).
+    // (previously: try_validate())
 
     LOG(INFO) << "try_validate stage 0";
     if (!compute_prev_state()) {
@@ -213,9 +193,10 @@ void ContestValidateQuery::start_up() {
     }
 
     td::BufferSlice result_state_update_ = build_state_update(); // reject_query("cannot build state update"); return;
-    finish_query(result_state_update_);
-    return;
 
+    finish_query(result_state_update_);
+  
+    return;
   } catch (std::string error) {
     reject_query(error); return;
   } catch (vm::VmError& err) {
