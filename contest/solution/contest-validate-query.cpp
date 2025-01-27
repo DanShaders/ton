@@ -282,7 +282,7 @@ bool ContestValidateQuery::extract_collated_data() {
  */
 void ContestValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
   LOG(INFO) << "in ContestValidateQuery::after_get_mc_state() for " << mc_blkid_.to_str();
-  // --pending; // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
+  // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   if (res.is_error()) {
     // fatal_error(res.move_as_error());
     throw res.move_as_error().to_string();
@@ -293,11 +293,6 @@ void ContestValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
     throw "cannot process masterchain state for "s + mc_blkid_.to_str();
     return;
   }
-  // if (!pending) {
-  //   if (!try_validate()) {
-  //     fatal_error("cannot validate new block");
-  //   }
-  // }
 }
 
 /**
@@ -308,7 +303,7 @@ void ContestValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
  */
 void ContestValidateQuery::after_get_shard_state(int idx, td::Result<Ref<ShardState>> res) {
   LOG(INFO) << "in ContestValidateQuery::after_get_shard_state(" << idx << ")";
-  // --pending; // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
+  // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   if (res.is_error()) {
     // fatal_error(res.move_as_error());
     throw res.move_as_error().to_string();
@@ -320,11 +315,6 @@ void ContestValidateQuery::after_get_shard_state(int idx, td::Result<Ref<ShardSt
   CHECK(prev_states[idx].not_null());
   CHECK(prev_states[idx]->get_shard() == ShardIdFull(prev_blocks[idx]));
   CHECK(prev_states[idx]->root_cell().not_null());
-  // if (!pending) {
-  //   if (!try_validate()) {
-  //     fatal_error("cannot validate new block");
-  //   }
-  // }
 }
 
 /**
@@ -926,14 +916,11 @@ bool ContestValidateQuery::request_neighbor_queues() {
   {
     for (block::McShardDescr& descr : neighbors_) {
       LOG(DEBUG) << "requesting outbound queue of neighbor #" << i << " : " << descr.blk_.to_str();
-      // ++pending;
       auto r_state = fetch_block_state(descr.blk_);
       if (r_state.is_error()) {
         return fatal_error(r_state.move_as_error());
       }
       got_neighbor_out_queue(i, r_state.ok()->message_queue());
-      // td::actor::send_closure(actor_id(this), &ContestValidateQuery::got_neighbor_out_queue, i,
-      //                         r_state.ok()->message_queue());
       ++i;
     }
   }
@@ -948,7 +935,7 @@ bool ContestValidateQuery::request_neighbor_queues() {
  * @param res The obtained outbound queue.
  */
 void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQueue>> res) {
-  // --pending; // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
+  // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   if (res.is_error()) {
     fatal_error(res.move_as_error());
     return;
@@ -1006,11 +993,6 @@ void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQ
       }
     }
   } while (false);
-
-  // if (!pending) {
-  //   LOG(INFO) << "all neighbor output queues fetched";
-  //   try_validate();
-  // }
 }
 
 /**
@@ -1076,10 +1058,9 @@ bool ContestValidateQuery::request_aux_mc_state(BlockSeqno seqno, Ref<Masterchai
   }
   CHECK(blkid.is_valid_ext() && blkid.is_masterchain());
   LOG(DEBUG) << "sending auxiliary wait_block_state() query for " << blkid.to_str() << " to Manager";
-  // ++pending;
+
   after_get_aux_shard_state(blkid, fetch_block_state(blkid));
-  // td::actor::send_closure_later(actor_id(this), &ContestValidateQuery::after_get_aux_shard_state, blkid,
-  //                               fetch_block_state(blkid));
+
   state.clear();
   return true;
 }
@@ -1111,7 +1092,7 @@ Ref<MasterchainStateQ> ContestValidateQuery::get_aux_mc_state(BlockSeqno seqno) 
  */
 void ContestValidateQuery::after_get_aux_shard_state(ton::BlockIdExt blkid, td::Result<Ref<ShardState>> res) {
   LOG(DEBUG) << "in ContestValidateQuery::after_get_aux_shard_state(" << blkid.to_str() << ")";
-  // --pending; // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
+  // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   if (res.is_error()) {
     fatal_error("cannot load auxiliary masterchain state for "s + blkid.to_str() + " : " +
                 res.move_as_error().to_string());

@@ -157,7 +157,6 @@ class ContestValidateQuery : public td::actor::Actor {
 //  private: // !!TODO: reverse
 public:
   int verbosity{0};
-  int pending{0};
   const ShardIdFull shard_;
   const BlockIdExt id_;
   std::vector<BlockIdExt> prev_blocks;
@@ -333,7 +332,6 @@ public:
   bool unpack_block_candidate();
   bool extract_collated_data_from(Ref<vm::Cell> croot, int idx);
   bool extract_collated_data();
-  bool try_validate();
   bool compute_prev_state();
   bool unpack_merge_prev_state();
   bool unpack_prev_state();
