@@ -744,7 +744,7 @@ bool ContestValidateQuery::check_this_shard_mc_info() {
  *
  * @returns True if the previous state is computed successfully, false otherwise.
  */
-bool ContestValidateQuery::compute_prev_state() {
+void ContestValidateQuery::compute_prev_state() {
   CHECK(prev_states.size() == 1u + after_merge_);
 
   prev_state_root_ = prev_states[0]->root_cell();
@@ -753,12 +753,11 @@ bool ContestValidateQuery::compute_prev_state() {
     Ref<vm::Cell> aux_root = prev_states[1]->root_cell();
     if (!block::gen::t_ShardState.cell_pack_split_state(prev_state_root_, prev_states[0]->root_cell(),
                                                         prev_states[1]->root_cell())) {
-      return fatal_error(-667, "cannot construct mechanically merged previously state");
+      fatal_throw(-667, "cannot construct mechanically merged previously state");
     }
   }
   state_usage_tree_ = std::make_shared<vm::CellUsageTree>();
   prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr()); // !TEMP_THREAD likely breaks Merkle Update
-  return true;
 }
 
 /**
@@ -768,31 +767,32 @@ bool ContestValidateQuery::compute_prev_state() {
  *
  * @returns True if the unpacking and merging was successful, false otherwise.
  */
-bool ContestValidateQuery::unpack_merge_prev_state() {
+void ContestValidateQuery::unpack_merge_prev_state() {
   LOG(DEBUG) << "unpack/merge previous states";
   CHECK(prev_states.size() == 2);
   // 2. extract the two previous states
   Ref<vm::Cell> root0, root1;
   if (!block::gen::t_ShardState.cell_unpack_split_state(prev_state_root_, root0, root1)) {
-    return fatal_error(-667, "cannot unsplit a virtual split_state after a merge");
+    fatal_throw(-667, "cannot unsplit a virtual split_state after a merge");
   }
   // 3. unpack previous states
   // 3.1. unpack left ancestor
-  if (!unpack_one_prev_state(ps_, prev_blocks.at(0), std::move(root0))) {
-    return fatal_error("cannot unpack the state of left ancestor "s + prev_blocks.at(0).to_str());
-  }
+  unpack_one_prev_state(ps_, prev_blocks.at(0), std::move(root0));
+    //return fatal_error("cannot unpack the state of left ancestor "s + prev_blocks.at(0).to_str());
+  
   // 3.2. unpack right ancestor
   block::ShardState ss1;
-  if (!unpack_one_prev_state(ss1, prev_blocks.at(1), std::move(root1))) {
-    return fatal_error("cannot unpack the state of right ancestor "s + prev_blocks.at(1).to_str());
-  }
+  unpack_one_prev_state(ss1, prev_blocks.at(1), std::move(root1));
+    //return fatal_error("cannot unpack the state of right ancestor "s + prev_blocks.at(1).to_str());
+  
   // 4. merge the two ancestors of the current state
   LOG(INFO) << "merging the two previous states";
   auto res = ps_.merge_with(ss1);
   if (res.is_error()) {
-    return fatal_error(std::move(res)) || fatal_error("cannot merge the two previous states");
+    // return fatal_error(std::move(res)) || fatal_error("cannot merge the two previous states");
+    // What is this error OR-ing even supposed to mean?
+    fatal_throw(std::move(res)); // || fatal_error("cannot merge the two previous states");
   }
-  return true;
 }
 
 /**
@@ -802,18 +802,20 @@ bool ContestValidateQuery::unpack_merge_prev_state() {
  *
  * @returns True if the unpacking is successful, false otherwise.
  */
-bool ContestValidateQuery::unpack_prev_state() {
+void ContestValidateQuery::unpack_prev_state() {
   LOG(DEBUG) << "unpacking previous state(s)";
   CHECK(prev_state_root_.not_null());
   if (after_merge_) {
-    if (!unpack_merge_prev_state()) {
-      return fatal_error("unable to unpack/merge previous states immediately after a merge");
-    }
-    return true;
+    unpack_merge_prev_state();
+      // return fatal_error("unable to unpack/merge previous states immediately after a merge");
+    return;
   }
   CHECK(prev_states.size() == 1);
   // unpack previous state
-  return unpack_one_prev_state(ps_, prev_blocks.at(0), prev_state_root_) && (!after_split_ || split_prev_state(ps_));
+
+  unpack_one_prev_state(ps_, prev_blocks.at(0), prev_state_root_);
+  PassIf(!after_split_ || split_prev_state(ps_));
+  // return unpack_one_prev_state(ps_, prev_blocks.at(0), prev_state_root_) && (!after_split_ || split_prev_state(ps_));
 }
 
 /**
@@ -826,7 +828,7 @@ bool ContestValidateQuery::unpack_prev_state() {
  *
  * @returns True if the unpacking and checks are successful, false otherwise.
  */
-bool ContestValidateQuery::unpack_one_prev_state(block::ShardState& ss, BlockIdExt blkid,
+void ContestValidateQuery::unpack_one_prev_state(block::ShardState& ss, BlockIdExt blkid,
                                                  Ref<vm::Cell> prev_state_root) {
   auto res = ss.unpack_state_ext(blkid, std::move(prev_state_root), global_id_, mc_seqno_, after_split_,
                                  after_split_ | after_merge_, [this](ton::BlockSeqno mc_seqno) {
@@ -834,13 +836,12 @@ bool ContestValidateQuery::unpack_one_prev_state(block::ShardState& ss, BlockIdE
                                    return request_aux_mc_state(mc_seqno, state);
                                  });
   if (res.is_error()) {
-    return fatal_error(std::move(res));
+    fatal_throw(std::move(res));
   }
   if (ss.vert_seqno_ > vert_seqno_) {
-    return reject_query(PSTRING() << "one of previous states " << ss.id_.to_str() << " has vertical seqno "
+    reject_throw(PSTRING() << "one of previous states " << ss.id_.to_str() << " has vertical seqno "
                                   << ss.vert_seqno_ << " larger than that of the new block " << vert_seqno_);
   }
-  return true;
 }
 
 /**
@@ -873,7 +874,7 @@ bool ContestValidateQuery::split_prev_state(block::ShardState& ss) {
   return true;
 }
 
-bool ContestValidateQuery::init_next_state() {
+void ContestValidateQuery::init_next_state() {
   ns_.id_ = id_;
   ns_.global_id_ = global_id_;
   ns_.utime_ = now_;
@@ -883,9 +884,8 @@ bool ContestValidateQuery::init_next_state() {
   ns_.before_split_ = before_split_;
   ns_.processed_upto_ = block::MsgProcessedUptoCollection::unpack(id_.shard_full(), extra_collated_data_.proc_info);
   if (!ns_.processed_upto_) {
-    return reject_query("failed top unpack processed upto");
+    reject_throw("failed top unpack processed upto");
   }
-  return true;
 }
 
 /**
@@ -894,7 +894,7 @@ bool ContestValidateQuery::init_next_state() {
  *
  * @returns True if the request for neighbor message queues was successful, false otherwise.
  */
-bool ContestValidateQuery::request_neighbor_queues() {
+void ContestValidateQuery::request_neighbor_queues() {
   CHECK(new_shard_conf_);
   auto neighbor_list = new_shard_conf_->get_neighbor_shard_hash_ids(shard_);
   LOG(DEBUG) << "got a preliminary list of " << neighbor_list.size() << " neighbors for " << shard_.to_str();
@@ -904,10 +904,10 @@ bool ContestValidateQuery::request_neighbor_queues() {
     }
     auto shard_ptr = new_shard_conf_->get_shard_hash(ton::ShardIdFull(blk_id));
     if (shard_ptr.is_null()) {
-      return reject_query("cannot obtain shard hash for neighbor "s + blk_id.to_str());
+      reject_throw("cannot obtain shard hash for neighbor "s + blk_id.to_str());
     }
     if (shard_ptr->blk_.id != blk_id) {
-      return reject_query("invalid block id "s + shard_ptr->blk_.to_str() + " returned in information for neighbor " +
+      reject_throw("invalid block id "s + shard_ptr->blk_.to_str() + " returned in information for neighbor " +
                           blk_id.to_str());
     }
     neighbors_.emplace_back(*shard_ptr);
@@ -918,13 +918,12 @@ bool ContestValidateQuery::request_neighbor_queues() {
       LOG(DEBUG) << "requesting outbound queue of neighbor #" << i << " : " << descr.blk_.to_str();
       auto r_state = fetch_block_state(descr.blk_);
       if (r_state.is_error()) {
-        return fatal_error(r_state.move_as_error());
+        fatal_throw(r_state.move_as_error());
       }
       got_neighbor_out_queue(i, r_state.ok()->message_queue());
       ++i;
     }
   }
-  return true;
 }
 
 /**
@@ -1120,35 +1119,34 @@ void ContestValidateQuery::after_get_aux_shard_state(ton::BlockIdExt blkid, td::
  *
  * @returns True if the utime and logical time pass checks, False otherwise.
  */
-bool ContestValidateQuery::check_utime_lt() {
+void ContestValidateQuery::check_utime_lt() {
   if (start_lt_ <= ps_.lt_) {
-    return reject_query(PSTRING() << "block has start_lt " << start_lt_ << " less than or equal to lt " << ps_.lt_
+    reject_throw(PSTRING() << "block has start_lt " << start_lt_ << " less than or equal to lt " << ps_.lt_
                                   << " of the previous state");
   }
   if (now_ <= ps_.utime_) {
-    return reject_query(PSTRING() << "block has creation time " << now_
+    reject_throw(PSTRING() << "block has creation time " << now_
                                   << " less than or equal to that of the previous state (" << ps_.utime_ << ")");
   }
   if (now_ <= config_->utime) {
-    return reject_query(PSTRING() << "block has creation time " << now_
+    reject_throw(PSTRING() << "block has creation time " << now_
                                   << " less than or equal to that of the reference masterchain state ("
                                   << config_->utime << ")");
   }
   if (start_lt_ <= config_->lt) {
-    return reject_query(PSTRING() << "block has start_lt " << start_lt_ << " less than or equal to lt " << config_->lt
+    reject_throw(PSTRING() << "block has start_lt " << start_lt_ << " less than or equal to lt " << config_->lt
                                   << " of the reference masterchain state");
   }
   auto lt_bound = std::max(ps_.lt_, std::max(config_->lt, max_shard_lt_));
   if (start_lt_ > lt_bound + config_->get_lt_align() * 4) {
-    return reject_query(PSTRING() << "block has start_lt " << start_lt_
+    reject_throw(PSTRING() << "block has start_lt " << start_lt_
                                   << " which is too large without a good reason (lower bound is " << lt_bound + 1
                                   << ")");
   }
   if (end_lt_ - start_lt_ > block_limits_->lt_delta.hard()) {
-    return reject_query(PSTRING() << "block increased logical time by " << end_lt_ - start_lt_
+    reject_throw(PSTRING() << "block increased logical time by " << end_lt_ - start_lt_
                                   << " which is larger than the hard limit " << block_limits_->lt_delta.hard());
   }
-  return true;
 }
 
 /**
@@ -1156,26 +1154,26 @@ bool ContestValidateQuery::check_utime_lt() {
  *
  * @returns True if the request was successful, false otherwise.
  */
-bool ContestValidateQuery::prepare_out_msg_queue_size() {
+void ContestValidateQuery::prepare_out_msg_queue_size() {
   if (ps_.out_msg_queue_size_) {
     // if after_split then out_msg_queue_size is always present, since it is calculated during split
     old_out_msg_queue_size_ = ps_.out_msg_queue_size_.value();
     out_msg_queue_size_known_ = true;
     have_out_msg_queue_size_in_state_ = true;
-    return true;
+    return;
   }
   if (ps_.out_msg_queue_->is_empty()) {
     old_out_msg_queue_size_ = 0;
     out_msg_queue_size_known_ = true;
     have_out_msg_queue_size_in_state_ = true;
-    return true;
+    return;
   }
   if (!store_out_msg_queue_size_) {  // Don't need it
-    return true;
+    return;
   }
   old_out_msg_queue_size_ = 0;
   out_msg_queue_size_known_ = true;
-  return fatal_error("unknown queue sizes");
+  fatal_throw("unknown queue sizes");
 }
 
 
@@ -1195,23 +1193,23 @@ bool ContestValidateQuery::prepare_out_msg_queue_size() {
  *
  * @returns True if the processed up to information was successfully adjusted, false otherwise.
  */
-bool ContestValidateQuery::fix_one_processed_upto(block::MsgProcessedUpto& proc, ton::ShardIdFull owner,
+void ContestValidateQuery::fix_one_processed_upto(block::MsgProcessedUpto& proc, ton::ShardIdFull owner,
                                                   bool allow_cur) {
   if (proc.compute_shard_end_lt) {
-    return true;
+    return;
   }
   auto seqno = std::min(proc.mc_seqno, mc_seqno_);
   {
     auto state = get_aux_mc_state(seqno);
     if (state.is_null()) {
-      return fatal_error(
+      fatal_throw(
           -666, PSTRING() << "cannot obtain masterchain state with seqno " << seqno << " (originally required "
                           << proc.mc_seqno << ") in a MsgProcessedUpto record for "
                           << ton::ShardIdFull{owner.workchain, proc.shard}.to_str() << " owned by " << owner.to_str());
     }
     proc.compute_shard_end_lt = state->get_config()->get_compute_shard_end_lt_func();
   }
-  return (bool)proc.compute_shard_end_lt;
+  PassIf((bool)proc.compute_shard_end_lt);
 }
 
 /**
@@ -1223,13 +1221,10 @@ bool ContestValidateQuery::fix_one_processed_upto(block::MsgProcessedUpto& proc,
  *
  * @returns True if all entries were successfully adjusted, False otherwise.
  */
-bool ContestValidateQuery::fix_processed_upto(block::MsgProcessedUptoCollection& upto, bool allow_cur) {
+void ContestValidateQuery::fix_processed_upto(block::MsgProcessedUptoCollection& upto, bool allow_cur) {
   for (auto& entry : upto.list) {
-    if (!fix_one_processed_upto(entry, upto.owner, allow_cur)) {
-      return false;
-    }
+    fix_one_processed_upto(entry, upto.owner, allow_cur);
   }
-  return true;
 }
 
 /**
@@ -1237,24 +1232,24 @@ bool ContestValidateQuery::fix_processed_upto(block::MsgProcessedUptoCollection&
  *
  * @returns True if all processed_upto values were successfully adjusted, false otherwise.
  */
-bool ContestValidateQuery::fix_all_processed_upto() {
+void ContestValidateQuery::fix_all_processed_upto() {
   CHECK(ps_.processed_upto_);
-  if (!fix_processed_upto(*ps_.processed_upto_)) {
-    return fatal_error("Cannot adjust old ProcessedUpto of our shard state");
-  }
-  if (sibling_processed_upto_ && !fix_processed_upto(*sibling_processed_upto_)) {
-    return fatal_error("Cannot adjust old ProcessedUpto of the shard state of our virtual sibling");
-  }
-  if (!fix_processed_upto(*ns_.processed_upto_, true)) {
-    return fatal_error("Cannot adjust new ProcessedUpto of our shard state");
-  }
+  fix_processed_upto(*ps_.processed_upto_);
+    //return fatal_error("Cannot adjust old ProcessedUpto of our shard state");
+
+  // if (sibling_processed_upto_ && !fix_processed_upto(*sibling_processed_upto_))
+  if (sibling_processed_upto_)
+    fix_processed_upto(*sibling_processed_upto_);
+    //return fatal_error("Cannot adjust old ProcessedUpto of the shard state of our virtual sibling");
+
+  fix_processed_upto(*ns_.processed_upto_, true);
+    //return fatal_error("Cannot adjust new ProcessedUpto of our shard state");
+
   for (auto& descr : neighbors_) {
     CHECK(descr.processed_upto);
-    if (!fix_processed_upto(*descr.processed_upto)) {
-      return fatal_error("Cannot adjust ProcessedUpto of neighbor "s + descr.blk_.to_str());
-    }
+    fix_processed_upto(*descr.processed_upto);
+      //return fatal_error("Cannot adjust ProcessedUpto of neighbor "s + descr.blk_.to_str());
   }
-  return true;
 }
 
 /**
@@ -1264,7 +1259,7 @@ bool ContestValidateQuery::fix_all_processed_upto() {
  *
  * @returns True if the operation is successful, false otherwise.
  */
-bool ContestValidateQuery::add_trivial_neighbor_after_merge() {
+void ContestValidateQuery::add_trivial_neighbor_after_merge() {
   LOG(DEBUG) << "in add_trivial_neighbor_after_merge()";
   CHECK(prev_blocks.size() == 2);
   int found = 0;
@@ -1275,11 +1270,11 @@ bool ContestValidateQuery::add_trivial_neighbor_after_merge() {
       ++found;
       LOG(DEBUG) << "neighbor #" << i << " : " << nb.blk_.to_str() << " intersects our shard " << shard_.to_str();
       if (!ton::shard_is_parent(shard_, nb.shard()) || found > 2) {
-        return fatal_error("impossible shard configuration in add_trivial_neighbor_after_merge()");
+        fatal_throw("impossible shard configuration in add_trivial_neighbor_after_merge()");
       }
       auto prev_shard = prev_blocks.at(found - 1).shard_full();
       if (nb.shard() != prev_shard) {
-        return fatal_error("neighbor shard "s + nb.shard().to_str() + " does not match that of our ancestor " +
+        fatal_throw("neighbor shard "s + nb.shard().to_str() + " does not match that of our ancestor " +
                            prev_shard.to_str());
       }
       if (found == 1) {
@@ -1295,7 +1290,6 @@ bool ContestValidateQuery::add_trivial_neighbor_after_merge() {
     }
   }
   CHECK(found == 2);
-  return true;
 }
 
 /**
@@ -1305,21 +1299,21 @@ bool ContestValidateQuery::add_trivial_neighbor_after_merge() {
  *
  * @returns True if the operation is successful, false otherwise.
  */
-bool ContestValidateQuery::add_trivial_neighbor() {
+void ContestValidateQuery::add_trivial_neighbor() {
   LOG(DEBUG) << "in add_trivial_neighbor()";
   if (after_merge_) {
-    return add_trivial_neighbor_after_merge();
+    add_trivial_neighbor_after_merge();
   }
   CHECK(prev_blocks.size() == 1);
   if (!prev_blocks[0].seqno()) {
     // skipping
     LOG(DEBUG) << "no trivial neighbor because previous block has zero seqno";
-    return true;
+    return;
   }
   CHECK(prev_state_root_.not_null());
   auto descr_ref = block::McShardDescr::from_state(prev_blocks[0], prev_state_root_);
   if (descr_ref.is_null()) {
-    return reject_query("cannot deserialize header of previous state");
+    reject_throw("cannot deserialize header of previous state");
   }
   CHECK(descr_ref.not_null());
   CHECK(descr_ref->blk_ == prev_blocks[0]);
@@ -1376,7 +1370,7 @@ bool ContestValidateQuery::add_trivial_neighbor() {
                      << " with shard shrinking to our (immediate after-split adjustment)";
           cs = 2;
         } else {
-          return fatal_error("impossible shard configuration in add_trivial_neighbor()");
+          fatal_throw("impossible shard configuration in add_trivial_neighbor()");
         }
       } else if (ton::shard_is_parent(nb.shard(), shard_) && shard_ == prev_shard) {
         // case 3. Continued after-split
@@ -1397,11 +1391,11 @@ bool ContestValidateQuery::add_trivial_neighbor() {
         CHECK(sibling_out_msg_queue_->cut_prefix_subdict(pfx.bits(), 32 + l));
         int res2 = block::filter_out_msg_queue(*sibling_out_msg_queue_, nb2.shard(), sib_shard);
         if (res2 < 0) {
-          return fatal_error("cannot filter virtual sibling's OutMsgQueue from that of the last common ancestor");
+          fatal_throw("cannot filter virtual sibling's OutMsgQueue from that of the last common ancestor");
         }
         nb2.set_queue_root(sibling_out_msg_queue_->get_root_cell());
         if (!nb2.processed_upto->split(sib_shard)) {
-          return fatal_error("error splitting ProcessedUpto for our virtual sibling");
+          fatal_throw("error splitting ProcessedUpto for our virtual sibling");
         }
         nb2.blk_.id.shard = ton::shard_sibling(shard_.shard);
         LOG(DEBUG) << "adjusted neighbor #" << i << " : " << nb2.blk_.to_str()
@@ -1431,13 +1425,12 @@ bool ContestValidateQuery::add_trivial_neighbor() {
           nb.disable();
         }
       } else {
-        return fatal_error("impossible shard configuration in add_trivial_neighbor()");
+        fatal_throw("impossible shard configuration in add_trivial_neighbor()");
       }
     }
   }
   CHECK(found && cs);
   CHECK(found == (1 + (cs == 4)));
-  return true;
 }
 
 /**

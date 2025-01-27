@@ -70,6 +70,14 @@ auto t(Args&&... args) -> decltype(f(std::forward<Args>(args)...)) {
 }
 
 
+#define PassIf(cond) \
+  if (!(cond)) { \
+    reject_throw(#cond); \
+  }
+#define PassIfWithComment(cond, comment) \
+  if (!(cond)) { \
+    reject_throw(#cond ": " comment); \
+  }
 
 #define RejectIf(cond) \
   if (cond) { \
@@ -357,13 +365,13 @@ public:
   bool unpack_block_candidate();
   bool extract_collated_data_from(Ref<vm::Cell> croot, int idx);
   bool extract_collated_data();
-  bool compute_prev_state();
-  bool unpack_merge_prev_state();
-  bool unpack_prev_state();
-  bool init_next_state();
-  bool unpack_one_prev_state(block::ShardState& ss, BlockIdExt blkid, Ref<vm::Cell> prev_state_root);
+  void compute_prev_state();
+  void unpack_merge_prev_state();
+  void unpack_prev_state();
+  void init_next_state();
+  void unpack_one_prev_state(block::ShardState& ss, BlockIdExt blkid, Ref<vm::Cell> prev_state_root);
   bool split_prev_state(block::ShardState& ss);
-  bool request_neighbor_queues();
+  void request_neighbor_queues();
   void got_neighbor_out_queue(int i, td::Result<Ref<MessageQueue>> res);
 
   bool register_mc_state(Ref<MasterchainStateQ> other_mc_state);
@@ -371,14 +379,14 @@ public:
   Ref<MasterchainStateQ> get_aux_mc_state(BlockSeqno seqno) const;
   void after_get_aux_shard_state(ton::BlockIdExt blkid, td::Result<Ref<ShardState>> res);
 
-  bool check_utime_lt();
-  bool prepare_out_msg_queue_size();
+  void check_utime_lt();
+  void prepare_out_msg_queue_size();
 
-  bool fix_one_processed_upto(block::MsgProcessedUpto& proc, ton::ShardIdFull owner, bool allow_cur = false);
-  bool fix_processed_upto(block::MsgProcessedUptoCollection& upto, bool allow_cur = false);
-  bool fix_all_processed_upto();
-  bool add_trivial_neighbor_after_merge();
-  bool add_trivial_neighbor();
+  void fix_one_processed_upto(block::MsgProcessedUpto& proc, ton::ShardIdFull owner, bool allow_cur = false);
+  void fix_processed_upto(block::MsgProcessedUptoCollection& upto, bool allow_cur = false);
+  void fix_all_processed_upto();
+  void add_trivial_neighbor_after_merge();
+  void add_trivial_neighbor();
   tuple<block::ValueFlow, td::RefInt256> unpack_block_data();
   tuple<block::ValueFlow, td::RefInt256> unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
   bool compute_minted_amount(block::CurrencyCollection& to_mint);

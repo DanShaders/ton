@@ -114,37 +114,21 @@ void ContestValidateQuery::start_up() {
     // (previously: try_validate())
 
     LOG(INFO) << "try_validate stage 0";
-    if (!compute_prev_state()) {
-      fatal_error(-666, "cannot compute previous state"); return;
-    }
-    if (!request_neighbor_queues()) {
-      fatal_error("cannot request neighbor output queues"); return;
-    }
-    if (!unpack_prev_state()) {
-      fatal_error("cannot unpack previous state"); return;
-    }
-    if (!init_next_state()) {
-      fatal_error("cannot unpack previous state"); return;
-    }
-    if (!check_utime_lt()) {
-      reject_query("creation utime/lt of the new block is invalid"); return;
-    }
-    if (!prepare_out_msg_queue_size()) {
-      reject_query("cannot request out msg queue size"); return;
-    }
-
+    compute_prev_state(); // fatal_error(-666, "cannot compute previous state"); return;
+    request_neighbor_queues(); // fatal_error("cannot request neighbor output queues"); return;
+    unpack_prev_state(); // fatal_error("cannot unpack previous state"); return;
+    init_next_state(); // fatal_error("cannot unpack previous state"); return;
+    check_utime_lt(); // reject_query("creation utime/lt of the new block is invalid"); return;
+    prepare_out_msg_queue_size(); // reject_query("cannot request out msg queue size"); return;
+    
     LOG(INFO) << "try_validate stage 1";
     LOG(INFO) << "running automated validity checks for block candidate " << id_.to_str();
     if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
       reject_query("block "s + id_.to_str() + " failed to pass automated validity checks"); return;
     }
-    if (!fix_all_processed_upto()) {
-      fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks"); return;
-    }
-    if (!add_trivial_neighbor()) {
-      fatal_error("cannot add previous block as a trivial neighbor"); return;
-    }
 
+    fix_all_processed_upto(); // fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks"); return;
+    add_trivial_neighbor(); // fatal_error("cannot add previous block as a trivial neighbor"); return;
     DEST2(value_flow_, import_fees_, unpack_block_data());
     // reject_query("cannot unpack block data: " + error);
 
