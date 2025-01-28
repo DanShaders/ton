@@ -188,22 +188,33 @@ public:
   int verbosity{0};
   const ShardIdFull shard_;
   const BlockIdExt id_;
+  WorkchainId workchain() const {
+    return shard_.workchain;
+  }
+
+  // ^ Keep global
+
+
+
+  td::BufferSlice block_data, collated_data;
+  // ^ Unclear
+
+  
+  td::Promise<td::BufferSlice> main_promise;
+  // ^ Maybe clean_up later
+
+
   std::vector<BlockIdExt> prev_blocks;
   std::vector<Ref<ShardState>> prev_states;
-  td::BufferSlice block_data, collated_data;
-  td::Promise<td::BufferSlice> main_promise;
   bool after_merge_{false};
   bool after_split_{false};
   bool before_split_{false};
   bool want_split_{false};
   bool want_merge_{false};
   bool is_key_block_{false};
-  bool update_shard_cc_{false};
   bool prev_key_block_exists_{false};
   bool debug_checks_{false};
-  bool outq_cleanup_partial_{false};
   BlockSeqno prev_key_seqno_{~0u};
-  int stage_{0};
   td::BitArray<64> shard_pfx_;
   int shard_pfx_len_;
   td::Bits256 created_by_;
@@ -268,12 +279,11 @@ public:
   std::unique_ptr<vm::AugmentedDictionary> sibling_out_msg_queue_;
   std::shared_ptr<block::MsgProcessedUptoCollection> sibling_processed_upto_;
 
-  MyMap<td::Bits256, int> block_create_count_;
-  unsigned block_create_total_{0};
 
   std::unique_ptr<vm::AugmentedDictionary> in_msg_dict_, out_msg_dict_, account_blocks_dict_;
   // block::ValueFlow value_flow_;
-  block::CurrencyCollection import_created_, transaction_fees_, total_burned_{0}, fees_burned_{0};
+  // block::CurrencyCollection import_created_; // Doesn't exist
+  block::CurrencyCollection transaction_fees_, total_burned_{0}, fees_burned_{0};
   // td::RefInt256 import_fees_;
 
   ton::LogicalTime proc_lt_{0}, claimed_proc_lt_{0}, min_enq_lt_{~0ULL};
@@ -297,9 +307,6 @@ public:
   td::uint64 processed_account_dispatch_queues_ = 0;
   bool have_unprocessed_account_dispatch_queue_ = false;
 
-  WorkchainId workchain() const {
-    return shard_.workchain;
-  }
 
 
 
@@ -440,6 +447,8 @@ public:
   bool store_master_ref(vm::CellBuilder& cb);
   td::BufferSlice build_state_update();
 
+
+  // My stuff
  private:
   int testIndex;
   static int globalTestIndex;
@@ -453,6 +462,15 @@ public:
   void leave_multithreading();
 
   friend class MultithreadingGuard;
+
+
+  // Useless properties:
+  // These were probably used in the original code, but are not used in the contest
+ private:
+  // bool update_shard_cc_{false};
+  // bool outq_cleanup_partial_{false};
+  // MyMap<td::Bits256, int> block_create_count_;
+  // unsigned block_create_total_{0};
 };
 
 

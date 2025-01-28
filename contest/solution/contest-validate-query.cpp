@@ -965,7 +965,7 @@ void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQ
   do {
     // require masterchain blocks referred to in ProcessedUpto
     // TODO: perform this only if there are messages for this shard in our output queue
-    // .. (have to check the above condition and perform a `break` here) ..
+    // .. (have to check the above condition and perform a 'break' here) ..
     // ..
     for (const auto& entry : descr.processed_upto->list) {
       Ref<MasterchainStateQ> state;
