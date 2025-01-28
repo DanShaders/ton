@@ -91,7 +91,7 @@ td::Result<Ref<DataCell>> CellSerializationInfo::create_data_cell(td::Slice cell
                                                                   td::Span<Ref<Cell>> refs) const {
   DCHECK(refs_cnt == (td::int64)refs.size());
   TRY_RESULT(bits, get_bits(cell_slice));
-  TRY_RESULT(res, DataCell::create(cell_slice.ubegin() + data_offset, bits, refs, special));
+  TRY_RESULT(res, DataCell::create(cell_slice.substr(data_offset), bits, refs, special));
   CHECK(!res.is_null());
   if (res->is_special() != special) {
     return td::Status::Error("is_special mismatch");
