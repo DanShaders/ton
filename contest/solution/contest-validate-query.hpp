@@ -60,6 +60,7 @@ using td::Ref;
 template <typename K, typename V>
 using MyMap = std::unordered_map<K, V>;
 
+using std::shared_ptr;
 using std::tuple;
 // template <typename... Args>
 // using tup = std::tuple<... Args>;
@@ -99,11 +100,17 @@ auto t(Args&&... args) -> decltype(f(std::forward<Args>(args)...)) {
   }
 
 
-#define DEST2(a, b, v) \
+/*
+#define Dest2(a, b, v) \
   auto temp##__LINE__ = v; \
   auto a = std::get<0>(temp##__LINE__); \
   auto b = std::get<1>(temp##__LINE__);
-
+^ Doesn't work with __LINE__ - it doesn't get replaced with the line number
+*/
+#define Dest2(a, b, v) \
+  auto temp_##a = v; \
+  auto a = std::get<0>(temp_##a); \
+  auto b = std::get<1>(temp_##a);
 
 
 class ErrorCtxAdd;
@@ -191,6 +198,7 @@ public:
   WorkchainId workchain() const {
     return shard_.workchain;
   }
+  bool debug_checks_{false};
 
   // ^ Keep global
 
@@ -204,23 +212,29 @@ public:
   // ^ Maybe clean_up later
 
 
+
+
+
+
+  // bool want_split_{false};
+  // bool want_merge_{false};
+  // bool is_key_block_{false};
+  // bool prev_key_block_exists_{false};
+  // ^ Removed because fully local
+
+
   std::vector<BlockIdExt> prev_blocks;
   std::vector<Ref<ShardState>> prev_states;
   bool after_merge_{false};
   bool after_split_{false};
   bool before_split_{false};
-  bool want_split_{false};
-  bool want_merge_{false};
-  bool is_key_block_{false};
-  bool prev_key_block_exists_{false};
-  bool debug_checks_{false};
   BlockSeqno prev_key_seqno_{~0u};
   td::BitArray<64> shard_pfx_;
   int shard_pfx_len_;
   td::Bits256 created_by_;
 
-  Ref<vm::Cell> prev_state_root_;
-  std::shared_ptr<vm::CellUsageTree> state_usage_tree_;  // used to construct Merkle update
+  // Ref<vm::Cell> prev_state_root_;
+  // std::shared_ptr<vm::CellUsageTree> state_usage_tree_;  // used to construct Merkle update
 
   ErrorCtx error_ctx_;
 
@@ -373,9 +387,9 @@ public:
   void unpack_block_candidate();
   void extract_collated_data_from(Ref<vm::Cell> croot, int idx);
   void extract_collated_data();
-  void compute_prev_state();
-  void unpack_merge_prev_state();
-  void unpack_prev_state();
+  tuple<shared_ptr<vm::CellUsageTree>, Ref<vm::Cell>> compute_prev_state();
+  void unpack_merge_prev_state(Ref<vm::Cell> prev_state_root_);
+  void unpack_prev_state(Ref<vm::Cell> prev_state_root_);
   void init_next_state();
   void unpack_one_prev_state(block::ShardState& ss, BlockIdExt blkid, Ref<vm::Cell> prev_state_root);
   void split_prev_state(block::ShardState& ss);
@@ -394,7 +408,7 @@ public:
   void fix_processed_upto(block::MsgProcessedUptoCollection& upto, bool allow_cur = false);
   void fix_all_processed_upto();
   void add_trivial_neighbor_after_merge();
-  void add_trivial_neighbor();
+  void add_trivial_neighbor(Ref<vm::Cell> prev_state_root_);
   tuple<block::ValueFlow, td::RefInt256> unpack_block_data();
   tuple<block::ValueFlow, td::RefInt256> unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
   void compute_minted_amount(block::CurrencyCollection& to_mint);
@@ -445,7 +459,7 @@ public:
   // td::BufferSlice result_state_update_;
 
   bool store_master_ref(vm::CellBuilder& cb);
-  td::BufferSlice build_state_update();
+  td::BufferSlice build_state_update(std::shared_ptr<vm::CellUsageTree> state_usage_tree_, Ref<vm::Cell> prev_state_root_);
 
 
   // My stuff

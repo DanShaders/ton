@@ -157,9 +157,9 @@ void ContestValidateQuery::init_parse() {
   end_lt_ = info.end_lt;
   now_ = info.gen_utime;
   before_split_ = info.before_split;
-  want_merge_ = info.want_merge;
-  want_split_ = info.want_split;
-  is_key_block_ = info.key_block;
+  // want_merge_ = info.want_merge;
+  // want_split_ = info.want_split;
+  bool is_key_block_ = info.key_block;
   prev_key_seqno_ = info.prev_key_block_seqno;
   CHECK(after_split_ == info.after_split);
   if (is_key_block_) {
@@ -392,7 +392,7 @@ void ContestValidateQuery::try_unpack_mc_state() {
       reject_throw(PSTRING() << "vertical seqno mismatch: new block has " << vert_seqno_
                                     << " while the masterchain configuration expects " << config_->get_vert_seqno());
     }
-    prev_key_block_exists_ = config_->get_last_key_block(prev_key_block_, prev_key_block_lt_);
+    bool prev_key_block_exists_ = config_->get_last_key_block(prev_key_block_, prev_key_block_lt_);
     if (prev_key_block_exists_) {
       prev_key_block_seqno_ = prev_key_block_.seqno();
     } else {
@@ -724,10 +724,10 @@ void ContestValidateQuery::check_this_shard_mc_info() {
  *
  * @returns True if the previous state is computed successfully, false otherwise.
  */
-void ContestValidateQuery::compute_prev_state() {
+tuple<shared_ptr<vm::CellUsageTree>, Ref<vm::Cell>> ContestValidateQuery::compute_prev_state() {
   CHECK(prev_states.size() == 1u + after_merge_);
 
-  prev_state_root_ = prev_states[0]->root_cell();
+  Ref<vm::Cell> prev_state_root_ = prev_states[0]->root_cell();
   CHECK(prev_state_root_.not_null());
   if (after_merge_) {
     Ref<vm::Cell> aux_root = prev_states[1]->root_cell();
@@ -736,8 +736,9 @@ void ContestValidateQuery::compute_prev_state() {
       fatal_throw(-667, "cannot construct mechanically merged previously state");
     }
   }
-  state_usage_tree_ = std::make_shared<vm::CellUsageTree>();
+  auto state_usage_tree_ = std::make_shared<vm::CellUsageTree>();
   prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr()); // !TEMP_THREAD likely breaks Merkle Update
+  return tuple(state_usage_tree_, prev_state_root_);
 }
 
 /**
@@ -747,7 +748,7 @@ void ContestValidateQuery::compute_prev_state() {
  *
  * @returns True if the unpacking and merging was successful, false otherwise.
  */
-void ContestValidateQuery::unpack_merge_prev_state() {
+void ContestValidateQuery::unpack_merge_prev_state(Ref<vm::Cell> prev_state_root_) {
   LOG(DEBUG) << "unpack/merge previous states";
   CHECK(prev_states.size() == 2);
   // 2. extract the two previous states
@@ -782,11 +783,11 @@ void ContestValidateQuery::unpack_merge_prev_state() {
  *
  * @returns True if the unpacking is successful, false otherwise.
  */
-void ContestValidateQuery::unpack_prev_state() {
+void ContestValidateQuery::unpack_prev_state(Ref<vm::Cell> prev_state_root_) {
   LOG(DEBUG) << "unpacking previous state(s)";
   CHECK(prev_state_root_.not_null());
   if (after_merge_) {
-    unpack_merge_prev_state();
+    unpack_merge_prev_state(prev_state_root_);
       // return fatal_error("unable to unpack/merge previous states immediately after a merge");
     return;
   }
@@ -1275,7 +1276,7 @@ void ContestValidateQuery::add_trivial_neighbor_after_merge() {
  *
  * @returns True if the operation is successful, false otherwise.
  */
-void ContestValidateQuery::add_trivial_neighbor() {
+void ContestValidateQuery::add_trivial_neighbor(Ref<vm::Cell> prev_state_root_) {
   LOG(DEBUG) << "in add_trivial_neighbor()";
   if (after_merge_) {
     add_trivial_neighbor_after_merge();
@@ -1451,7 +1452,7 @@ tuple<block::ValueFlow, td::RefInt256> ContestValidateQuery::unpack_block_data()
     reject_throw("ShardAccountBlocks dictionary is invalid");
   }
 
-  DEST2(value_flow_, import_fees_, unpack_precheck_value_flow(std::move(blk.value_flow)));
+  Dest2(value_flow_, import_fees_, unpack_precheck_value_flow(std::move(blk.value_flow)));
   return tuple(value_flow_, import_fees_);
 }
 
@@ -5194,7 +5195,9 @@ Ref<vm::Cell> ContestValidateQuery::get_virt_state_root(td::Bits256 block_root_h
  *
  * @return True on success, False on error.
  */
-td::BufferSlice ContestValidateQuery::build_state_update() {
+td::BufferSlice ContestValidateQuery::build_state_update(
+  shared_ptr<vm::CellUsageTree> state_usage_tree_,
+  Ref<vm::Cell> prev_state_root_) {
   td::Ref<vm::Cell> msg_q_info;
   {
     vm::CellBuilder cb;
