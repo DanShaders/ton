@@ -1,0 +1,394 @@
+<html>
+	<head>
+		<title>Refactorer</title>
+		<style>
+			h3, h4 {
+				font-family: Calibri, sans-serif;
+			}
+
+			pre, code {
+				font-family: consolas, monospace;
+			}
+
+			.fileLabel {
+				display: inline-block;
+				padding: 10px;
+				border: solid 1px #222;
+			}
+
+			.propertyHighlight {
+				background-color: yellow;
+			}
+		</style>
+	</head>
+	<body>
+		<script>
+			function toggleExperiments() {
+				$container.style.display = $container.style.display === 'none' ? '' : 'none';
+			}
+		</script>
+		<button onclick="toggleExperiments()">Toggle experiments</button>
+		<div id="$container" style="height: 20vh;"></div>
+
+		<script src="./myCpp_rules.js"></script>
+		<script src="https://unpkg.com/monaco-editor@0.52.2/min/vs/loader.js"></script>
+		<script>
+			// Based on:
+			// https://stackoverflow.com/questions/73698181/embed-a-vscode-style-ide-in-the-browser
+			// https://stackoverflow.com/a/73698869/7788315
+			require.config({ paths: { 'vs': "https://unpkg.com/monaco-editor@0.52.2/min/vs" } });
+		</script>
+		<script src="https://unpkg.com/monaco-editor@0.52.2/min/vs/editor/editor.main.nls.js"></script>
+		<script src="https://unpkg.com/monaco-editor@0.52.2/min/vs/editor/editor.main.js"></script>
+		
+		<script type="module">
+			import { onCleanup, createSignal, For } from "https://esm.sh/solid-js@1.8.1";
+			import { render } from "https://esm.sh/solid-js@1.8.1/web";
+			import html from "https://esm.sh/solid-js@1.8.1/html";
+			
+
+			const $container = document.getElementById('$container');
+
+			
+			const myCppTheme = 'myCppTheme';
+			monaco.editor.defineTheme(myCppTheme, {
+				base: 'vs',
+				inherit: true,
+				colors: {
+					'editor.foreground': '#000000',
+				},
+				rules: [
+					{ token: 'targetProperty', foreground: 'ff0000', fontStyle: 'bold underline' },
+					// { token: 'custom-info', foreground: '808080' },
+					// { token: 'custom-error', foreground: 'ff0000', fontStyle: 'bold' },
+					// { token: 'custom-notice', foreground: 'FFA500' },
+					// { token: 'custom-date', foreground: '008800' },
+				]
+			});
+			// ^ https://stackoverflow.com/questions/52700307/how-to-use-monaco-editor-for-syntax-highlighting : https://stackoverflow.com/a/63219877/7788315
+
+			const cache = {};
+			function languageVariant(targetProperty) {
+				if (!cache[targetProperty]) {
+					const res = {
+						name: 'myCpp_' + targetProperty,
+						definition: {
+							...myCppRules.language,
+							toHighlight: [targetProperty],
+						},
+					};
+					cache[targetProperty] = res;
+
+					monaco.languages.register({ id: res.name });
+					monaco.languages.setMonarchTokensProvider(res.name, res.definition);
+
+				}
+				
+				return cache[targetProperty];
+			}
+
+			const zhukLanguage = languageVariant('Zhuk');
+
+			monaco.editor.setTheme(myCppTheme);
+			var diffEditor = monaco.editor.createDiffEditor(
+				$container,
+				{
+					// language: zhukLanguage.name,
+					// theme: myCppTheme,
+				}
+			);
+			// diffEditor.setModelLanguage(zhukLanguage.name);
+			// var diffEditorModel = diffEditor.getModel(); // we'll create a model for you if the editor created from string value.
+
+			let originalModel, modifiedModel;
+			diffEditor.setModel({
+				original: (originalModel = monaco.editor.createModel('1\n2\n3', 'python')),
+				modified: (modifiedModel = monaco.editor.createModel('1\n5\n3\nZhuk\nLLLLLLZhuk\nZhuk123', 'python')),
+			});
+			
+			monaco.editor.setModelLanguage(originalModel, zhukLanguage.name);
+			monaco.editor.setModelLanguage(modifiedModel, zhukLanguage.name);
+
+
+			// monaco.languages.register({ id: zhukLanguage.name });
+			// // Following rules are used to color / syntax highlight
+			// monaco.languages.setMonarchTokensProvider(zhukLanguage.name, zhukLanguage.definition);
+			
+
+
+			function postpone(f) {
+				setTimeout(f, 1000);
+			}
+			
+			postpone(() => {
+			});
+
+
+			let [files, setFiles] = createSignal([]);
+			let [property, setProperty] = createSignal('');
+
+			let propertyType = () => property().split(' ').slice(0, -1).join(' ').trim();
+			let propertyName = () => property().split(' ').at(-1);
+			let propertyValid = () => (propertyType() && propertyName() && true);
+			/* {
+				name: '',
+				handle: null,
+				code: '',
+				lines: [],
+			} */
+			let $property = null;
+
+
+			const patchingInfo = {};
+
+			// let handle = null;
+
+			async function openFiles() {
+				const handles = await window.showOpenFilePicker({ multiple: true });
+
+				const newFiles = [];
+				for (const handle of handles) {
+					const fileObj = await handle.getFile();
+					console.log('file:', fileObj);
+
+					const code = await fileObj.text();
+					const lines = code.split('\n');
+					
+					newFiles.push({
+						name: fileObj.name,
+						handle,
+						code,
+						lines,
+					});
+				}
+
+				setFiles([...files(), ...newFiles]);
+			};
+
+			async function reloadFiles() {
+				const nextFiles = [];
+
+				for (const file of files()) {
+					const fileObj = await file.handle.getFile();
+					const code = await fileObj.text();
+					const lines = code.split('\n');
+
+					nextFiles.push(code === file.code ? file : {
+						...file,
+						code,
+						lines,
+					});
+				}
+
+				setFiles(nextFiles);
+			};
+
+			async function patch() {
+				let patchedSomething = false;
+
+				const nextFiles = [];
+
+				for (const file of files()) {
+					const info = patchingInfo[file.name];
+
+					let patchedCode = '';
+
+					let prevEndLine = 0;
+					for (const { func, originalModel, modifiedModel } of info) {
+						patchedCode += file.lines.slice(prevEndLine, func.startLine).join('\n');
+						const modifiedCode = modifiedModel.getValue();
+						patchedCode += '\n' + modifiedCode + '\n';
+
+						prevEndLine = func.endLine;
+					}
+					const rest = file.lines.slice(prevEndLine).join('\n');
+					patchedCode += rest;
+					
+					if (patchedCode !== file.code) {
+						const writable = await file.handle.createWritable();
+						await writable.write(patchedCode);
+						await writable.close();
+
+						// console.log(patchedCode);
+						window.patchedCode = patchedCode;
+						patchedSomething = true;
+
+						// for (const { func, originalModel, modifiedModel } of info) {
+						// 	modifiedModel.setValue(originalModel.getValue());
+						// }
+
+						// break;
+					}
+
+					nextFiles.push({
+						...file,
+						code: patchedCode,
+						lines: patchedCode.split('\n'),
+					});
+				}
+
+				if (!patchedSomething) {
+					alert('Nothing patched');
+				}
+				console.log('patchedSomething:', patchedSomething);
+
+				setFiles(nextFiles);
+			};
+	  
+			const App = () => {
+				return html`<div>
+					<span>
+						<${For} each=${() => files()}>${file => html`
+							<span class="fileLabel">
+								${file.name}
+								<button onClick=${() => setFiles(files().filter(f => f !== file))}>-</button>
+							</span>`
+						}</For>
+					</span>
+					<button onClick=${openFiles}>Open File(s)</button>
+					<button onClick=${reloadFiles}>Reload Files</button>
+					Property: <input id="$property" /> <button onClick=${() => setProperty($property.value.trim())}>Analize</button>
+					<div><pre>
+						Type: ${() => propertyType()} <br />
+						Name: <b>${() => propertyName()}</b> <br />
+						${() => (!propertyValid() && 'Property invalid')}
+					</pre></div>
+					${() => (propertyName() && html`<div>
+						<${For} each=${() => files()}>${file => {
+							patchingInfo[file.name] = [];
+
+							const codeLines = file.lines;
+
+							const language = languageVariant(propertyName());
+
+							function analyzeProperty(name) {
+								let lastFunction = null;
+								// {
+								// 	name,
+								// 	startLine,
+								// 	endLine,
+								// };
+								// let lastFunctionStart = null;
+								// let lastFunctionEnd = null;
+								
+								// find all functions in a C++ file that use this property
+								let functions = [];
+
+								let lineI = 0;
+								for (let line of codeLines) {
+									const functionRegex = /ContestValidateQuery::(?<name>[^\(]+)\(/;
+									const functionEndRegex = /^}\s*$/;
+
+									const match = line.match(functionRegex);
+									if (match && !/\s/.test(line[0])) { // Trust that function definitions don't start with whitespace
+										lastFunction = {
+											name: match.groups.name,
+											startLine: lineI,
+										};
+									}
+
+									if (line.includes(name)
+										&& functions.at(-1) !== lastFunction) { // Don't include duplicates
+										if (lastFunction.endLine) {
+											alert('Function end line already set');
+											console.error('lineI:', lineI, 'lastFunction:', lastFunction);
+										}
+										functions.push(lastFunction);
+									}
+
+									if (functionEndRegex.test(line)) {
+										if (lastFunction) // Because functions which are not ContestValidateQuery:: are not included, but there end is found
+											lastFunction.endLine = lineI + 1;
+									}
+
+									lineI++;
+								}
+
+								const badFuncs = functions.filter(func => !func.endLine);
+								if (badFuncs.length > 0) {
+									alert('Some functions are missing an end line, list in the console');
+									console.error('Bad functions:', badFuncs);
+								}
+
+								return functions;
+							}
+
+							const relevantFunctions = analyzeProperty(propertyName());
+
+							return html`
+							<div>
+								<h3>${file.name}</h3>
+								<${For} each=${() => relevantFunctions}>${func => {
+									const de = document.createElement('div');
+									de.style.height = '70vh';
+
+									const functionCode = codeLines.slice(func.startLine, func.endLine).join('\n');
+									let originalModel= monaco.editor.createModel(functionCode, language.name);
+									let modifiedModel = monaco.editor.createModel(functionCode, language.name);
+
+									patchingInfo[file.name].push({
+										func,
+										originalModel,
+										modifiedModel,
+									});
+
+									setTimeout(() => {
+										// https://github.com/microsoft/monaco-editor/blob/35eb0efbc039827432002ccc17b120eb0874d70f/samples/browser-amd-diff-editor/index.html
+										var diffEditor = monaco.editor.createDiffEditor(de,
+											{
+												language: language.name,
+												theme: myCppTheme,
+											}
+										);
+
+										diffEditor.setModel({
+											original: originalModel,
+											modified: modifiedModel,
+										});
+
+
+									}, 100);
+
+									return html`
+									<div>
+										<h4>${func.name}</h4>
+										${de}
+									</div>`
+								}}</For>
+								<hr />
+							</div>`
+						}}</For>
+						<button onclick=${patch}>Patch</button>
+					</div>`)}
+					
+				</div>`;
+			};
+			render(App, document.body);
+
+			$property = document.getElementById('$property');
+
+
+										// <pre>
+										// 	<code innerHTML=${codeLines.slice(func.startLine, func.endLine+1).join('\n')
+										// 		.replaceAll(
+										// 			new RegExp(`([^a-zA-Z0-9_])${propertyName()}([^a-zA-Z0-9_])`, 'g'),
+										// 			`$1<span class="propertyHighlight">${propertyName()}</span>$2`,
+										// 		)
+										// 	}></code>
+										// </pre>
+
+
+
+			// const $openFile = document.getElementById('openFile');
+			// const $addZhuk = document.getElementById('addZhuk');
+			// const $contents = document.getElementById('contents');
+			
+			/*
+			${() => files().map(file => html`<span class="fileLabel">
+							${file.name}
+							<button onClick=${() => setFiles(files().filter(f => f !== file))}>-</button>
+						</span>
+			*/
+		</script>
+	</body>
+</html>
