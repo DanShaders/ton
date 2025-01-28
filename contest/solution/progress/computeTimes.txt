@@ -1,0 +1,112 @@
+const ShardIdFull shard_; // Creation
+const BlockIdExt id_; // Creation
+std::vector<BlockIdExt> prev_blocks; // init_parse
+std::vector<Ref<ShardState>> prev_states; // start_up (resize) + after_get_shard_state
+td::BufferSlice block_data, // creation
+                collated_data; // creation
+td::Promise<td::BufferSlice> main_promise; // creation
+bool after_merge_{false}; // init_parse
+bool after_split_{false};
+bool before_split_{false};
+bool want_split_{false};
+bool want_merge_{false};
+bool is_key_block_{false};
+bool update_shard_cc_{false};
+bool prev_key_block_exists_{false};
+bool debug_checks_{false};
+bool outq_cleanup_partial_{false};
+BlockSeqno prev_key_seqno_{~0u};
+int stage_{0};
+td::BitArray<64> shard_pfx_;
+int shard_pfx_len_;
+td::Bits256 created_by_;
+
+Ref<vm::Cell> prev_state_root_;
+std::shared_ptr<vm::CellUsageTree> state_usage_tree_;  // used to construct Merkle update
+
+ErrorCtx error_ctx_;
+
+td::Ref<MasterchainStateQ> mc_state_;
+td::Ref<vm::Cell> mc_state_root_;
+BlockIdExt mc_blkid_;
+ton::BlockSeqno mc_seqno_{0};
+
+Ref<vm::Cell> block_root_;
+std::vector<Ref<vm::Cell>> collated_roots_;
+std::unordered_map<RootHash, Ref<vm::Cell>> virt_roots_;
+std::unique_ptr<vm::Dictionary> top_shard_descr_dict_;
+block::gen::ExtraCollatedData::Record extra_collated_data_;
+bool have_extra_collated_data_ = false;
+
+Ref<vm::Cell> recover_create_msg_, mint_msg_;  // from McBlockExtra (UNCHECKED)
+
+std::unique_ptr<block::ConfigInfo> config_;
+std::unique_ptr<block::ShardConfig> old_shard_conf_;  // from reference mc state
+std::unique_ptr<block::ShardConfig> new_shard_conf_;  // from shard_hashes_ in mc blocks
+Ref<block::WorkchainInfo> wc_info_;
+Ref<vm::Cell> old_mparams_;
+bool accept_msgs_{true};
+
+ton::BlockSeqno min_shard_ref_mc_seqno_{~0U};
+ton::LogicalTime max_shard_lt_{0};
+
+int global_id_{0};
+ton::BlockSeqno vert_seqno_{~0U};
+bool ihr_enabled_{false};
+bool create_stats_enabled_{false};
+ton::BlockSeqno prev_key_block_seqno_;
+ton::BlockIdExt prev_key_block_;
+ton::LogicalTime prev_key_block_lt_;
+std::unique_ptr<block::BlockLimits> block_limits_;
+std::unique_ptr<block::BlockLimitStatus> block_limit_status_;
+td::uint64 total_gas_used_{0}, total_special_gas_used_{0};
+
+LogicalTime start_lt_, end_lt_;
+UnixTime now_{~0u};
+
+ton::Bits256 rand_seed_;
+std::vector<block::StoragePrices> storage_prices_;
+block::StoragePhaseConfig storage_phase_cfg_{&storage_prices_};
+block::ComputePhaseConfig compute_phase_cfg_;
+block::ActionPhaseConfig action_phase_cfg_;
+td::RefInt256 masterchain_create_fee_, basechain_create_fee_;
+
+std::vector<block::McShardDescr> neighbors_;
+std::unordered_map<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
+
+std::mutex ns_mutex_;
+block::ShardState ps_;
+block::ShardState ns_;
+bool processed_upto_updated_{false};
+std::unique_ptr<vm::AugmentedDictionary> sibling_out_msg_queue_;
+std::shared_ptr<block::MsgProcessedUptoCollection> sibling_processed_upto_;
+
+std::unordered_map<td::Bits256, int> block_create_count_;
+unsigned block_create_total_{0};
+
+std::unique_ptr<vm::AugmentedDictionary> in_msg_dict_, out_msg_dict_, account_blocks_dict_;
+block::ValueFlow value_flow_;
+block::CurrencyCollection import_created_, transaction_fees_, total_burned_{0}, fees_burned_{0};
+td::RefInt256 import_fees_;
+
+ton::LogicalTime proc_lt_{0}, claimed_proc_lt_{0}, min_enq_lt_{~0ULL};
+ton::Bits256 proc_hash_ = ton::Bits256::zero(), claimed_proc_hash_, min_enq_hash_;
+
+std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_proc_lt_;
+std::mutex msg_proc_lt_mutex_;
+std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_emitted_lt_;
+
+std::unordered_map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;
+std::unordered_map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> new_dispatch_queue_messages_;
+std::set<StdSmcAddress> account_expected_defer_all_messages_;
+td::uint64 old_out_msg_queue_size_ = 0;
+bool out_msg_queue_size_known_ = false;
+bool have_out_msg_queue_size_in_state_ = false;
+
+bool msg_metadata_enabled_ = false;
+bool deferring_messages_enabled_ = false;
+bool store_out_msg_queue_size_ = false;
+
+td::uint64 processed_account_dispatch_queues_ = 0;
+bool have_unprocessed_account_dispatch_queue_ = false;
+
