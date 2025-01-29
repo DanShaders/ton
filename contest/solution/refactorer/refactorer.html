@@ -19,6 +19,15 @@
 			.propertyHighlight {
 				background-color: yellow;
 			}
+
+			.callGraphOuter {
+				border: solid 1px #222;
+				padding: 10px;
+			}
+
+			.callGraphChildren {
+				display: flex;
+			}
 		</style>
 	</head>
 	<body>
@@ -42,7 +51,7 @@
 		<script src="https://unpkg.com/monaco-editor@0.52.2/min/vs/editor/editor.main.js"></script>
 		
 		<script type="module">
-			import { onCleanup, createSignal, For } from "https://esm.sh/solid-js@1.8.1";
+			import { onCleanup, createSignal, createEffect, createMemo, For } from "https://esm.sh/solid-js@1.8.1";
 			import { render } from "https://esm.sh/solid-js@1.8.1/web";
 			import html from "https://esm.sh/solid-js@1.8.1/html";
 			
@@ -139,7 +148,7 @@
 			let $property = null;
 
 
-			const patchingInfo = {};
+			let patchingInfo = {};
 
 			// let handle = null;
 
@@ -162,6 +171,7 @@
 					});
 				}
 
+				patchingInfo = {};
 				setFiles([...files(), ...newFiles]);
 			};
 
@@ -180,6 +190,7 @@
 					});
 				}
 
+				patchingInfo = {};
 				setFiles(nextFiles);
 			};
 
@@ -190,6 +201,10 @@
 
 				for (const file of files()) {
 					const info = patchingInfo[file.name];
+					if (!info) {
+						nextFiles.push(file);
+						continue;
+					}
 
 					let patchedCode = '';
 
@@ -220,7 +235,7 @@
 						// break;
 					}
 
-					nextFiles.push({
+					nextFiles.push(patchedCode === file.code ? file : {
 						...file,
 						code: patchedCode,
 						lines: patchedCode.split('\n'),
@@ -233,6 +248,163 @@
 				console.log('patchedSomething:', patchedSomething);
 
 				setFiles(nextFiles);
+			};
+
+			let allFunctions = createMemo(() => {
+				let functions = [];
+				// {
+					// 	name,
+					//	file,
+					// 	startLine,
+					// 	endLine,
+				// };
+
+				for (const file of files()) {
+					let lastFunction = null;
+					let lineI = 0;
+					for (let line of file.lines) {
+						const functionRegex = /ContestValidateQuery::(?<name>[^\(]+)\(/;
+						const functionEndRegex = /^}\s*$/;
+	
+						const match = line.match(functionRegex);
+						if (match && !/\s/.test(line[0])) { // Trust that function definitions don't start with whitespace
+							if (lastFunction) {
+								alert('Function without end found:', lastFunction);
+								console.error('Function without end found:', lastFunction);
+							}
+							lastFunction = {
+								file,
+								name: match.groups.name,
+								startLine: lineI,
+							};
+							functions.push(lastFunction);
+						}
+						if (functionEndRegex.test(line)) {
+							if (lastFunction) { // Because functions which are not ContestValidateQuery:: are not included, but there end is found
+								lastFunction.endLine = lineI + 1;
+								lastFunction.code = file.lines.slice(lastFunction.startLine, lastFunction.endLine).join('\n');
+								lastFunction = null;
+							}
+						}
+	
+						lineI++;
+					}
+
+					if (lastFunction) {
+						alert('Function without end found:', lastFunction);
+						console.error('Function without end found:', lastFunction);
+					}
+				}
+				
+				const badFuncs = functions.filter(func => !func.endLine);
+				if (badFuncs.length > 0) {
+					alert('Some functions are missing an end line, list in the console');
+					console.error('Bad functions:', badFuncs);
+				}
+
+				const overloadCount = {};
+				for (const func of functions) {
+					overloadCount[func.name] = (overloadCount[func.name] ?? 0) + 1;
+				}
+				functions = functions.filter(func => overloadCount[func.name] === 1 && func.name !== 'ContestValidateQuery');
+				// Remove overloaded functions: those are functions like reject_throw, fatal_throw, etc.
+				// They don't help to understand the big picture
+				
+				return functions;
+			});
+
+			function analyzeProperty(name) {
+				return allFunctions().filter(func => func.code.includes(name));
+			}
+
+			const calls = createMemo(() => {
+				const functions = allFunctions();
+				const calling = {};
+				const calledFrom = {};
+
+				for (const inner of functions) {
+					const regex = new RegExp(`\\b${inner.name}\\b`, 'g');
+					for (const outer of functions) {
+						if (outer !== inner && regex.test(outer.code)) {
+							calling[outer.name] = [...(calling[outer.name] ?? []), inner];
+							calledFrom[inner.name] = [...(calledFrom[inner.name] ?? []), outer];
+						}
+					}
+				}
+
+				return { calling, calledFrom };
+			});
+
+			const roots = createMemo(() => allFunctions().filter(func => !calls().calledFrom[func.name]));
+
+			const circularDependencies = createMemo(() => {
+				const functions = allFunctions();
+				const calling = calls().calling;
+
+				const visited = {};
+				let stack = {};
+
+				function dfs(func) {
+					if (visited[func.name]) {
+						if (stack[func.name]) {
+							return [func];
+						}
+						return [];
+					}
+
+					visited[func.name] = true;
+					stack[func.name] = true;
+
+					const children = calling[func.name] ?? [];
+					for (const child of children) {
+						const cycle = dfs(child);
+						if (cycle.length > 0) {
+							return [func, ...cycle];
+						}
+					}
+
+					stack[func.name] = false;
+					return [];
+				}
+
+				const cycles = [];
+				for (const func of functions) {
+					const cycle = dfs(func);
+					if (cycle.length > 0) {
+						cycles.push(cycle);
+						stack = {};
+					}
+				}
+
+				return cycles;
+			});
+
+			createEffect(() => {
+				console.log('files:', files());
+				console.log('roots:', roots());
+				console.log('calls:', calls());
+				console.log('circularDependencies:', circularDependencies());
+			});
+
+			const CallGraph = () => {
+
+
+				function dfs(func) {
+					// console.log(func);
+					const children = calls().calling[func.name] ?? [];
+
+					return html`<div class="callGraphOuter">
+						${func.name}
+						<div class="callGraphChildren">
+							<${For} each=${() => children}>${child => dfs(child)}</For>
+						</div>
+					</div>`;
+				}
+
+				return html`<div>
+					<h3>Call Graph ${() => files().length}</h3>
+						<${For} each=${() => roots()}>${root => dfs(root)}</For>
+					</div>`;
 			};
 	  
 			const App = () => {
@@ -253,111 +425,46 @@
 						Name: <b>${() => propertyName()}</b> <br />
 						${() => (!propertyValid() && 'Property invalid')}
 					</pre></div>
+					${() => html`<${CallGraph} />`}
+
 					${() => (propertyName() && html`<div>
-						<${For} each=${() => files()}>${file => {
-							patchingInfo[file.name] = [];
-
-							const codeLines = file.lines;
-
+						<${For} each=${() => analyzeProperty(propertyName())}>${func => {
+							const file = func.file;
+							patchingInfo[file.name] = patchingInfo[file.name] ?? [];
+	
 							const language = languageVariant(propertyName());
 
-							function analyzeProperty(name) {
-								let lastFunction = null;
-								// {
-								// 	name,
-								// 	startLine,
-								// 	endLine,
-								// };
-								// let lastFunctionStart = null;
-								// let lastFunctionEnd = null;
-								
-								// find all functions in a C++ file that use this property
-								let functions = [];
+							const de = document.createElement('div');
+							de.style.height = '70vh';
 
-								let lineI = 0;
-								for (let line of codeLines) {
-									const functionRegex = /ContestValidateQuery::(?<name>[^\(]+)\(/;
-									const functionEndRegex = /^}\s*$/;
+							const functionCode = file.lines.slice(func.startLine, func.endLine).join('\n');
+							let originalModel= monaco.editor.createModel(functionCode, language.name);
+							let modifiedModel = monaco.editor.createModel(functionCode, language.name);
 
-									const match = line.match(functionRegex);
-									if (match && !/\s/.test(line[0])) { // Trust that function definitions don't start with whitespace
-										lastFunction = {
-											name: match.groups.name,
-											startLine: lineI,
-										};
+							patchingInfo[func.file.name].push({
+								func,
+								originalModel,
+								modifiedModel,
+							});
+
+							setTimeout(() => {
+								// https://github.com/microsoft/monaco-editor/blob/35eb0efbc039827432002ccc17b120eb0874d70f/samples/browser-amd-diff-editor/index.html
+								var diffEditor = monaco.editor.createDiffEditor(de,
+									{
+										language: language.name,
+										theme: myCppTheme,
 									}
-
-									if (line.includes(name)
-										&& functions.at(-1) !== lastFunction) { // Don't include duplicates
-										if (lastFunction.endLine) {
-											alert('Function end line already set');
-											console.error('lineI:', lineI, 'lastFunction:', lastFunction);
-										}
-										functions.push(lastFunction);
-									}
-
-									if (functionEndRegex.test(line)) {
-										if (lastFunction) // Because functions which are not ContestValidateQuery:: are not included, but there end is found
-											lastFunction.endLine = lineI + 1;
-									}
-
-									lineI++;
-								}
-
-								const badFuncs = functions.filter(func => !func.endLine);
-								if (badFuncs.length > 0) {
-									alert('Some functions are missing an end line, list in the console');
-									console.error('Bad functions:', badFuncs);
-								}
-
-								return functions;
-							}
-
-							const relevantFunctions = analyzeProperty(propertyName());
+								);
+								diffEditor.setModel({ original: originalModel, modified: modifiedModel,});
+							}, 100);
 
 							return html`
 							<div>
-								<h3>${file.name}</h3>
-								<${For} each=${() => relevantFunctions}>${func => {
-									const de = document.createElement('div');
-									de.style.height = '70vh';
-
-									const functionCode = codeLines.slice(func.startLine, func.endLine).join('\n');
-									let originalModel= monaco.editor.createModel(functionCode, language.name);
-									let modifiedModel = monaco.editor.createModel(functionCode, language.name);
-
-									patchingInfo[file.name].push({
-										func,
-										originalModel,
-										modifiedModel,
-									});
-
-									setTimeout(() => {
-										// https://github.com/microsoft/monaco-editor/blob/35eb0efbc039827432002ccc17b120eb0874d70f/samples/browser-amd-diff-editor/index.html
-										var diffEditor = monaco.editor.createDiffEditor(de,
-											{
-												language: language.name,
-												theme: myCppTheme,
-											}
-										);
-
-										diffEditor.setModel({
-											original: originalModel,
-											modified: modifiedModel,
-										});
-
-
-									}, 100);
-
-									return html`
-									<div>
-										<h4>${func.name}</h4>
-										${de}
-									</div>`
-								}}</For>
-								<hr />
+								<h4>${func.file.name}: ${func.name}</h4>
+								${de}
 							</div>`
 						}}</For>
+						<hr />
 						<button onclick=${patch}>Patch</button>
 					</div>`)}
 					
