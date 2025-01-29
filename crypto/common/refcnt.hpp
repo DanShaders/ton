@@ -354,7 +354,9 @@ class Ref {
 };
 
 template <class T, typename... Args>
-Ref<T> make_ref(Args&&... args) {
+Ref<T> make_ref(Args&&... args)
+  requires std::is_constructible_v<T, Args...>
+{
   return Ref<T>{true, std::forward<Args>(args)...};
 }
 
