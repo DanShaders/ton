@@ -14,7 +14,9 @@ using namespace ton::validator;
 bool ContestValidateQuery::in_main_thread() {
   return !in_multithreading || std::this_thread::get_id() == main_thread_id;
 }
-void ContestValidateQuery::leave_multithreading() { in_multithreading = false; }
+void ContestValidateQuery::leave_multithreading() {
+  in_multithreading = false;
+}
 void ContestValidateQuery::enter_multithreading() {
   in_multithreading = true;
   main_thread_id = std::this_thread::get_id();
