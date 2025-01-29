@@ -34,7 +34,11 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   using NodeId = td::uint32;
 
   CellUsageTree() {
-    nodes_.reserve(200000); // !TEMP_THREAD
+    // nodes_.reserve(200000); // !TEMP_THREAD
+    nodes_ = new Node[200000];
+  }
+  ~CellUsageTree() {
+    delete[] nodes_;
   }
 
   struct NodePtr {
@@ -80,12 +84,14 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
     std::array<td::uint32, CellTraits::max_refs> children{};
   };
   bool use_mark_{false};
-  std::vector<Node> nodes_{2};
+  // std::vector<Node> nodes_{2};
+  Node* nodes_;
+  std::atomic<NodeId> nodes_count_{2};
   std::function<void(const td::Ref<vm::DataCell>&)> cell_load_callback_;
 
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);
   NodeId create_node(NodeId parent);
 
-  std::mutex mt;
+  // std::mutex mt;
 };
 }  // namespace vm

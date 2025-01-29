@@ -139,12 +139,12 @@ CellUsageTree::NodeId CellUsageTree::create_node(NodeId parent) {
 
   NodeId res;
   {
-    std::lock_guard<std::mutex> g(mt);
-    res = static_cast<NodeId>(nodes_.size());
+    // std::lock_guard<std::mutex> g(mt);
+    res = nodes_count_++; // static_cast<NodeId>(nodes_.size());
     if (res >= 160000) {
       LOG(ERROR) << "CellUsageTree reached 160 000 elements!"; 
     }
-    CellUsageTree::Node& newNode = nodes_.emplace_back();
+    CellUsageTree::Node& newNode = nodes_[res]; // nodes_.emplace_back();
     newNode.parent = parent;
   }
   return res;
