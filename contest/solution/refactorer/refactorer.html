@@ -20,13 +20,18 @@
 				background-color: yellow;
 			}
 
-			.callGraphOuter {
+			.callTreeOuter {
 				border: solid 1px #222;
 				padding: 10px;
 			}
 
-			.callGraphChildren {
+			.callTreeChildren {
 				display: flex;
+			}
+
+			.callGraphNode {
+				border: solid 1px #222;
+				padding: 10px;
 			}
 		</style>
 	</head>
@@ -379,6 +384,55 @@
 				return cycles;
 			});
 
+			const blockHeight = 150;
+			const blockWidth = 240;
+			const verticalSpacing = 50;
+			const horizontalSpacing = 50;
+
+
+			const graphOf = (func) => {
+				const calling = calls().calling;
+
+				const depths = {};
+				const levels = {};
+
+				function assignMaxDepth(f, depth) {
+					depths[f.name] = Math.max(depths[f.name] ?? 0, depth);
+					for (const child of calling[f.name] ?? []) {
+						assignMaxDepth(child, depth + 1);
+					}
+				}
+				assignMaxDepth(func, 0);
+
+				const visualProps = {};
+
+				const visited = {};
+				function dfs(f) {
+					if (visited[f.name]) {
+						return;
+					}
+					visited[f.name] = true;
+
+					const d = depths[f.name];
+					levels[d] = levels[d] ?? [];
+					levels[d].push(f);
+
+					const y = d * (blockHeight + verticalSpacing);
+					const x = (levels[d].length - 1) * (blockWidth + horizontalSpacing);
+
+					visualProps[f.name] = { f, x, y };
+
+					for (const child of calling[f.name] ?? []) {
+						dfs(child);
+					}
+				}
+				dfs(func);
+
+				console.log(func, visualProps)
+
+				return visualProps;
+			};
+
 			createEffect(() => {
 				console.log('files:', files());
 				console.log('roots:', roots());
@@ -386,16 +440,14 @@
 				console.log('circularDependencies:', circularDependencies());
 			});
 
-			const CallGraph = () => {
-
-
+			const CallTree = () => {
 				function dfs(func) {
 					// console.log(func);
 					const children = calls().calling[func.name] ?? [];
 
-					return html`<div class="callGraphOuter">
+					return html`<div class="callTreeOuter">
 						${func.name}
-						<div class="callGraphChildren">
+						<div class="callTreeChildren">
 							<${For} each=${() => children}>${child => dfs(child)}</For>
 						</div>
 					</div>`;
@@ -405,6 +457,29 @@
 					<h3>Call Graph ${() => files().length}</h3>
 						<${For} each=${() => roots()}>${root => dfs(root)}</For>
 					</div>`;
+			};
+
+			const CallGraph = () => {
+				
+
+				return html`<div>
+					<h3>Call Graph</h3>
+					<${For} each=${() => roots()}>${root => {
+						const gr = graphOf(root);
+						if (Object.keys(gr).length === 0) {
+							return html`<div style="padding: 10px; background-color: yellow; border: solid 1px black">${root.name}</div>`;
+						}
+
+						return html`<div style="position: relative; width: ${Math.max(...Object.values(gr).map(pr => pr.x)) + blockWidth }px; height: ${Math.max(...Object.values(gr).map(pr => pr.y)) + blockHeight }px;">
+							<${For} each=${() => Object.values(gr)}>${pr => {
+								const { f, x, y } = pr;
+								return html`<div class="callGraphNode" style="position: absolute; left: ${x}px; top: ${y}px; width: ${blockWidth}px; height: ${blockHeight}px;">
+									${f.name}
+								</div>`;
+							}}</For>
+						</div>`;
+					}}</For>
+				</div>`;
 			};
 	  
 			const App = () => {
