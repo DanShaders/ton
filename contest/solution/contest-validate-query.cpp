@@ -490,6 +490,20 @@ bool ContestValidateQuery::extract_collated_data() {
   return true;
 }
 
+td::Result<Ref<ShardState>> ContestValidateQuery::fetch_block_state(BlockIdExt block_id) {
+  Ref<vm::Cell> state_root = get_virt_state_root(block_id.root_hash);
+  if (state_root.is_null()) {
+    return td::Status::Error(PSTRING() << "cannot get hash of state root: " << block_id.to_str());
+  }
+  td::Bits256 state_root_hash = state_root->get_hash().bits();
+  auto it = virt_roots_.find(state_root_hash);
+  if (it == virt_roots_.end()) {
+    return td::Status::Error(PSTRING() << "cannot get state root from collated data: " << block_id.to_str());
+  }
+  TRY_RESULT(res, ShardStateQ::fetch(block_id, {}, it->second));
+  return Ref<ShardState>(res);
+}
+
 /**
  * Callback function called after retrieving the masterchain state referenced int the block.
  *
