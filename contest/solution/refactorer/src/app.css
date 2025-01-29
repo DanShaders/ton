@@ -127,3 +127,10 @@ pre, code {
 .callGraphNodeTitle {
 	background-color: rgba(255, 255, 255, 0.9);
 }
+
+.modifiedMark {
+	position: absolute;
+	top: 0px;
+	left: 0px;
+	opacity: 50%;
+}

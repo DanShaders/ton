@@ -22,6 +22,7 @@ type FunctionInfo = {
   startLine: number,
   endLine: number,
   code: string,
+  editedCode: string,
 };
 
 type CallGraphNode = {
@@ -45,6 +46,7 @@ editor.defineTheme(myCppTheme, {
   },
   rules: [
     { token: 'targetProperty', foreground: 'ff0000', fontStyle: 'bold underline' },
+    { token: 'targetFunction', foreground: '000000', fontStyle: 'bold underline' },
   ]
 });
 // ^ https://stackoverflow.com/questions/52700307/how-to-use-monaco-editor-for-syntax-highlighting : https://stackoverflow.com/a/63219877/7788315
@@ -52,23 +54,26 @@ editor.defineTheme(myCppTheme, {
 
 const cache: ObjDict<LanguageVariant> = {};
 
-function languageVariant(targetProperty: string) {
-  if (!cache[targetProperty]) {
+function languageVariant(targetProperty: string, functionNames: string[]) {
+  const key = targetProperty + '___' + functionNames.toSorted().join(',');
+
+  if (!cache[key]) {
     const res = {
-      name: 'myCpp_' + targetProperty,
+      name: 'myCpp_' + key,
       definition: {
         ...myCppRules.language,
-        toHighlight: [targetProperty],
+        toHighlight: [key],
+        functionsToHighlight: functionNames,
       },
     };
-    cache[targetProperty] = res;
+    cache[key] = res;
 
     languages.register({ id: res.name });
     languages.setMonarchTokensProvider(res.name, res.definition);
 
   }
   
-  return cache[targetProperty];
+  return cache[key];
 }
 
 
@@ -102,16 +107,20 @@ async function loadedFiles(): Promise<[boolean, MyFile[]]> {
 }
 const __initialState = await loadedFiles();
 
-let [errorAutoLoading, setErrorAutoLoading] = createSignal(__initialState[0]);
+let [errorAutoLoading, setErrorAutoLoading] = createSignal(!__initialState[0]);
 let [files, setFilesPrivate] = createSignal<MyFile[]>(__initialState[1]);
+let [allFunctions, setAllFunctions] = createSignal<FunctionInfo[]>([]);
 let [property, setProperty] = createSignal('');
 let [selectedFunction, setSelectedFunction] = createSignal<null | FunctionInfo>(null);
+let [modifiedFunctions, setModifiedFunctions] = createSignal<FunctionInfo[]>([]);
+let previouslySelectedFunction: null | FunctionInfo = null;
 
 let propertyType = () => property().split(' ').slice(0, -1).join(' ').trim();
 let propertyName = () => property().split(' ').at(-1);
 let propertyValid = () => (propertyType() && propertyName() && true);
 
 function setFiles(newFiles: MyFile[]) {
+  setErrorAutoLoading(false);
   setFilesPrivate(newFiles);
   dbSet('files', newFiles.map(f => {
     const { handle } = f;
@@ -270,7 +279,59 @@ async function patch() {
   setFiles(nextFiles);
 };
 
-let allFunctions = createMemo(function(): FunctionInfo[] {
+async function patchEdited() {
+  let patchedSomething = false;
+  const nextFiles = [];
+
+  for (const file of files()) {
+    let patchedCode = '';
+
+    const fileFuncs = allFunctions().filter(f => f.file === file); // Assume they are sorted
+    
+    let prevEndLine = 0;
+    for (const func of fileFuncs) {
+      patchedCode += file.lines.slice(prevEndLine, func.startLine).join('\n');
+      patchedCode += '\n' + func.editedCode + '\n';
+
+      prevEndLine = func.endLine;
+    }
+    const rest = file.lines.slice(prevEndLine).join('\n');
+    patchedCode += rest;
+    
+    if (patchedCode !== file.code) {
+      const writable = await file.handle.createWritable();
+      await writable.write(patchedCode);
+      await writable.close();
+
+      // console.log(patchedCode);
+      // window.patchedCode = patchedCode;
+      patchedSomething = true;
+
+      // for (const { func, originalModel, modifiedModel } of info) {
+      // 	modifiedModel.setValue(originalModel.getValue());
+      // }
+
+      // break;
+    }
+
+    nextFiles.push(patchedCode === file.code ? file : {
+      ...file,
+      code: patchedCode,
+      lines: patchedCode.split('\n'),
+    });
+  }
+
+  if (!patchedSomething) {
+    alert('Nothing patched');
+    return;
+  }
+  console.log('patchedSomething:', patchedSomething);
+
+  setFiles(nextFiles);
+}
+
+
+createEffect(function extractFunctionsFromFiles() {
   let functions: FunctionInfo[] = [];
   // {
     // 	name,
@@ -302,7 +363,7 @@ let allFunctions = createMemo(function(): FunctionInfo[] {
       if (functionEndRegex.test(line)) {
         if (lastFunction) { // Because functions which are not ContestValidateQuery:: are not included, but there end is found
           lastFunction.endLine = lineI + 1;
-          lastFunction.code = file.lines.slice(lastFunction.startLine, lastFunction.endLine).join('\n');
+          lastFunction.editedCode = lastFunction.code = file.lines.slice(lastFunction.startLine, lastFunction.endLine).join('\n');
           lastFunction = null;
         }
       }
@@ -330,7 +391,7 @@ let allFunctions = createMemo(function(): FunctionInfo[] {
   // Remove overloaded functions: those are functions like reject_throw, fatal_throw, etc.
   // They don't help to understand the big picture
   
-  return functions;
+  setAllFunctions(functions);
 });
 
 function analyzeProperty(name: string) {
@@ -497,6 +558,16 @@ createEffect(() => {
   console.log('circularDependencies:', circularDependencies());
 });
 
+
+
+const markSide = 30;
+const ModifiedMark = () =>
+  <div class="modifiedMark">
+    <svg width={markSide} height={markSide}>
+      <polygon points={`0, 0, 0, ${markSide}, ${markSide}, 0`} fill="blue" />
+    </svg>
+  </div>;
+
 const CallTree = () => {
   function dfs(func: FunctionInfo) {
     // console.log(func);
@@ -519,7 +590,7 @@ const CallTree = () => {
 const CallGraph = () => {
   return <div>
     <h3>Call Graph</h3>
-    <For each={roots()}>{root => {
+    <For each={roots().filter(f => f.name === 'start_up')}>{root => { // Dirty ways to get stuff done, hopefully ...
       const gr = graphOf(root);
       if (Object.keys(gr).length === 0) {
         return <div style="padding: 10px; background-color: yellow; border: solid 1px black">${root.name}</div>;
@@ -550,7 +621,9 @@ const CallGraph = () => {
             <For each={Object.values(gr)}>{pr => {
               const { f, x, y } = pr;
               return <div class="callGraphNode"
-                classList={{ selected: selectedFunction() === f }}
+                classList={{
+                  selected: selectedFunction() === f,
+                }}
                 onClick={() => setSelectedFunction(f)}
                 style={{
                   left: x + 'px',
@@ -558,7 +631,8 @@ const CallGraph = () => {
                   width: blockWidth + 'px',
                   height: blockHeight + 'px',
                 }}>
-                <span class="callGraphNodeTitle">${f.name}</span>
+                {modifiedFunctions().includes(f) && <ModifiedMark />}
+                <span class="callGraphNodeTitle">{f.name}</span>
               </div>;
             }}</For>
           </div>
@@ -577,7 +651,7 @@ export default function App() {
   let $property;
 
 
-  const mdLanguage = languageVariant(propertyName() ?? '');
+  const mdLanguage = languageVariant(propertyName() ?? '', allFunctions().map(fs => fs.name));
   let mdOriginalModel= editor.createModel('', mdLanguage.name);
   let mdModifiedModel = editor.createModel('', mdLanguage.name);
   const $mainDiffEditorContainer = document.createElement('div');
@@ -588,15 +662,44 @@ export default function App() {
       // https://github.com/microsoft/monaco-editor/blob/35eb0efbc039827432002ccc17b120eb0874d70f/samples/browser-amd-diff-editor/index.html
       var diffEditor = editor.createDiffEditor($mainDiffEditorContainer, { theme: myCppTheme });
       diffEditor.setModel({ original: mdOriginalModel, modified: mdModifiedModel,});
+
+      mdModifiedModel.onDidChangeContent(event => {
+        const sf = selectedFunction();
+        if (!sf) return;
+        sf.editedCode = mdModifiedModel.getValue();
+        // ^ Imperative, not "Solid" way, but I have no time for "Solid" way:)
+
+        if (sf.editedCode !== sf.code) {
+          if (!modifiedFunctions().includes(sf))
+            setModifiedFunctions([...modifiedFunctions(), sf]);
+        } else {
+          if (modifiedFunctions().includes(sf))
+            setModifiedFunctions(modifiedFunctions().filter(mf => mf !== sf));
+        }
+
+        // const nextFuncs = [...allFunctions()];
+        // const pi = nextFuncs.indexOf(sf);
+        // if (pi < 0)
+        //   throw `Couldn't find previouslySelectedFunction in allFunctions()`;
+
+        // nextFuncs[pi] = {
+        //   ...sf,
+        //   editedCode: mdModifiedModel.getValue(),
+        // };
+        // setAllFunctions(nextFuncs);
+      })
     });
   }
+
 
   createEffect(() => {
     const sf = selectedFunction();
 
     mdOriginalModel.setValue(sf?.code ?? '');
-    mdModifiedModel.setValue(sf?.code ?? '');
+    mdModifiedModel.setValue(sf?.editedCode ?? '');
   });
+
+
 
   return <div>
     <span>
@@ -607,10 +710,12 @@ export default function App() {
         </span>
       }</For>
     </span>
+    {errorAutoLoading() && <span style={{ color: 'red' }}>Auto loading previous files failed, click:</span>}
     <button onClick={loadFiles}>Load previous files</button>
     <button onClick={openFiles}>Open File(s)</button>
     <button onClick={reloadFiles}>Reload Files</button>
     Property: <input ref={$property} /> <button onClick={() => setProperty($property!.value.trim())}>Analize</button>
+    <button onClick={patchEdited}>Patch edited</button>
     <div><pre>
       Type: {propertyType()} <br />
       Name: <b>{propertyName()}</b> <br />
@@ -625,7 +730,7 @@ export default function App() {
         const file = func.file;
         patchingInfo[file.name] = patchingInfo[file.name] ?? [];
 
-        const language = languageVariant(propertyName()!);
+        const language = languageVariant(propertyName()!, allFunctions().map(fs => fs.name));
 
         const de = document.createElement('div');
         de.style.height = '70vh';

@@ -53,6 +53,7 @@ export const myCppRules: monaco.languages.IMonarchLanguage = {
 		],
 
 		toHighlight: ['Zhuk'],
+		functionsToHighlight: ['Luk'],
 
 		keywords: [
 			'abstract',
@@ -297,6 +298,7 @@ export const myCppRules: monaco.languages.IMonarchLanguage = {
 						cases: {
 							'@keywords': { token: 'keyword.$0' },
 							'@toHighlight': { token: 'targetProperty' },
+							'@functionsToHighlight': { token: 'targetFunction' },
 							'@default': 'identifier'
 						}
 					}
