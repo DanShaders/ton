@@ -12,9 +12,9 @@ using namespace std::literals::string_literals;
 
 
 void ContestValidateQuery::generated_root() {
-
 	// <{generated_root
-	build_state_update(state_usage_tree_, prev_state_root_);
+	postcheck_value_flow();
+	build_state_update();
 	// generated_root}/>
 }
 

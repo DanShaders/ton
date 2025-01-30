@@ -986,11 +986,13 @@ export default function App() {
     <button onClick={patchEdited}>Patch edited</button>
     <div>
       <textarea rows={10} cols={100}
+        autocomplete="off" autocapitalize="off" spellcheck={"false" as unknown as boolean}
         ref={$functionsToDAG}
         onInput={functionsToDAGchanged}
         value={__initialFunctionsToDAG}></textarea>
       <button onClick={dagFunctions}>DAG functions</button>
       <textarea rows={10} cols={100}
+        autocomplete="off" autocapitalize="off" spellcheck={"false" as unknown as boolean}
         onInput={e => setPropertiesToHighlightString(e.target.value)}
         value={propertiesToHighlightString()}></textarea>
     </div>

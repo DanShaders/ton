@@ -401,8 +401,8 @@ public:
   void fix_all_processed_upto();
   void add_trivial_neighbor_after_merge();
   void add_trivial_neighbor(Ref<vm::Cell> prev_state_root_);
-  tuple<block::ValueFlow, td::RefInt256> unpack_block_data();
-  tuple<block::ValueFlow, td::RefInt256> unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
+  void unpack_block_data();
+  void unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
   void compute_minted_amount(block::CurrencyCollection& to_mint);
   void postcheck_one_account_update(td::ConstBitPtr acc_id, Ref<vm::CellSlice> old_value, Ref<vm::CellSlice> new_value);
   void postcheck_account_updates();
@@ -443,15 +443,15 @@ public:
   void check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr);
   void check_transactions();
   void check_message_processing_order();
-  void check_new_state(const block::ValueFlow& value_flow_);
-  void postcheck_value_flow(const block::ValueFlow& value_flow_, const td::RefInt256& import_fees_);
+  void check_new_state();
+  void postcheck_value_flow();
 
   Ref<vm::Cell> get_virt_state_root(td::Bits256 block_root_hash);
 
   td::BufferSlice result_state_update_;
 
   bool store_master_ref(vm::CellBuilder& cb);
-  void build_state_update(std::shared_ptr<vm::CellUsageTree> state_usage_tree_, Ref<vm::Cell> prev_state_root_);
+  void build_state_update();
 
 
   // My stuff

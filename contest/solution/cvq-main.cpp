@@ -135,7 +135,7 @@ void ContestValidateQuery::start_up() {
 
     fix_all_processed_upto(); // fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks"); return;
     add_trivial_neighbor(prev_state_root_); // fatal_error("cannot add previous block as a trivial neighbor"); return;
-    PropDest2(value_flow_, import_fees_, unpack_block_data());
+    unpack_block_data();
     // reject_query("cannot unpack block data: " + error);
 
     precheck_account_transactions(); // reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
@@ -150,9 +150,9 @@ void ContestValidateQuery::start_up() {
     check_transactions(); // // LOG(ERROR) << "Test index #" << testIndex << ": another reject_query here"; reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
     postcheck_account_updates(); // reject_query("invalid AccountState update"); return;
     check_message_processing_order(); // reject_query("some messages have been processed by transactions in incorrect order"); return;
-    check_new_state(value_flow_); // reject_query("the header of the new shardchain state is invalid"); return;
-    postcheck_value_flow(value_flow_, import_fees_); // reject_query("new ValueFlow is invalid"); return;
+    check_new_state(); // reject_query("the header of the new shardchain state is invalid"); return;
     
+    // _postcheck_value_flow(); // reject_query("new ValueFlow is invalid"); return;
     // _build_state_update(state_usage_tree_, prev_state_root_); // reject_query("cannot build state update"); return;
     // _finish_query();
 

@@ -1462,7 +1462,7 @@ void ContestValidateQuery::add_trivial_neighbor(Ref<vm::Cell> prev_state_root_) 
  *
  * @returns True if the block data is successfully unpacked and passes all validation checks, false otherwise.
  */
-tuple<block::ValueFlow, td::RefInt256> ContestValidateQuery::unpack_block_data() {
+void ContestValidateQuery::unpack_block_data() {
   LOG(DEBUG) << "unpacking block structures";
   block::gen::Block::Record blk;
   block::gen::BlockExtra::Record extra;
@@ -1499,8 +1499,7 @@ tuple<block::ValueFlow, td::RefInt256> ContestValidateQuery::unpack_block_data()
     reject_throw("ShardAccountBlocks dictionary is invalid");
   }
 
-  Dest2(value_flow_, import_fees_, unpack_precheck_value_flow(std::move(blk.value_flow)));
-  return tuple(value_flow_, import_fees_);
+  unpack_precheck_value_flow(std::move(blk.value_flow));
 }
 
 /**
@@ -1510,13 +1509,13 @@ tuple<block::ValueFlow, td::RefInt256> ContestValidateQuery::unpack_block_data()
  *
  * @returns True if the value flow is valid and unpacked successfully, false otherwise.
  */
-tuple<block::ValueFlow, td::RefInt256> ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root) {
-  block::ValueFlow value_flow_;
-
+void ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root) {
   vm::CellSlice cs{vm::NoVmOrd(), value_flow_root};
   if (!(cs.is_valid() && value_flow_.fetch(cs) && cs.empty_ext())) {
     reject_throw("cannot unpack ValueFlow of the new block "s + id_.to_str());
   }
+  //<%assigned%>: value_flow_
+
   std::ostringstream os;
   value_flow_.show(os);
   LOG(DEBUG) << "value flow: " << os.str();
@@ -1589,10 +1588,12 @@ tuple<block::ValueFlow, td::RefInt256> ContestValidateQuery::unpack_precheck_val
   }
   auto msg_extra = in_msg_dict_->get_root_extra();
   // block::gen::t_ImportFees.print(std::cerr, msg_extra);
-  td::RefInt256 import_fees_;
+
   if (!(block::tlb::t_Grams.as_integer_skip_to(msg_extra.write(), import_fees_) && cc.unpack(std::move(msg_extra)))) {
     reject_throw("cannot unpack ImportFees from the augmentation of the InMsgDescr dictionary");
   }
+  //<%assigned%>: import_fees_
+
   if (cc != value_flow_.imported) {
     reject_throw("ValueFlow for "s + id_.to_str() + " declares imported=" + value_flow_.imported.to_str() +
                         " but the sum over all inbound messages listed in InMsgDescr is " + cc.to_str());
@@ -1609,7 +1610,7 @@ tuple<block::ValueFlow, td::RefInt256> ContestValidateQuery::unpack_precheck_val
         "cannot unpack CurrencyCollection with total transaction fees from the augmentation of the ShardAccountBlocks "
         "dictionary");
   }
-  return tuple(value_flow_, import_fees_);
+  //<%assigned%>: transaction_fees_
 }
 
 /**
@@ -4773,6 +4774,9 @@ void ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
         << " is invalid: it has produced a set of outbound messages different from that listed in the transaction");
   }
   total_burned_ += trs->blackhole_burned;
+  //<%assigned%>: total_burned_
+
+
   // check new balance and value flow
   auto new_balance = account.get_balance();
   block::CurrencyCollection total_fees;
@@ -5145,7 +5149,7 @@ void ContestValidateQuery::check_message_processing_order() {
  *
  * @returns True if the new state is valid, false otherwise.
  */
-void ContestValidateQuery::check_new_state(const block::ValueFlow& value_flow_) {
+void ContestValidateQuery::check_new_state() {
   // shard_state#9023afe2 global_id:int32 -> checked in unpack_next_state()
   // shard_id:ShardIdent -> checked in unpack_next_state()
   // seq_no:uint32 vert_seq_no:# -> checked in unpack_next_state()
@@ -5205,7 +5209,7 @@ void ContestValidateQuery::check_new_state(const block::ValueFlow& value_flow_) 
  *
  * @returns True if the value flow is valid, False otherwise.
  */
-void ContestValidateQuery::postcheck_value_flow(const block::ValueFlow& value_flow_, const td::RefInt256& import_fees_) {
+void ContestValidateQuery::postcheck_value_flow() {
   auto accounts_extra = ns_.account_dict_->get_root_extra();
   block::CurrencyCollection cc;
   if (!(accounts_extra.write().advance(5) && cc.unpack(std::move(accounts_extra)))) {
@@ -5257,9 +5261,7 @@ Ref<vm::Cell> ContestValidateQuery::get_virt_state_root(td::Bits256 block_root_h
  *
  * @return True on success, False on error.
  */
-void ContestValidateQuery::build_state_update(
-  shared_ptr<vm::CellUsageTree> state_usage_tree_,
-  Ref<vm::Cell> prev_state_root_) {
+void ContestValidateQuery::build_state_update() {
   td::Ref<vm::Cell> msg_q_info;
   {
     vm::CellBuilder cb;

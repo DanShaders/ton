@@ -1,5 +1,3 @@
-
-
 const annotatedProperties: string[] = [
 	// ContestValidateQuery::ContestValidateQuery
 	'shard_',
@@ -56,6 +54,13 @@ const annotatedProperties: string[] = [
 
 
 	'result_state_update_',
+
+	// Added for: postcheck_value_flow()
+	'transaction_fees_',
+	'total_burned_',
+	'fees_burned_', // Inited with 0, never changed
+	'value_flow_',
+	'import_fees_',
 ];
 
 export default annotatedProperties;
