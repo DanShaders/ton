@@ -148,6 +148,10 @@ void ContestValidateQuery::init_parse() {
   prev_blocks = prev_blks;
   after_merge_ = prev_blocks.size() == 2;
   after_split_ = !after_merge_ && prev_blocks[0].shard_full() != shard_;
+  //<%assigned%>: mc_seqno_
+  //<%assigned%>: after_merge_
+  //<%assigned%>: after_split_
+
   if (after_split != after_split_) {
     // ??? impossible
     fatal_throw("after_split mismatch in block header");
@@ -777,7 +781,7 @@ tuple<shared_ptr<vm::CellUsageTree>, Ref<vm::Cell>> ContestValidateQuery::comput
  *
  * @returns True if the unpacking and merging was successful, false otherwise.
  */
-void ContestValidateQuery::unpack_merge_prev_state(Ref<vm::Cell> prev_state_root_) {
+void ContestValidateQuery::unpack_merge_prev_state() {
   LOG(DEBUG) << "unpack/merge previous states";
   CHECK(prev_states.size() == 2);
   // 2. extract the two previous states
@@ -816,7 +820,7 @@ void ContestValidateQuery::unpack_prev_state(Ref<vm::Cell> prev_state_root_) {
   LOG(DEBUG) << "unpacking previous state(s)";
   CHECK(prev_state_root_.not_null());
   if (after_merge_) {
-    unpack_merge_prev_state(prev_state_root_);
+    unpack_merge_prev_state();
       // return fatal_error("unable to unpack/merge previous states immediately after a merge");
     return;
   }
@@ -827,7 +831,7 @@ void ContestValidateQuery::unpack_prev_state(Ref<vm::Cell> prev_state_root_) {
   if (after_split_)
     split_prev_state(ps_);
   // PassIf(!after_split_ || split_prev_state(ps_));
-  // return unpack_one_prev_state(ps_, prev_blocks.at(0), prev_state_root_) && (!after_split_ || split_prev_state(ps_));
+  // return _unpack_one_prev_state(ps_, prev_blocks.at(0), prev_state_root_) && (!after_split_ || split_prev_state(ps_));
 }
 
 /**
@@ -895,7 +899,7 @@ void ContestValidateQuery::init_next_state() {
   ns_.vert_seqno_ = vert_seqno_;
   ns_.before_split_ = before_split_;
 
-  // Moved forward to "fix_all_processed_upto"
+  // Moved forward to "_fix_all_processed_upto"
   // ns_.processed_upto_ = block::MsgProcessedUptoCollection::unpack(id_.shard_full(), extra_collated_data_.proc_info);
   // if (!ns_.processed_upto_) {
   //   reject_throw("failed top unpack processed upto");

@@ -98,10 +98,10 @@ void ContestValidateQuery::start_up() {
           "previous block does not belong to the shard we are generating a new block for"
         );
       }
-      if (after_split_) {
-        // soft_reject_query("splitting shards not implemented yet");
-        // return;
-      }
+      // if (_after_split_) {
+      //   // _soft_reject_query("splitting shards not implemented yet");
+      //   // return;
+      // }
     }
 
 
@@ -150,6 +150,8 @@ void ContestValidateQuery::start_up() {
     check_transactions(); // // LOG(ERROR) << "Test index #" << testIndex << ": another reject_query here"; reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
     postcheck_account_updates(); // reject_query("invalid AccountState update"); return;
     check_message_processing_order(); // reject_query("some messages have been processed by transactions in incorrect order"); return;
+    
+    
     check_new_state(); // reject_query("the header of the new shardchain state is invalid"); return;
     
     // _postcheck_value_flow(); // reject_query("new ValueFlow is invalid"); return;

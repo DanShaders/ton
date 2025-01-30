@@ -263,7 +263,7 @@ public:
   Ref<vm::Cell> old_mparams_;
   bool accept_msgs_{true};
 
-  ton::BlockSeqno min_shard_ref_mc_seqno_{~0U};
+  ton::BlockSeqno min_shard_ref_mc_seqno_{~0U}; // ??Always zero
   ton::LogicalTime max_shard_lt_{0};
 
   int global_id_{0};
@@ -380,7 +380,7 @@ public:
   void extract_collated_data_from(Ref<vm::Cell> croot, int idx);
   void extract_collated_data();
   tuple<shared_ptr<vm::CellUsageTree>, Ref<vm::Cell>> compute_prev_state();
-  void unpack_merge_prev_state(Ref<vm::Cell> prev_state_root_);
+  void unpack_merge_prev_state();
   void unpack_prev_state(Ref<vm::Cell> prev_state_root_);
   void init_next_state();
   void unpack_one_prev_state(block::ShardState& ss, BlockIdExt blkid, Ref<vm::Cell> prev_state_root);
