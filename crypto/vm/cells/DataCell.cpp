@@ -25,15 +25,20 @@
 #include "vm/cells/CellWithStorage.h"
 #include <openssl/sha.h>
 
-#ifndef TD_WINDOWS
+/// The experiment is disabled by default
+#ifdef TON_EXPERIMENT_ISAL_CRYPTO
   /// ISA-L crypto
   #include <sha256_mb.h>      // isal_sha256_*
   #include <memcpy_inline.h>
   #include <endian_helper.h>  // to_be
+#endif
 
-  /// SHANI - имеет много проблем с Win32. Под Linux дает +1%
+/// The experiment is disabled by default
+#ifdef TON_EXPERIMENT_SHANI
+#ifndef TD_WINDOWS
   #include "third-party/flo-shani-aesni/sha256/flo-shani.h"
   #include "third-party/flo-shani-aesni/cpuid/flo-cpuid.h"
+#endif
 #endif
 
 namespace vm {
@@ -108,7 +113,7 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
   return create(std::move(data), bits, td::MutableSpan<Ref<Cell>>(copied_refs.data(), refs.size()), special);
 }
 
-#ifndef TD_WINDOWS
+#ifdef TON_EXPERIMENT_ISAL_CRYPTO
 /// \example https://github.com/intel/isa-l_crypto/blob/v2.25.0/sha256_mb/sha256_mb_test.c
 class ABSL_ATTRIBUTE_FUNC_ALIGN(16) HasherSha256Isal {
  private:
@@ -379,11 +384,19 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     }
 
     /// Хешер для процессоров Intel
-#if 0
+#ifdef TON_EXPERIMENT_ISAL_CRYPTO
     static ABSL_ATTRIBUTE_FUNC_ALIGN(16) TD_THREAD_LOCAL HasherSha256Isal hasherIsal;
     if (hasherIsal.is_ok()) {
       const int rc = hasherIsal.sha256(buffer, buffer_size, hashes_ptr[dest_i].as_slice().ubegin());
       DCHECK(0 == rc);
+    }
+#endif
+
+#ifdef TON_EXPERIMENT_SHANI
+    static bool has_shani = hasSHANI();
+
+    if (has_shani) {
+      sha256_update_shani(buffer, buffer_size, hashes_ptr[dest_i].as_slice().ubegin());
     } else
 #endif
 

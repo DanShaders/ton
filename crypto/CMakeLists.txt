@@ -334,7 +334,9 @@ if (MSVC)
   target_link_libraries(ton_crypto_core PUBLIC ${SECP256K1_LIBRARY} ${ISA_L_CRYPTO_LIBRARY})
   target_link_libraries(ton_crypto PUBLIC ${SECP256K1_LIBRARY})
 elseif (EMSCRIPTEN)
-  target_link_libraries(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_LIBRARY}> $<BUILD_INTERFACE:${ISA_L_CRYPTO_LIBRARY}>)
+  target_link_libraries(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_LIBRARY}> $<BUILD_INTERFACE:${ISA_L_CRYPTO_LIBRARY}> 
+    #flo-shani flo-cpuid
+  )
   target_link_libraries(ton_crypto PUBLIC $<BUILD_INTERFACE:${SECP256K1_LIBRARY}>)
 else()
   if (NOT SODIUM_FOUND)
@@ -343,7 +345,9 @@ else()
     message(STATUS "Using Sodium ${SODIUM_LIBRARY_RELEASE}")
   endif()
   target_compile_definitions(ton_crypto PUBLIC SODIUM_STATIC)
-  target_link_libraries(ton_crypto_core PUBLIC ${SECP256K1_LIBRARY} ${ISA_L_CRYPTO_LIBRARY})
+  target_link_libraries(ton_crypto_core PUBLIC ${SECP256K1_LIBRARY} ${ISA_L_CRYPTO_LIBRARY}
+    #flo-shani flo-cpuid
+  )
   target_link_libraries(ton_crypto PUBLIC ${SECP256K1_LIBRARY})
 endif()
 
