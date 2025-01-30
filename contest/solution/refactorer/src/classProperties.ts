@@ -107,7 +107,10 @@ const classProperties = [
 
 	'msg_proc_lt_',
 	'msg_proc_lt_mutex_',
-	'msg_emitted_lt_',
+
+	// 'msg_emitted_lt_',
+	'in_msg_emitted_lt_',
+	'out_msg_emitted_lt_',
 
 	'removed_dispatch_queue_messages_',
 	'new_dispatch_queue_messages_',

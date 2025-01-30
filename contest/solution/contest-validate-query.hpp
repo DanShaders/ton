@@ -309,7 +309,10 @@ public:
 
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_proc_lt_;
   std::mutex msg_proc_lt_mutex_;
-  std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_emitted_lt_;
+
+  // std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_emitted_lt_;
+  std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> in_msg_emitted_lt_;
+  std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> out_msg_emitted_lt_;
 
   MyMap<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;
   MyMap<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> new_dispatch_queue_messages_;

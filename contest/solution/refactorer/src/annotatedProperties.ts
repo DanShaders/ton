@@ -70,6 +70,13 @@ const annotatedProperties: string[] = [
 	'mc_seqno_',
 	'min_shard_ref_mc_seqno_', // Inited with 0, never changed
 	'aux_mc_states_',
+
+
+
+	// Added for: check_message_processing_order()
+	'msg_proc_lt_',
+	'in_msg_emitted_lt_',
+	'out_msg_emitted_lt_',
 ];
 
 export default annotatedProperties;

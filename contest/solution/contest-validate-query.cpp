@@ -2984,7 +2984,7 @@ void ContestValidateQuery::check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> 
     }
     removed_dispatch_queue_messages_.erase(it);
     if (tag == block::gen::InMsg::msg_import_deferred_fin) {
-      msg_emitted_lt_.emplace_back(src_addr, lt, env.emitted_lt.value());
+      in_msg_emitted_lt_.emplace_back(src_addr, lt, env.emitted_lt.value());
     }
   }
 
@@ -3257,7 +3257,7 @@ void ContestValidateQuery::check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> 
  */
 void ContestValidateQuery::check_in_msg_descr() {
   LOG(INFO) << "checking inbound messages listed in InMsgDescr";
-  try {
+  // try {
     CHECK(in_msg_dict_);
     if (!in_msg_dict_->validate_check_extra(
             [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
@@ -3268,9 +3268,11 @@ void ContestValidateQuery::check_in_msg_descr() {
             })) {
       reject_throw("invalid InMsgDescr dictionary in the new block "s + id_.to_str());
     }
-  } catch (vm::VmError& err) {
-    reject_throw("invalid InMsgDescr dictionary: "s + err.get_msg());
-  }
+  // } catch (vm::VmError& err) {
+  //   reject_throw("invalid InMsgDescr dictionary: "s + err.get_msg());
+  // }
+
+  //<%assigned%>: in_msg_emitted_lt_
 }
 
 /**
@@ -3647,7 +3649,7 @@ void ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
           "OutMsg with key "s + key.to_hex(256) +
           " refers to a (re)import InMsg, but the actual InMsg with this key is different from the one referred to");
     }
-    // NB: in check_in_msg(), we have already checked that all InMsg have correct keys (equal to the hash of the imported message), so the imported message is equal to the exported message (they have the same hash)
+    // NB: in _check_in_msg(), we have already checked that all InMsg have correct keys (equal to the hash of the imported message), so the imported message is equal to the exported message (they have the same hash)
     // have only to check the envelope
     int i_tag = block::gen::t_InMsg.get_tag(*in);
     if (i_tag < 0 || i_tag != in_tag) {
@@ -3733,7 +3735,7 @@ void ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
                             in_cur_prefix.to_str() +
                             " inside the current shard (msg_export_tr_req should have been used instead)");
       }
-      // we have already checked correctness of hypercube routing in InMsg::msg_import_tr case of check_in_msg()
+      // we have already checked correctness of hypercube routing in InMsg::msg_import_tr case of _check_in_msg()
       CHECK(shard_contains(shard_, in_next_prefix));
       CHECK(shard_contains(shard_, cur_prefix));
       CHECK(!shard_contains(shard_, next_prefix));
@@ -3810,7 +3812,7 @@ void ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
                             " outside the current shard (msg_export_tr should have been used instead, because there "
                             "was no re-queueing)");
       }
-      // we have already checked correctness of hypercube routing in InMsg::msg_import_tr case of check_in_msg()
+      // we have already checked correctness of hypercube routing in InMsg::msg_import_tr case of _check_in_msg()
       CHECK(shard_contains(shard_, in_next_prefix));
       CHECK(shard_contains(shard_, cur_prefix));
       CHECK(!shard_contains(shard_, next_prefix));
@@ -3863,7 +3865,7 @@ void ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
                             " dequeued a MsgEnvelope with current address " + cur_prefix.to_str() +
                             "... outside current shard");
       }
-      // we have already checked more conditions in check_in_msg() case msg_import_fin
+      // we have already checked more conditions in _check_in_msg() case msg_import_fin
       CHECK(shard_contains(shard_, next_prefix));  // sanity check
       CHECK(shard_contains(shard_, dest_prefix));  // sanity check
       // ...
@@ -3888,7 +3890,7 @@ void ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
                                     << ", tag=" << tag);
     }
     auto emitted_lt = env.emitted_lt ? env.emitted_lt.value() : created_lt;
-    msg_emitted_lt_.emplace_back(src_addr, created_lt, emitted_lt);
+    out_msg_emitted_lt_.emplace_back(src_addr, created_lt, emitted_lt);
   }
 
   return;
@@ -3901,7 +3903,7 @@ void ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
  */
 void ContestValidateQuery::check_out_msg_descr() {
   LOG(INFO) << "checking outbound messages listed in OutMsgDescr";
-  try {
+  // try {
     CHECK(out_msg_dict_);
     if (!out_msg_dict_->validate_check_extra(
             [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
@@ -3912,9 +3914,11 @@ void ContestValidateQuery::check_out_msg_descr() {
             })) {
       reject_throw("invalid OutMsgDescr dictionary in the new block "s + id_.to_str());
     }
-  } catch (vm::VmError& err) {
-    reject_throw("invalid OutMsgDescr dictionary: "s + err.get_msg());
-  }
+  // } catch (vm::VmError& err) {
+  //   reject_throw("invalid OutMsgDescr dictionary: "s + err.get_msg());
+  // }
+
+  //<%assigned%>: out_msg_emitted_lt_
 }
 
 /**
@@ -4299,8 +4303,7 @@ std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBi
  *
  * @returns True if the transaction is valid, false otherwise.
  */
-void ContestValidateQuery::check_one_transaction(block::Account& account, ton::LogicalTime lt, Ref<vm::Cell> trans_root,
-                                                 bool is_first, bool is_last) {
+void ContestValidateQuery::check_one_transaction(block::Account& account, ton::LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first, bool is_last) {
   // return true; // !TEMP_THREAD_TEST
   // LOG(ERROR) << "Test index #" << testIndex << ": check_one_transaction, current thread id: "<< render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   LOG(DEBUG) << "checking transaction " << lt << " of account " << account.addr.to_hex();
@@ -4366,7 +4369,7 @@ void ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
                                       << " processed inbound message created later at logical time "
                                       << info.created_lt);
       }
-      LogicalTime emitted_lt = info.created_lt;  // See ContestValidateQuery::check_message_processing_order
+      LogicalTime emitted_lt = info.created_lt;  // See ContestValidateQuery::_check_message_processing_order
       // return true; // !TEMP_THREAD_TEST
       if (in_msg_tag == block::gen::InMsg::msg_import_imm || in_msg_tag == block::gen::InMsg::msg_import_fin ||
           in_msg_tag == block::gen::InMsg::msg_import_deferred_fin) {
@@ -5116,6 +5119,8 @@ void ContestValidateQuery::check_transactions() {
 
 
   //<%assigned%>: ns_.account_dict_
+  //<%assigned%>: msg_proc_lt_
+  
 }
 
 
@@ -5140,12 +5145,18 @@ void ContestValidateQuery::check_message_processing_order() {
                                     << ") processes an earlier message created at logical time " << std::get<2>(b));
     }
   }
+  // _msg_proc_lt_ is changed here, but we'll ignore that and say that
+  // it was assigned in _check_account_transactions
+  // since it's not read anywhere else anyway
+
+  in_msg_emitted_lt_.insert( in_msg_emitted_lt_.end(), out_msg_emitted_lt_.begin(), out_msg_emitted_lt_.end() );
+  // We can modify this ^ vector, because it's not used anywhere else
 
   // Check that if messages m1 and m2 with the same source have m1.created_lt < m2.created_lt then
   // m1.emitted_lt < m2.emitted_lt.
-  std::sort(msg_emitted_lt_.begin(), msg_emitted_lt_.end());
-  for (std::size_t i = 1; i < msg_emitted_lt_.size(); i++) {
-    auto &a = msg_emitted_lt_[i - 1], &b = msg_emitted_lt_[i];
+  std::sort(in_msg_emitted_lt_.begin(), in_msg_emitted_lt_.end());
+  for (std::size_t i = 1; i < in_msg_emitted_lt_.size(); i++) {
+    auto &a = in_msg_emitted_lt_[i - 1], &b = in_msg_emitted_lt_[i];
     if (std::get<0>(a) == std::get<0>(b) && std::get<2>(a) >= std::get<2>(b)) {
       reject_throw(PSTRING() << "incorrect deferred message processing order for sender "
                                     << std::get<0>(a).to_hex() << ": message with created_lt " << std::get<1>(a)
