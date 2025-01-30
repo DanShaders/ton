@@ -263,6 +263,8 @@ class ContestValidateQuery : public td::actor::Actor {
   bool extract_collated_data_from(Ref<vm::Cell> croot, int idx);
   bool extract_collated_data();
   bool try_validate();
+  bool try_validate_stage0();
+  bool try_validate_stage1();
   bool compute_prev_state();
   bool unpack_merge_prev_state();
   bool unpack_prev_state();

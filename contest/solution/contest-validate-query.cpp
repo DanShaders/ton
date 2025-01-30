@@ -5319,94 +5319,112 @@ Ref<vm::Cell> ContestValidateQuery::get_virt_state_root(td::Bits256 block_root_h
  *
  * @returns True if the validation is successful, False otherwise.
  */
+
+bool ContestValidateQuery::try_validate_stage0() {
+
+  LOG(INFO) << "try_validate stage 0";
+  if (!compute_prev_state()) {
+    return fatal_error(-666, "cannot compute previous state");
+  }
+  if (!request_neighbor_queues()) {
+    return fatal_error("cannot request neighbor output queues");
+  }
+  if (!unpack_prev_state()) {
+    return fatal_error("cannot unpack previous state");
+  }
+  if (!init_next_state()) {
+    return fatal_error("cannot unpack previous state");
+  }
+  if (!check_utime_lt()) {
+    return reject_query("creation utime/lt of the new block is invalid");
+  }
+  if (!prepare_out_msg_queue_size()) {
+    return reject_query("cannot request out msg queue size");
+  }
+
+  return true;
+}
+
+bool ContestValidateQuery::try_validate_stage1() {
+  LOG(INFO) << "try_validate stage 1";
+  LOG(INFO) << "running automated validity checks for block candidate " << id_.to_str();
+  if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
+    return reject_query("block "s + id_.to_str() + " failed to pass automated validity checks");
+  }
+  if (!fix_all_processed_upto()) {
+    return fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks");
+  }
+  if (!add_trivial_neighbor()) {
+    return fatal_error("cannot add previous block as a trivial neighbor");
+  }
+  if (!unpack_block_data()) {
+    return reject_query("cannot unpack block data");
+  }
+  if (!precheck_account_transactions()) {
+    return reject_query("invalid collection of account transactions in ShardAccountBlocks");
+  }
+  if (!build_new_message_queue()) {
+    return reject_query("cannot build a new message queue");
+  }
+  if (!precheck_message_queue_update()) {
+    return reject_query("invalid OutMsgQueue update");
+  }
+  if (!unpack_dispatch_queue_update()) {
+    return reject_query("invalid DispatchQueue update");
+  }
+  if (!check_in_msg_descr()) {
+    return reject_query("invalid InMsgDescr");
+  }
+  if (!check_out_msg_descr()) {
+    return reject_query("invalid OutMsgDescr");
+  }
+  if (!check_dispatch_queue_update()) {
+    return reject_query("invalid OutMsgDescr");
+  }
+  if (!check_processed_upto()) {
+    return reject_query("invalid ProcessedInfo");
+  }
+  if (!check_in_queue()) {
+    return reject_query("cannot check inbound message queues");
+  }
+  if (!check_transactions()) {
+    return reject_query("invalid collection of account transactions in ShardAccountBlocks");
+  }
+  if (!postcheck_account_updates()) {
+    return reject_query("invalid AccountState update");
+  }
+  if (!check_message_processing_order()) {
+    return reject_query("some messages have been processed by transactions in incorrect order");
+  }
+  if (!check_new_state()) {
+    return reject_query("the header of the new shardchain state is invalid");
+  }
+  if (!postcheck_value_flow()) {
+    return reject_query("new ValueFlow is invalid");
+  }
+  if (!build_state_update()) {
+    return reject_query("cannot build state update");
+  }
+
+  return true;
+}
+
 bool ContestValidateQuery::try_validate() {
   if (pending) {
     return true;
   }
   try {
     if (!stage_) {
-      LOG(INFO) << "try_validate stage 0";
-      if (!compute_prev_state()) {
-        return fatal_error(-666, "cannot compute previous state");
-      }
-      if (!request_neighbor_queues()) {
-        return fatal_error("cannot request neighbor output queues");
-      }
-      if (!unpack_prev_state()) {
-        return fatal_error("cannot unpack previous state");
-      }
-      if (!init_next_state()) {
-        return fatal_error("cannot unpack previous state");
-      }
-      if (!check_utime_lt()) {
-        return reject_query("creation utime/lt of the new block is invalid");
-      }
-      if (!prepare_out_msg_queue_size()) {
-        return reject_query("cannot request out msg queue size");
+      if (!try_validate_stage0()) {
+        return false;
       }
       stage_ = 1;
       if (pending) {
         return true;
       }
     }
-    LOG(INFO) << "try_validate stage 1";
-    LOG(INFO) << "running automated validity checks for block candidate " << id_.to_str();
-    if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
-      return reject_query("block "s + id_.to_str() + " failed to pass automated validity checks");
-    }
-    if (!fix_all_processed_upto()) {
-      return fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks");
-    }
-    if (!add_trivial_neighbor()) {
-      return fatal_error("cannot add previous block as a trivial neighbor");
-    }
-    if (!unpack_block_data()) {
-      return reject_query("cannot unpack block data");
-    }
-    if (!precheck_account_transactions()) {
-      return reject_query("invalid collection of account transactions in ShardAccountBlocks");
-    }
-    if (!build_new_message_queue()) {
-      return reject_query("cannot build a new message queue");
-    }
-    if (!precheck_message_queue_update()) {
-      return reject_query("invalid OutMsgQueue update");
-    }
-    if (!unpack_dispatch_queue_update()) {
-      return reject_query("invalid DispatchQueue update");
-    }
-    if (!check_in_msg_descr()) {
-      return reject_query("invalid InMsgDescr");
-    }
-    if (!check_out_msg_descr()) {
-      return reject_query("invalid OutMsgDescr");
-    }
-    if (!check_dispatch_queue_update()) {
-      return reject_query("invalid OutMsgDescr");
-    }
-    if (!check_processed_upto()) {
-      return reject_query("invalid ProcessedInfo");
-    }
-    if (!check_in_queue()) {
-      return reject_query("cannot check inbound message queues");
-    }
-    if (!check_transactions()) {
-      return reject_query("invalid collection of account transactions in ShardAccountBlocks");
-    }
-    if (!postcheck_account_updates()) {
-      return reject_query("invalid AccountState update");
-    }
-    if (!check_message_processing_order()) {
-      return reject_query("some messages have been processed by transactions in incorrect order");
-    }
-    if (!check_new_state()) {
-      return reject_query("the header of the new shardchain state is invalid");
-    }
-    if (!postcheck_value_flow()) {
-      return reject_query("new ValueFlow is invalid");
-    }
-    if (!build_state_update()) {
-      return reject_query("cannot build state update");
+    if (!try_validate_stage1()) {
+      return false;
     }
   } catch (vm::VmError& err) {
     return fatal_error(-666, err.get_msg());
