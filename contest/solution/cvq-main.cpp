@@ -120,7 +120,7 @@ void ContestValidateQuery::start_up() {
     // (previously: try_validate())
 
     LOG(INFO) << "try_validate stage 0";
-    Dest2(state_usage_tree_, prev_state_root_, compute_prev_state()); // fatal_error(-666, "cannot compute previous state"); return;
+    PropDest2(state_usage_tree_, prev_state_root_, compute_prev_state()); // fatal_error(-666, "cannot compute previous state"); return;
     request_neighbor_queues(); // fatal_error("cannot request neighbor output queues"); return;
     unpack_prev_state(prev_state_root_); // fatal_error("cannot unpack previous state"); return;
     init_next_state(); // fatal_error("cannot unpack previous state"); return;
@@ -135,7 +135,7 @@ void ContestValidateQuery::start_up() {
 
     fix_all_processed_upto(); // fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks"); return;
     add_trivial_neighbor(prev_state_root_); // fatal_error("cannot add previous block as a trivial neighbor"); return;
-    Dest2(value_flow_, import_fees_, unpack_block_data());
+    PropDest2(value_flow_, import_fees_, unpack_block_data());
     // reject_query("cannot unpack block data: " + error);
 
     precheck_account_transactions(); // reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
@@ -152,9 +152,9 @@ void ContestValidateQuery::start_up() {
     check_message_processing_order(); // reject_query("some messages have been processed by transactions in incorrect order"); return;
     check_new_state(value_flow_); // reject_query("the header of the new shardchain state is invalid"); return;
     postcheck_value_flow(value_flow_, import_fees_); // reject_query("new ValueFlow is invalid"); return;
-    td::BufferSlice result_state_update_ = build_state_update(state_usage_tree_, prev_state_root_); // reject_query("cannot build state update"); return;
-
-    finish_query(result_state_update_);
+    
+    // _build_state_update(state_usage_tree_, prev_state_root_); // reject_query("cannot build state update"); return;
+    // _finish_query();
 
     generated_root();
   

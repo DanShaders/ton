@@ -111,6 +111,10 @@ auto t(Args&&... args) -> decltype(f(std::forward<Args>(args)...)) {
   auto temp_##a = v; \
   auto a = std::get<0>(temp_##a); \
   auto b = std::get<1>(temp_##a);
+#define PropDest2(a, b, v) \
+  auto temp_##a = v; \
+  a = std::get<0>(temp_##a); \
+  b = std::get<1>(temp_##a);
 
 
 class ErrorCtxAdd;
@@ -295,10 +299,10 @@ public:
 
 
   std::unique_ptr<vm::AugmentedDictionary> in_msg_dict_, out_msg_dict_, account_blocks_dict_;
-  // block::ValueFlow value_flow_;
+  block::ValueFlow value_flow_;
   // block::CurrencyCollection import_created_; // Doesn't exist
   block::CurrencyCollection transaction_fees_, total_burned_{0}, fees_burned_{0};
-  // td::RefInt256 import_fees_;
+  td::RefInt256 import_fees_;
 
   ton::LogicalTime proc_lt_{0}, claimed_proc_lt_{0}, min_enq_lt_{~0ULL};
   ton::Bits256 proc_hash_ = ton::Bits256::zero(), claimed_proc_hash_, min_enq_hash_;
@@ -331,7 +335,7 @@ public:
   void reject_throw(std::string error, td::BufferSlice reason = {});
   void reject_throw(std::string err_msg, td::Status error, td::BufferSlice reason = {});
 
-  void finish_query(td::BufferSlice& result_state_update_);
+  void finish_query();
   void abort_query(td::Status error);
   bool reject_query(std::string error, td::BufferSlice reason = {});
   bool reject_query(std::string err_msg, td::Status error, td::BufferSlice reason = {});
@@ -444,10 +448,10 @@ public:
 
   Ref<vm::Cell> get_virt_state_root(td::Bits256 block_root_hash);
 
-  // td::BufferSlice result_state_update_;
+  td::BufferSlice result_state_update_;
 
   bool store_master_ref(vm::CellBuilder& cb);
-  td::BufferSlice build_state_update(std::shared_ptr<vm::CellUsageTree> state_usage_tree_, Ref<vm::Cell> prev_state_root_);
+  void build_state_update(std::shared_ptr<vm::CellUsageTree> state_usage_tree_, Ref<vm::Cell> prev_state_root_);
 
 
   // My stuff
@@ -465,6 +469,15 @@ public:
 
   friend class MultithreadingGuard;
   void generated_root();
+
+
+
+  //<%generated_vars%>
+  std::atomic<int> __pending_finish_query{1};
+  //<%/generated_vars%>
+
+
+
 
   // Useless properties:
   // These were probably used in the original code, but are not used in the contest

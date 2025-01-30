@@ -5257,7 +5257,7 @@ Ref<vm::Cell> ContestValidateQuery::get_virt_state_root(td::Bits256 block_root_h
  *
  * @return True on success, False on error.
  */
-td::BufferSlice ContestValidateQuery::build_state_update(
+void ContestValidateQuery::build_state_update(
   shared_ptr<vm::CellUsageTree> state_usage_tree_,
   Ref<vm::Cell> prev_state_root_) {
   td::Ref<vm::Cell> msg_q_info;
@@ -5310,8 +5310,11 @@ td::BufferSlice ContestValidateQuery::build_state_update(
   if (state_update.is_null()) {
     fatal_throw("failed to generate Merkle update");
   }
-  td::BufferSlice result_state_update_ = vm::std_boc_serialize(state_update).move_as_ok();
-  return result_state_update_;
+  result_state_update_ = vm::std_boc_serialize(state_update).move_as_ok();
+  //<%assigned%>: result_state_update_
+							//<%generated%>
+							if (--__pending_finish_query == 0) finish_query();
+							//<%/generated%>
 }
 
 /**

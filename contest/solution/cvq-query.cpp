@@ -14,9 +14,11 @@ using namespace ton::validator;
 bool ContestValidateQuery::in_main_thread() {
   return !in_multithreading || std::this_thread::get_id() == main_thread_id;
 }
+
 void ContestValidateQuery::leave_multithreading() {
   in_multithreading = false;
 }
+
 void ContestValidateQuery::enter_multithreading() {
   in_multithreading = true;
   main_thread_id = std::this_thread::get_id();
@@ -181,7 +183,7 @@ bool ContestValidateQuery::fatal_error(std::string err_msg, int err_code) {
 /**
  * Finishes the query and sends the result to the promise.
  */
-void ContestValidateQuery::finish_query(td::BufferSlice& result_state_update_) {
+void ContestValidateQuery::finish_query() {
   if (main_promise) {
     LOG(WARNING) << "validate query done";
     main_promise.set_result(std::move(result_state_update_));
