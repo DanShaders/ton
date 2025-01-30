@@ -822,16 +822,22 @@ void ContestValidateQuery::unpack_prev_state(Ref<vm::Cell> prev_state_root_) {
   if (after_merge_) {
     unpack_merge_prev_state();
       // return fatal_error("unable to unpack/merge previous states immediately after a merge");
-    return;
-  }
-  CHECK(prev_states.size() == 1);
-  // unpack previous state
+  } else {
+    CHECK(prev_states.size() == 1);
+    // unpack previous state
 
-  unpack_one_prev_state(ps_, prev_blocks.at(0), prev_state_root_);
-  if (after_split_)
-    split_prev_state(ps_);
-  // PassIf(!after_split_ || split_prev_state(ps_));
-  // return _unpack_one_prev_state(ps_, prev_blocks.at(0), prev_state_root_) && (!after_split_ || split_prev_state(ps_));
+    unpack_one_prev_state(ps_, prev_blocks.at(0), prev_state_root_);
+    if (after_split_)
+      split_prev_state(ps_);
+    // PassIf(!after_split_ || split_prev_state(ps_));
+    // return _unpack_one_prev_state(ps_, prev_blocks.at(0), prev_state_root_) && (!after_split_ || split_prev_state(ps_));
+  }
+
+  //<%assigned%>: aux_mc_states_
+
+  CHECK(ps_.processed_upto_);
+  fix_processed_upto(*ps_.processed_upto_);
+  //<%assigned%>: ps_
 }
 
 /**
@@ -1259,8 +1265,9 @@ void ContestValidateQuery::fix_all_processed_upto() {
     reject_throw("failed top unpack processed upto");
   }
 
-  CHECK(ps_.processed_upto_);
-  fix_processed_upto(*ps_.processed_upto_);
+  // The following lines are carefully (hopefully) moved to "_unpack_prev_state" to expose __ps as soon as possible
+  // CHECK(_ps_.processed_upto_);
+  // _fix_processed_upto(*_ps_.processed_upto_);
     //return fatal_error("Cannot adjust old ProcessedUpto of our shard state");
 
   // if (sibling_processed_upto_ && !fix_processed_upto(*sibling_processed_upto_))
