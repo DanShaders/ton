@@ -23,6 +23,8 @@
 #include "td/utils/bits.h"
 #include "td/utils/misc.h"
 #include "crypto/openssl/digest.hpp"
+#include <openssl/sha.h>
+#include <absl/base/optimization.h>
 
 namespace td {
 
@@ -587,10 +589,24 @@ long parse_bitstring_binary_literal(BitPtr buff, std::size_t buff_size_bits, con
 void bits_sha256(BitPtr to, ConstBitPtr from, std::size_t size) {
   if (from.byte_aligned() && !(size & 7)) {
     if (to.byte_aligned()) {
-      digest::hash_str<digest::SHA256>(to.get_byte_ptr(), from.get_byte_ptr(), size >> 3);
+      if (size < 512 << 3) {
+        static ABSL_CACHELINE_ALIGNED TD_THREAD_LOCAL SHA256_CTX ctx;
+        SHA256_Init(&ctx);
+        SHA256_Update(&ctx, from.get_byte_ptr(), size >> 3);
+        SHA256_Final(to.get_byte_ptr(), &ctx);
+      } else {
+        digest::hash_str<digest::SHA256>(to.get_byte_ptr(), from.get_byte_ptr(), size >> 3);
+      }
     } else {
-      unsigned char buffer[32];
-      digest::hash_str<digest::SHA256>(buffer, from.get_byte_ptr(), size >> 3);
+      static TD_THREAD_LOCAL ABSL_CACHELINE_ALIGNED unsigned char buffer[32];
+      if (size < 512 << 3) {
+        static ABSL_CACHELINE_ALIGNED TD_THREAD_LOCAL SHA256_CTX ctx;
+        SHA256_Init(&ctx);
+        SHA256_Update(&ctx, from.get_byte_ptr(), size >> 3);
+        SHA256_Final(buffer, &ctx);
+      } else {
+        digest::hash_str<digest::SHA256>(buffer, from.get_byte_ptr(), size >> 3);
+      }
       to.copy_from(BitPtr{buffer}, 256);
     }
   } else {

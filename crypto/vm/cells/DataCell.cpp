@@ -23,6 +23,7 @@
 #include "td/utils/ScopeGuard.h"
 
 #include "vm/cells/CellWithStorage.h"
+#include <openssl/sha.h>
 
 namespace vm {
 thread_local bool DataCell::use_arena = false;
@@ -307,12 +308,22 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
 
     /// Делаем вычисление за одну операцию, это быстрее и для SHA256_CTX, и digest::SHA256
 
-    static TD_THREAD_LOCAL digest::SHA256* hasher;
-    td::init_thread_local<digest::SHA256>(hasher);
-    hasher->reset();
-    hasher->feed(buffer, buffer_size);
-    auto extracted_size = hasher->extract(hashes_ptr[dest_i].as_slice());
-    DCHECK(extracted_size == hash_bytes);
+    /// В зависимости от размера блока данных выбираем hasher:
+    /// SHA256_CTX намного быстрее для малых данных чем digest::SHA256
+    /// И под Win32 и под Linux.
+    if (buffer_size < 512) {
+      static ABSL_ATTRIBUTE_FUNC_ALIGN(16) TD_THREAD_LOCAL SHA256_CTX ctx;
+      SHA256_Init(&ctx);
+      SHA256_Update(&ctx, buffer, buffer_size);
+      SHA256_Final(hashes_ptr[dest_i].as_slice().ubegin(), &ctx);
+    } else {
+      static TD_THREAD_LOCAL digest::SHA256* hasher;
+      td::init_thread_local<digest::SHA256>(hasher);
+      hasher->reset();
+      hasher->feed(buffer, buffer_size);
+      auto extracted_size = hasher->extract(hashes_ptr[dest_i].as_slice());
+      DCHECK(extracted_size == hash_bytes);
+    }
   }
 
   return Ref<DataCell>(data_cell.release(), Ref<DataCell>::acquire_t{});

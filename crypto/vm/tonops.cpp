@@ -36,6 +36,7 @@
 #include <sodium.h>
 #include "bls.h"
 #include "mc-config.h"
+#include <openssl/sha.h>
 
 namespace vm {
 
@@ -404,7 +405,10 @@ td::RefInt256 generate_randu256(VmState* st) {
     throw VmError{Excno::range_chk, "random seed out of range"};
   }
   unsigned char hash[64];
-  digest::hash_str<digest::SHA512>(hash, seed, 32);
+  SHA512_CTX ctx;
+  SHA512_Init(&ctx);
+  SHA512_Update(&ctx, seed, 32);
+  SHA512_Final(hash, &ctx);
   if (!seedv.write().import_bytes(hash, 32, false)) {
     throw VmError{Excno::range_chk, "cannot store new random seed"};
   }
@@ -467,7 +471,10 @@ int exec_set_rand(VmState* st, bool mix) {
     if (!x->export_bytes(buffer + 32, 32, false)) {
       throw VmError{Excno::range_chk, "mixed seed value out of range"};
     }
-    digest::hash_str<digest::SHA256>(hash, buffer, 64);
+    SHA256_CTX ctx;
+    SHA256_Init(&ctx);
+    SHA256_Update(&ctx, buffer, 64);
+    SHA256_Final(hash, &ctx);
     if (!x.write().import_bytes(hash, 32, false)) {
       throw VmError{Excno::range_chk, "new random seed value out of range"};
     }
@@ -524,7 +531,14 @@ int exec_compute_sha256(VmState* st) {
   unsigned char data[128], hash[32];
   CHECK(len <= sizeof(data));
   CHECK(cs->prefetch_bytes(data, len));
-  digest::hash_str<digest::SHA256>(hash, data, len);
+  if (len < 512) {
+    SHA256_CTX ctx;
+    SHA256_Init(&ctx);
+    SHA256_Update(&ctx, data, len);
+    SHA256_Final(hash, &ctx);
+  } else {
+    digest::hash_str<digest::SHA256>(hash, data, len);
+  }
   td::RefInt256 res{true};
   CHECK(res.write().import_bytes(hash, 32, false));
   stack.push_int(std::move(res));
