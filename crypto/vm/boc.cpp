@@ -95,23 +95,10 @@ td::Status CellSerializationInfo::init(td::uint8 d1, td::uint8 d2, int ref_byte_
   return td::Status::OK();
 }
 
-td::Result<int> CellSerializationInfo::get_bits(td::Slice cell) const {
-  if (data_with_bits) {
-    DCHECK(data_len != 0);
-    int last = cell[data_offset + data_len - 1];
-    if (!(last & 0x7f)) {
-      return td::Status::Error("overlong encoding");
-    }
-    return td::narrow_cast<int>((data_len - 1) * 8 + 7 - td::count_trailing_zeroes_non_zero32(last));
-  } else {
-    return td::narrow_cast<int>(data_len * 8);
-  }
-}
-
 // TODO: check usage when result is empty
 td::Result<Ref<DataCell>> CellSerializationInfo::create_data_cell(td::Slice cell_slice,
                                                                   td::Span<Ref<Cell>> refs) const {
-  CellBuilder cb;
+  static ABSL_ATTRIBUTE_FUNC_ALIGN(16) TD_THREAD_LOCAL CellBuilder cb;
   TRY_RESULT(bits, get_bits(cell_slice));
   cb.store_bits(cell_slice.ubegin() + data_offset, bits);
   DCHECK(refs_cnt == (td::int64)refs.size());
@@ -1130,8 +1117,8 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
 td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(const CellSlice& cs, bool kill_dup,
                                                                         unsigned skip_count_root) {
   if (!(skip_count_root & 1)) {
-    ++cells;
-    if (cells > limit_cells) {
+    ++cells_;
+    if (cells_ > limit_cells) {
       return td::Status::Error("too many cells");
     }
   }
@@ -1156,8 +1143,8 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(const Ce
 td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlice&& cs, bool kill_dup,
                                                                         unsigned skip_count_root) {
   if (!(skip_count_root & 1)) {
-    ++cells;
-    if (cells > limit_cells) {
+    ++cells_;
+    if (cells_ > limit_cells) {
       return td::Status::Error("too many cells");
     }
   }
@@ -1187,9 +1174,16 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
   if (kill_dup) {
     /// \remark Контейнер seen нужен только для того, чтобы определять, дупликат или нет
     /// Если его закомментировать, ни что не заругается больше!
-    auto ins = seen.emplace(cell->get_hash(), CellInfo{});
+    //auto ins = seen.emplace(cell->get_hash(), CellInfo{});
+
+    //if (!ins.second) {
+    //  return ins.first->second;
+    //}
+
+    auto ins = deduplication_strategy->emplace(cell->get_hash(), CellInfo{});
+
     if (!ins.second) {
-      return ins.first->second;
+      return ins.first;
     }
   }
   vm::CellSlice cs{vm::NoVm{}, std::move(cell)};

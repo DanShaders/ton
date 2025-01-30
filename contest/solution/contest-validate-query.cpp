@@ -5066,6 +5066,8 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
   CHECK(trans_dict.get_minmax_key(min_trans).not_null() && trans_dict.get_minmax_key(max_trans, true).not_null());
   ton::LogicalTime min_trans_lt = min_trans.to_ulong(), max_trans_lt = max_trans.to_ulong();
 
+  vm::CacheTransactions::clear();
+
   /// В результате этой строки state_usage_tree разрастается до 63663 на valid-202.bin
   if (!trans_dict.check_for_each_extra([this, &account, min_trans_lt, max_trans_lt](Ref<vm::CellSlice> value,
                                                                                     Ref<vm::CellSlice> extra,

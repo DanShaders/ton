@@ -2907,7 +2907,8 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
       cell_equal(account.library, new_library)) {
     return td::Status::OK();
   }
-  vm::CellStorageStat storage_stat;
+  vm::CellStorageStat storage_stat{account.storage_stat.get_cells()};
+
   storage_stat.limit_cells = size_limits.max_acc_state_cells;
   storage_stat.limit_bits = size_limits.max_acc_state_bits;
   {
@@ -3601,7 +3602,7 @@ Ref<vm::Cell> Transaction::commit(Account& acc) {
   acc.last_trans_hash_ = root->get_hash().bits();
   acc.last_paid = last_paid;
   /// \remark: нельзя перемещать!
-  acc.storage_stat = new_storage_stat;
+  acc.storage_stat.update_state_from_other(new_storage_stat);
   acc.storage = new_storage;
   acc.balance = std::move(balance);
   acc.due_payment = std::move(due_payment);

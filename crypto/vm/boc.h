@@ -110,20 +110,168 @@ class NewCellStorageStat {
   void dfs(Ref<Cell> cell, bool need_stat, bool need_proof_stat);
 };
 
+enum class DeduplicationStrategyType : uint8_t {
+  deduplicationStrategyMap,
+  deduplicationStrategyHashMap,
+  deduplicationStrategyCombined
+};
+
+template <typename TKey, typename TValue>
+struct IDeduplicationStrategy {
+  virtual ~IDeduplicationStrategy() = default;
+  virtual const std::pair<const TValue&, bool> emplace(const TKey& key, TValue&& value) = 0;
+  virtual const TValue* find(const TKey& key) const = 0;
+  virtual void clear() = 0;
+  virtual DeduplicationStrategyType get_type() const = 0;
+  virtual size_t size() const = 0;
+};
+
+template <typename TKey, typename TValue>
+struct DeduplicationStrategyMap : public IDeduplicationStrategy<TKey, TValue> {
+  const std::pair<const TValue&, bool> emplace(const TKey& key, TValue&& value) override {
+    auto ins = seen_.emplace(key, std::move(value));
+    return std::pair<const TValue&, bool>(ins.first->second, ins.second);
+  }
+  const TValue* find(const TKey& key) const override {
+    auto it = seen_.find(key);
+    return it == seen_.end() ? nullptr : &it->second;
+  }
+  void clear() override {
+    seen_.clear();
+  }
+  DeduplicationStrategyType get_type() const override {
+    return DeduplicationStrategyType::deduplicationStrategyMap;
+  }
+  size_t size() const override {
+    return seen_.size();
+  }
+
+  std::map<TKey, TValue> seen_;
+};
+
+template <typename TKey, typename TValue>
+struct DeduplicationStrategyHashMap : public IDeduplicationStrategy<TKey, TValue> {
+  explicit DeduplicationStrategyHashMap(size_t size) {
+    seen_.reserve(size);
+  }
+
+  const std::pair<const TValue&, bool> emplace(const TKey& key, TValue&& value) override {
+    auto ins = seen_.emplace(key, std::move(value));
+    return std::pair<const TValue&, bool>(ins.first->second, ins.second);
+  }
+  const TValue* find(const TKey& key) const override {
+    auto it = seen_.find(key);
+    return it == seen_.end() ? nullptr : &it->second;
+  }
+  void clear() override {
+    seen_.clear();
+  }
+  DeduplicationStrategyType get_type() const override {
+    return DeduplicationStrategyType::deduplicationStrategyHashMap;
+  }
+  size_t size() const override {
+    return seen_.size();
+  }
+
+  td::HashMap<TKey, TValue> seen_;
+};
+
+template <typename TKey, typename TValue>
+struct Cache {
+  using HashTable = td::HashMap<TKey, std::pair<TValue, bool>>;
+
+  static HashTable& instance() {
+    static HashTable cache;
+    return cache;
+  }
+  static void reset_flags() {
+    HashTable& hm = instance();
+    for (auto& val : hm) {
+      val.second.second = false;
+    }
+  }
+  static void clear() {
+    instance().clear();
+  }
+  static void reserve(const size_t size) {
+    if (instance().size() == 0 || size > instance().size()) {
+      instance().reserve(size * 1.5);
+    }
+  }
+  static size_t size() {
+    return instance().size();
+  }
+  static std::pair<const TValue&, bool> emplace(const TKey& key, TValue&& value) {
+    HashTable& hm = instance();
+    auto &val = hm[key];
+    if (!val.second) {
+      val.first = std::move(value);
+      val.second = true;
+      return std::pair<const TValue&, bool>(val.first, true);
+    } else {
+      return std::pair<const TValue&, bool>(val.first, false);
+    }
+  }
+};
+
+template <typename TKey, typename TValue>
+struct DeduplicationStrategyCache : public IDeduplicationStrategy<TKey, TValue> {
+  DeduplicationStrategyCache(const size_t cells) {
+    Cache<TKey, TValue>::reset_flags();
+    Cache<TKey, TValue>::reserve(cells);
+  }
+  const std::pair<const TValue&, bool> emplace(const TKey& key, TValue &&value) override {
+    return Cache<TKey, TValue>::emplace(key, std::move(value));
+  }
+  const TValue* find(const TKey& key) const override {
+    /// Not intended to be used
+    assert(false);
+    return nullptr;
+  }
+  void clear() override {
+    Cache<TKey, TValue>::reset_flags();
+  }
+  DeduplicationStrategyType get_type() const override {
+    return DeduplicationStrategyType::deduplicationStrategyCombined;
+  }
+  size_t size() const override {
+    return Cache<TKey, TValue>::size();
+  }
+};
+
 struct CellStorageStat {
   unsigned long long bits;
   unsigned long long public_cells;
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  td::HashMap<vm::Cell::Hash, CellInfo> seen;
-  CellStorageStat() : cells(0), bits(0), public_cells(0) {
+
+  using IStrategy = IDeduplicationStrategy<vm::Cell::Hash, CellInfo>;
+  using StrategyMap = DeduplicationStrategyMap<vm::Cell::Hash, CellInfo>;
+  using StrategyHashMap = DeduplicationStrategyHashMap<vm::Cell::Hash, CellInfo>;
+  using StrategyCache = DeduplicationStrategyCache<vm::Cell::Hash, CellInfo>;
+
+  void update_state_from_other(const CellStorageStat &other) {
+    bits         = other.bits;
+    public_cells = other.public_cells;
+    cells_       = other.cells_;
+  }
+
+  std::shared_ptr<IStrategy> deduplication_strategy;
+
+  CellStorageStat() : cells_(0), bits(0), public_cells(0) {
+    deduplication_strategy = std::make_shared<StrategyHashMap>(20);
   }
   explicit CellStorageStat(unsigned long long limit_cells)
     : bits(0), public_cells(0), limit_cells(limit_cells), cells_(0) {
+    if (limit_cells > 10000) {
+      deduplication_strategy = std::make_shared<StrategyCache>(limit_cells);
+    } else {
+      deduplication_strategy = std::make_shared<StrategyHashMap>(limit_cells);
+    }
   }
   void clear_seen() {
-    cells_.clear();
+    deduplication_strategy->clear();
   }
   void clear() {
     cells_ = bits = public_cells = 0;
@@ -158,6 +306,8 @@ struct CellStorageStat {
  private:
    unsigned long long cells_;
 };
+
+using CacheTransactions = Cache<vm::Cell::Hash, CellStorageStat::CellInfo>;
 
 struct VmStorageStat {
   td::uint64 cells{0}, bits{0}, refs{0}, limit;
