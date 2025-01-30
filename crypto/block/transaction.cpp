@@ -268,6 +268,7 @@ bool Account::unpack_storage_info(vm::CellSlice& cs) {
     due_payment = td::zero_refint();
   }
   unsigned long long u = 0;
+  /// Здесь мы читаем число cells аккаунта
   u |= storage_stat.cells = block::tlb::t_VarUInteger_7.as_uint(*used.cells);
   u |= storage_stat.bits = block::tlb::t_VarUInteger_7.as_uint(*used.bits);
   u |= storage_stat.public_cells = block::tlb::t_VarUInteger_7.as_uint(*used.public_cells);
@@ -459,6 +460,8 @@ bool Account::unpack(Ref<vm::CellSlice> shard_account, ton::UnixTime now, bool s
   now_ = now;
   auto account = std::move(acc_info.account);
   total_state = orig_total_state = account;
+
+  /// Это slice, в которой лежат cells аккаунта
   auto acc_cs = load_cell_slice(std::move(account));
   if (block::gen::t_Account.get_tag(acc_cs) == block::gen::Account::account_none) {
     is_special = special;
@@ -1769,6 +1772,26 @@ bool Transaction::prepare_compute_phase(const ComputePhaseConfig& cfg) {
   return true;
 }
 
+class Timer {
+ public:
+  using clock_t = std::chrono::high_resolution_clock;
+
+  Timer() : m_begin(clock_t::now()) {
+  }
+
+  clock_t::duration Elapsed() const {
+    return (clock_t::now() - m_begin);
+  }
+
+  double ElapsedSec() const {
+    using second_t = std::chrono::duration<double, std::ratio<1>>;
+    return std::chrono::duration_cast<second_t>(Elapsed()).count();
+  }
+
+ private:
+  std::chrono::time_point<clock_t> m_begin;
+};
+
 /**
  * Prepares the action phase of a transaction.
  *
@@ -1777,6 +1800,24 @@ bool Transaction::prepare_compute_phase(const ComputePhaseConfig& cfg) {
  * @returns True if the action phase was prepared successfully, false otherwise.
  */
 bool Transaction::prepare_action_phase(const ActionPhaseConfig& cfg) {
+
+#if !defined(NDEBUG) && 0
+  Timer tmr;
+
+  SCOPE_EXIT {
+    {
+      static size_t count = 0;
+      ++count;
+      ::OutputDebugStringA(std::format("[Transaction::prepare_action_phase]-{}-[{:0.3f}]\n", count, tmr.ElapsedSec())
+                               .c_str());
+
+      if (count == 7) {
+        int i = 1;
+      }
+    }
+  };
+#endif
+
   if (!compute_phase || !compute_phase->success) {
     return false;
   }
@@ -2880,6 +2921,7 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
       return td::Status::OK();
     };
     TRY_STATUS(add_used_storage(new_code));
+    /// Здесь в этой строке происходит заполнение блока valid-202.bin!!
     TRY_STATUS(add_used_storage(new_data));
     TRY_STATUS(add_used_storage(new_library));
     if (timer.elapsed() > 0.1) {
@@ -2904,6 +2946,21 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
   if (update_storage_stat) {
     // storage_stat will be reused in compute_state()
     new_storage_stat = std::move(storage_stat);
+
+#if !defined(NDEBUG) && 1
+    {
+      static size_t count = 0;
+      ++count;
+      ::OutputDebugStringA(
+          std::format("[new_storage_stat = std::move(storage_stat)] {}-{}\n", count,
+            new_storage_stat.deduplication_strategy->size()).c_str()
+      );
+
+      if (count == 5) {
+        int i = 1;
+      }
+    }
+#endif
   }
   return res;
 }
@@ -3162,6 +3219,8 @@ bool Transaction::compute_state() {
   } else {
     new_inner_state.clear();
   }
+
+  /// Здесь, возможно, идет передача ячеек от транзакции к аккаунту??? Но почему она не проходит???
   vm::CellStorageStat& stats = new_storage_stat;
   auto new_stats = try_update_storage_stat(account.storage_stat, account.storage, storage);
   if (new_stats) {
@@ -3538,6 +3597,7 @@ Ref<vm::Cell> Transaction::commit(Account& acc) {
   acc.last_trans_end_lt_ = end_lt;
   acc.last_trans_hash_ = root->get_hash().bits();
   acc.last_paid = last_paid;
+  /// \remark: нельзя перемещать!
   acc.storage_stat = new_storage_stat;
   acc.storage = new_storage;
   acc.balance = std::move(balance);

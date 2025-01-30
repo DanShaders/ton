@@ -28,6 +28,7 @@ namespace vm {
 
 class DataCell;
 
+/// \remark Нет ли здесь замедления из-за счетчика ссылок
 class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
  public:
   using NodeId = td::uint32;

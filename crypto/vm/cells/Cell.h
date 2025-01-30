@@ -70,6 +70,7 @@ class Cell : public CellTraits {
   }
 
   // hash helper functions
+  /// 33,570,000
   const Hash& get_hash(int level = max_level) const {
     return do_get_hash(level);
   }

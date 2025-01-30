@@ -55,6 +55,8 @@ struct CellHash {
   td::BitPtr bits() {
     return td::BitPtr{hash_.data()};
   }
+
+  /// 55900 раз
   td::BitSlice as_bitslice() const {
     return td::BitSlice{hash_.data(), (unsigned int)hash_.size() * 8};
   }
@@ -62,6 +64,7 @@ struct CellHash {
     return hash_;
   }
 
+  /// Менее 100 раз
   static CellHash from_slice(td::Slice slice) {
     CellHash res;
     CHECK(slice.size() == res.hash_.size());
@@ -83,7 +86,16 @@ template <>
 struct hash<vm::CellHash> {
   typedef vm::CellHash argument_type;
   typedef std::size_t result_type;
+
+  /// 35,770,000
   result_type operator()(argument_type const& s) const noexcept {
+#if !defined(NDEBUG) && 0
+    static size_t count = 0;
+    ++count;
+    if (count % 10000 == 0)
+      ::OutputDebugStringA(("[hash<vm::CellHash>] " + std::to_string(count) + "\n").c_str());
+#endif
+
     return cell_hash_slice_hash(s.as_slice());
   }
 };

@@ -71,6 +71,7 @@ class CellSlice : public td::CntObject {
 
   Cell::LoadedCell move_as_loaded_cell();
   td::CntObject* make_copy() const override {
+    /// Здесь, как и должно быть, используется operator new
     return new CellSlice{*this};
   }
   void clear();
@@ -81,6 +82,8 @@ class CellSlice : public td::CntObject {
   bool load(Ref<DataCell> dc_ref);
   bool load(Ref<Cell> cell);
   bool load_ord(Ref<Cell> cell);
+
+  /// \remark Эти размеры совершенно разные, очень большое разнообразие
   unsigned size() const {
     return bits_en - bits_st;
   }

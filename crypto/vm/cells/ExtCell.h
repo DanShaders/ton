@@ -105,6 +105,15 @@ class ExtCell : public Cell {
   };
 
   const Hash& do_get_hash(td::uint32 level) const override {
+#if !defined(NDEBUG) && 1
+    {
+      static size_t count = 0;
+      ++count;
+      if (count % 1000 == 0)
+        ::OutputDebugStringA(std::format("[ExtCell::do_get_hash] {}\n", count).c_str());
+    }
+#endif
+
     return CellView(this)->get_hash(level);
   }
 

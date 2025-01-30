@@ -70,6 +70,15 @@ class VirtualCell : public Cell {
 
  protected:
   const Hash& do_get_hash(td::uint32 level) const override {
+#if !defined(NDEBUG) && 1
+    {
+      static size_t count = 0;
+      ++count;
+      if (count % 1000 == 0)
+        ::OutputDebugStringA(std::format("[VirtualCell::do_get_hash] {}\n", count).c_str());
+    }
+#endif
+
     return cell_->get_hash(fix_level(level));
   }
   td::uint16 do_get_depth(td::uint32 level) const override {

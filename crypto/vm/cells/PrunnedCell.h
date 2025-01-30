@@ -135,6 +135,15 @@ class PrunnedCell : public Cell {
 
  private:
   const Hash& do_get_hash(td::uint32 level) const override {
+#if !defined(NDEBUG) && 1
+    {
+      static size_t count = 0;
+      ++count;
+      if (count % 1000 == 0)
+        ::OutputDebugStringA(std::format("[PrunnedCell::do_get_hash] {}\n", count).c_str());
+    }
+#endif
+
     return info_.get_hashes(get_storage())[get_level_mask().apply(level).get_hash_i()];
   }
 

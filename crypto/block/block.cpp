@@ -1959,6 +1959,7 @@ td::Status unpack_block_prev_blk_try(Ref<vm::Cell> block_root, const ton::BlockI
                                      std::vector<ton::BlockIdExt>& prev, ton::BlockIdExt& mc_blkid, bool& after_split,
                                      ton::BlockIdExt* fetch_blkid, bool ignore_root_hash) {
   try {
+    /// Здесь получаем std::vector<ton::BlockIdExt>& prev, ton::BlockIdExt& mc_blkid, bool& after_split
     return unpack_block_prev_blk_ext(std::move(block_root), id, prev, mc_blkid, after_split, fetch_blkid,
                                      ignore_root_hash);
   } catch (vm::VmError err) {

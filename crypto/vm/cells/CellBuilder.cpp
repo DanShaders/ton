@@ -67,6 +67,7 @@ Ref<DataCell> CellBuilder::finalize_copy(bool special) const {
   return cell;
 }
 
+/// 7,558,000
 td::Result<Ref<DataCell>> CellBuilder::finalize_novm_nothrow(bool special) {
   auto res = DataCell::create(data, size(), td::mutable_span(refs.data(), size_refs()), special);
   bits = refs_cnt = 0;

@@ -57,6 +57,7 @@ thread_local td::int64 SafeDeleter::delete_count{0};
 
 TD_THREAD_LOCAL SafeDeleter *deleter;
 void safe_delete(const CntObject *ptr) {
+  /// Нельзя это удалять, иначе будет утечка!
   init_thread_local<SafeDeleter>(deleter);
   deleter->retire(ptr);
 }
