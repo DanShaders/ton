@@ -231,7 +231,7 @@ class DataCell : public Cell {
   }
   static std::unique_ptr<DataCell> create_empty_data_cell(Info info);
 
-  const Hash do_get_hash(td::uint32 level) const override;
+  const Hash& do_get_hash(td::uint32 level) const override;
   td::uint16 do_get_depth(td::uint32 level) const override;
 
   friend class CellBuilder;

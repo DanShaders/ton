@@ -70,7 +70,7 @@ class Cell : public CellTraits {
   }
 
   // hash helper functions
-  const Hash get_hash(int level = max_level) const {
+  const Hash& get_hash(int level = max_level) const {
     return do_get_hash(level);
   }
 
@@ -83,7 +83,7 @@ class Cell : public CellTraits {
 
  private:
   virtual td::uint16 do_get_depth(td::uint32 level) const = 0;
-  virtual const Hash do_get_hash(td::uint32 level) const = 0;
+  virtual const Hash& do_get_hash(td::uint32 level) const = 0;
 };
 
 std::ostream& operator<<(std::ostream& os, const Cell& c);

@@ -104,7 +104,7 @@ class ExtCell : public Cell {
     const Cell* cell_;
   };
 
-  const Hash do_get_hash(td::uint32 level) const override {
+  const Hash& do_get_hash(td::uint32 level) const override {
     return CellView(this)->get_hash(level);
   }
 

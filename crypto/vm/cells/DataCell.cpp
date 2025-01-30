@@ -319,7 +319,7 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
   return Ref<DataCell>(data_cell.release(), Ref<DataCell>::acquire_t{});
 }
 
-const DataCell::Hash DataCell::do_get_hash(td::uint32 level) const {
+const DataCell::Hash& DataCell::do_get_hash(td::uint32 level) const {
   auto hash_i = get_level_mask().apply(level).get_hash_i();
   if (special_type() == SpecialType::PrunnedBranch) {
     auto this_hash_i = get_level_mask().get_hash_i();

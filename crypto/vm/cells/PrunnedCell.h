@@ -134,7 +134,7 @@ class PrunnedCell : public Cell {
   }
 
  private:
-  const Hash do_get_hash(td::uint32 level) const override {
+  const Hash& do_get_hash(td::uint32 level) const override {
     return info_.get_hashes(get_storage())[get_level_mask().apply(level).get_hash_i()];
   }
 
