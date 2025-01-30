@@ -97,6 +97,7 @@ endif()
 option(TON_USE_ROCKSDB "Use \"ON\" to enable RocksDb." ${NOT_TON_ONLY_TONLIB})
 option(TON_USE_ABSEIL "Use \"ON\" to enable Abseil." ${NOT_TON_ONLY_TONLIB})
 option(TON_USE_JEMALLOC "Use \"ON\" to enable JeMalloc." OFF)
+option(TON_USE_ISA_L_CRYPTO "Use \"ON\" to enable isa-l_crypto." OFF)
 #END internal
 
 option(TONLIB_ENABLE_JNI "Use \"ON\" to enable JNI-compatible TonLib API.")
@@ -185,6 +186,10 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMake" ${CMAKE_MODULE_PATH})
 include(BuildBLST)
 include(BuildSECP256K1)
 
+if (TON_USE_ISA_L_CRYPTO)
+  include(Buildisa-l_crypto)
+endif()
+
 # Configure CCache if available
 find_program(CCACHE_FOUND ccache)
 #set(CCACHE_FOUND 0)
@@ -242,6 +247,9 @@ if (NIX)
   find_package(Secp256k1 REQUIRED)
 endif()
 
+if (TON_USE_ISA_L_CRYPTO)
+  find_package(isa-l_crypto REQUIRED)
+endif()
 
 set(MEMPROF "" CACHE STRING "Use one of \"ON\", \"FAST\" or \"SAFE\" to enable memory profiling. \
 Works under macOS and Linux when compiled using glibc. \

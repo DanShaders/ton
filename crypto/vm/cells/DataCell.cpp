@@ -25,6 +25,17 @@
 #include "vm/cells/CellWithStorage.h"
 #include <openssl/sha.h>
 
+#ifndef TD_WINDOWS
+  /// ISA-L crypto
+  #include <sha256_mb.h>      // isal_sha256_*
+  #include <memcpy_inline.h>
+  #include <endian_helper.h>  // to_be
+
+  /// SHANI - имеет много проблем с Win32. Под Linux дает +1%
+  #include "third-party/flo-shani-aesni/sha256/flo-shani.h"
+  #include "third-party/flo-shani-aesni/cpuid/flo-cpuid.h"
+#endif
+
 namespace vm {
 thread_local bool DataCell::use_arena = false;
 
@@ -92,6 +103,58 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
   }
   return create(std::move(data), bits, td::MutableSpan<Ref<Cell>>(copied_refs.data(), refs.size()), special);
 }
+
+#ifndef TD_WINDOWS
+/// \example https://github.com/intel/isa-l_crypto/blob/v2.25.0/sha256_mb/sha256_mb_test.c
+class ABSL_ATTRIBUTE_FUNC_ALIGN(16) HasherSha256Isal {
+ private:
+  ABSL_ATTRIBUTE_FUNC_ALIGN(16) ISAL_SHA256_HASH_CTX_MGR mgr_;
+  ABSL_ATTRIBUTE_FUNC_ALIGN(16) ISAL_SHA256_HASH_CTX ctx_in_;
+  ABSL_ATTRIBUTE_FUNC_ALIGN(16) ISAL_SHA256_HASH_CTX *ctx_out_;
+  int rc_ = 0;
+
+  void init() {
+    isal_hash_ctx_init(&ctx_in_);
+  }
+
+ public:
+  HasherSha256Isal() {
+    rc_ = isal_sha256_ctx_mgr_init(&mgr_);
+    if (rc_ != 0) {
+      isal_hash_ctx_init(&ctx_in_);
+    }
+  }
+
+  int sha256(const uint8_t* data, const size_t size, uint8_t* digest) {
+    init();
+    rc_ = isal_sha256_ctx_mgr_submit(&mgr_, &ctx_in_, &ctx_out_, data, size, ISAL_HASH_ENTIRE);
+    if (rc_ != 0) {
+      return rc_;
+    }
+
+    rc_ = isal_sha256_ctx_mgr_flush(&mgr_, &ctx_out_);
+    if (rc_ != 0) {
+      return rc_;
+    }
+
+    /// https://github.com/intel/isa-l_crypto/blob/v2.25.0/sha256_mb/sha256_mb_vs_ossl_perf.c
+    uint32_t* out = reinterpret_cast<uint32_t*>(digest);
+    out[0] = to_be32(ctx_out_->job.result_digest[0]);
+    out[1] = to_be32(ctx_out_->job.result_digest[1]);
+    out[2] = to_be32(ctx_out_->job.result_digest[2]);
+    out[3] = to_be32(ctx_out_->job.result_digest[3]);
+    out[4] = to_be32(ctx_out_->job.result_digest[4]);
+    out[5] = to_be32(ctx_out_->job.result_digest[5]);
+    out[6] = to_be32(ctx_out_->job.result_digest[6]);
+    out[7] = to_be32(ctx_out_->job.result_digest[7]);
+    return 0;
+  }
+
+  bool is_ok() {
+    return rc_ == 0; 
+  }
+};
+#endif
 
 td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, td::MutableSpan<Ref<Cell>> refs,
                                            bool special) {
@@ -306,7 +369,14 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
       buffer_size += sizeof(Hash);
     }
 
-    /// Делаем вычисление за одну операцию, это быстрее и для SHA256_CTX, и digest::SHA256
+    /// Хешер для процессоров Intel
+#if 0
+    static ABSL_ATTRIBUTE_FUNC_ALIGN(16) TD_THREAD_LOCAL HasherSha256Isal hasherIsal;
+    if (hasherIsal.is_ok()) {
+      const int rc = hasherIsal.sha256(buffer, buffer_size, hashes_ptr[dest_i].as_slice().ubegin());
+      DCHECK(0 == rc);
+    } else
+#endif
 
     /// В зависимости от размера блока данных выбираем hasher:
     /// SHA256_CTX намного быстрее для малых данных чем digest::SHA256
