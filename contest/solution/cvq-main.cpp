@@ -152,15 +152,14 @@ void ContestValidateQuery::start_up() {
     check_message_processing_order(); // reject_query("some messages have been processed by transactions in incorrect order"); return;
     
     
-    check_new_state(); // reject_query("the header of the new shardchain state is invalid"); return;
-    
+    // _check_new_state(); // reject_query("the header of the new shardchain state is invalid"); return;  
     // _postcheck_value_flow(); // reject_query("new ValueFlow is invalid"); return;
     // _build_state_update(state_usage_tree_, prev_state_root_); // reject_query("cannot build state update"); return;
     // _finish_query();
 
     generated_root();
-  
-    return;
+
+    finish_query();
   } catch (std::string error) {
     reject_query(error); return;
   } catch (vm::VmError& err) {

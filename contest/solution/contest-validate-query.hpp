@@ -473,7 +473,7 @@ public:
 
 
   //<%generated_vars%>
-  std::atomic<int> __pending_finish_query{1};
+  std::atomic<int> __pending_build_state_update{5};
   //<%/generated_vars%>
 
 

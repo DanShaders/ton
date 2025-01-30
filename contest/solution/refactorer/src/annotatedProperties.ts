@@ -29,6 +29,7 @@ const annotatedProperties: string[] = [
 	'mc_blkid_',
 
 
+	'ps_',
 
 	'ns_.id_',
 	'ns_.global_id_',
@@ -61,6 +62,14 @@ const annotatedProperties: string[] = [
 	'fees_burned_', // Inited with 0, never changed
 	'value_flow_',
 	'import_fees_',
+
+
+
+	'after_merge_',
+	'after_split_',
+	'mc_seqno_',
+	'min_shard_ref_mc_seqno_', // Inited with 0, never changed
+	'aux_mc_states_',
 ];
 
 export default annotatedProperties;

@@ -5171,6 +5171,9 @@ void ContestValidateQuery::check_new_state() {
       std::min(std::min(my_mc_seqno, min_shard_ref_mc_seqno_), ns_.processed_upto_->min_mc_seqno());
   ns_.min_ref_mc_seqno_ = ref_mc_seqno;
   //<%assigned%>: ns_.min_ref_mc_seqno_
+							//<%generated%>
+							if (--__pending_build_state_update == 0) build_state_update();
+							//<%/generated%>
 
   // out_msg_queue_info:^OutMsgQueueInfo
   // -> _ out_queue:OutMsgQueue proc_info:ProcessedInfo
@@ -5181,9 +5184,15 @@ void ContestValidateQuery::check_new_state() {
   // ^[ overload_history:uint64 underload_history:uint64
   ns_.overload_history_ = ((ps_.overload_history_ << 1) | extra_collated_data_.overload);
   //<%assigned%>: ns_.overload_history_
+							//<%generated%>
+							if (--__pending_build_state_update == 0) build_state_update();
+							//<%/generated%>
 
   ns_.underload_history_ = ((ps_.underload_history_ << 1) | extra_collated_data_.underload);
   //<%assigned%>: ns_.underload_history_
+							//<%generated%>
+							if (--__pending_build_state_update == 0) build_state_update();
+							//<%/generated%>
 
   if (ns_.overload_history_ & ns_.underload_history_ & 1) {
     reject_throw(
@@ -5212,7 +5221,13 @@ void ContestValidateQuery::check_new_state() {
   ns_.total_validator_fees_ = old_total_validator_fees + value_flow_.fees_collected - value_flow_.recovered;
   ns_.total_balance_ = value_flow_.to_next_blk;
   //<%assigned%>: ns_.total_validator_fees_
+							//<%generated%>
+							if (--__pending_build_state_update == 0) build_state_update();
+							//<%/generated%>
   //<%assigned%>: ns_.total_balance_
+							//<%generated%>
+							if (--__pending_build_state_update == 0) build_state_update();
+							//<%/generated%>
 }
 
 /**
@@ -5326,7 +5341,6 @@ void ContestValidateQuery::build_state_update() {
   result_state_update_ = vm::std_boc_serialize(state_update).move_as_ok();
   //<%assigned%>: result_state_update_
 							//<%generated%>
-							if (--__pending_finish_query == 0) finish_query();
 							//<%/generated%>
 }
 

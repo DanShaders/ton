@@ -372,10 +372,10 @@ function dagFunctions() {
       functionCallString[functionName] = functionLine;
     }
   
-    const pendingVariables = new Set<string>();
-    const pendingVariableOf = (fname: string) => {
+    const pendingVariables: ObjDict<number> = {};
+    const pendingVariableOf_inc = (fname: string) => {
       const varName = '__pending_' + fname;
-      pendingVariables.add(varName);
+      pendingVariables[varName] = (pendingVariables[varName] ?? 0) + 1;
       return varName;
     }
   
@@ -395,12 +395,12 @@ function dagFunctions() {
     const relevantFuncs = new Set<FunctionInfo>();
     const allProps = new Set<string>();
     const funcPropMentions: ObjDict<Set<string>> = {};
-    const propMentionedIn: ObjDict<Set<string>> = {};
+    const propMentionedIn_root: ObjDict<Set<string>> = {};
     const funcAssigns: ObjDict<Set<string>> = {};
     const assignedIn: ObjDict<FunctionInfo> = {};
     const assignedInRoot: ObjDict<FunctionInfo> = {};
   
-    const dependentOn = (prop: string) => [...propMentionedIn[prop]].filter(f => f !== assignedInRoot[prop].name);
+    const dependentOn = (prop: string) => [...propMentionedIn_root[prop]].filter(f => f !== assignedInRoot[prop].name);
     const dependenciesOf = (func: FunctionInfo) => [...funcPropMentions[func.name]].filter(prop => assignedInRoot[prop] !== func)
   
     const generatedStartMark = `//<%generated%>`;
@@ -419,7 +419,7 @@ function dagFunctions() {
   
         allProps.add(classProp);
         funcPropMentions[root.name] = (funcPropMentions[root.name] ?? new Set()).add(classProp);
-        propMentionedIn[classProp] = (propMentionedIn[classProp] ?? new Set()).add(root.name);
+        propMentionedIn_root[classProp] = (propMentionedIn_root[classProp] ?? new Set()).add(root.name);
   
   
         const reAssign = regexForAssignedName(classProp);
@@ -452,6 +452,12 @@ function dagFunctions() {
   
   
       for (const child of calling[node.name] ?? []) {
+        if (functionsToDAG.includes(child))
+          continue;
+        // All functionsToDAG are considered top level and independent from each other
+        // The reason one might end up a "child" of another is because the code-generated parts
+        // are also taken into account when initially looking for "children"
+
         dfs(root, child);
       }
     }
@@ -488,7 +494,7 @@ function dagFunctions() {
         return (
           `${matchedString}\n`
           + `${indent}${generatedStartMark}\n`
-          + dependentOn(prop).map(fname => `${indent}if (--${pendingVariableOf(fname)} == 0) ${functionCallString[fname]}\n`)
+          + dependentOn(prop).map(fname => `${indent}if (--${pendingVariableOf_inc(fname)} == 0) ${functionCallString[fname]}\n`)
           + `${indent}${generatedEndMark}`
         );
       });
@@ -560,8 +566,10 @@ function dagFunctions() {
     console.log('topLevelString:\n\n', topLevelString);
 
     console.log('pendingVariables:', pendingVariables);
-    const pendingVariablesString = [...pendingVariables].map(varName => `std::atomic<int> ${varName}{1};\n`).join('');
+    const pendingVariablesString = Object.entries(pendingVariables)
+      .map(([varName, varCount]) => `std::atomic<int> ${varName}{${varCount}};\n`).join('');
     console.log('pendingVariablesString:\n\n', pendingVariablesString);
+
   } catch (error) {
     console.error(error);
   }
@@ -727,7 +735,7 @@ const circularDependencies = createMemo(() => {
 
 const blockHeight = 80;
 const blockWidth = 160;
-const verticalSpacing = 50;
+const verticalSpacing = 80;
 const horizontalSpacing = 20;
 
 
