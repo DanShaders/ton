@@ -6,6 +6,9 @@ import { get as dbGet, set as dbSet } from 'idb-keyval';
 import "./app.css";
 import { myCppRules } from "./myCpp_rules";
 
+import classProperties from "./classProperties";
+import annotatedProperties from "./annotatedProperties";
+
 
 type ObjDict<T> = { [key: string]: T };
 
@@ -54,8 +57,8 @@ editor.defineTheme(myCppTheme, {
 
 const cache: ObjDict<LanguageVariant> = {};
 
-function languageVariant(targetProperty: string, functionNames: string[]) {
-  const key = targetProperty + '___' + functionNames.toSorted().join(',');
+function languageVariant(targetProperty: string, functionNames: string[], propsToHighlight: string[]) {
+  const key = targetProperty + '___' + functionNames.toSorted().join(',') + '___' + propsToHighlight.toSorted().join(',');
 
   if (!cache[key]) {
     const res = {
@@ -64,6 +67,7 @@ function languageVariant(targetProperty: string, functionNames: string[]) {
         ...myCppRules.language,
         toHighlight: [key],
         functionsToHighlight: functionNames,
+        propertiesToHighlight: propsToHighlight,
       },
     };
     cache[key] = res;
@@ -107,17 +111,29 @@ async function loadedFiles(): Promise<[boolean, MyFile[]]> {
 }
 const __initialState = await loadedFiles();
 
+const propertiesToHighlightStringKey = 'propertiesToHighlightString';
+async function setPropertiesToHighlightString(value: string) {
+  await dbSet(propertiesToHighlightStringKey, value);
+  setPropertiesToHighlightStringPrivate(value);
+}
+const __initialPropertiesToHighlightString = await dbGet(propertiesToHighlightStringKey) ?? '';
+
 let [errorAutoLoading, setErrorAutoLoading] = createSignal(!__initialState[0]);
 let [files, setFilesPrivate] = createSignal<MyFile[]>(__initialState[1]);
 let [allFunctions, setAllFunctions] = createSignal<FunctionInfo[]>([]);
 let [property, setProperty] = createSignal('');
 let [selectedFunction, setSelectedFunction] = createSignal<null | FunctionInfo>(null);
 let [modifiedFunctions, setModifiedFunctions] = createSignal<FunctionInfo[]>([]);
-let previouslySelectedFunction: null | FunctionInfo = null;
+let [propertiesToHighlightString, setPropertiesToHighlightStringPrivate] = createSignal<string>(__initialPropertiesToHighlightString);
 
 let propertyType = () => property().split(' ').slice(0, -1).join(' ').trim();
 let propertyName = () => property().split(' ').at(-1);
 let propertyValid = () => (propertyType() && propertyName() && true);
+
+const propertiesToHighlight = createMemo(() => propertiesToHighlightString().split('\n').map(s => s.trim()).filter(s => s));
+function containsPropertyToHighlight(func: FunctionInfo) {
+  return propertiesToHighlight().some(prop => regexForName(prop).test(func.code));
+}
 
 function setFiles(newFiles: MyFile[]) {
   setErrorAutoLoading(false);
@@ -147,6 +163,14 @@ let patchingInfo: ObjDict<PatchingInfo[]> = {};
 // let handle = null;
 
 let untypedWindow = window as any;
+
+
+const functionsToDAGKey = 'functionsToDAG';
+async function functionsToDAGchanged() {
+  await dbSet(functionsToDAGKey, $functionsToDAG!.value);
+}
+const __initialFunctionsToDAG = await dbGet(functionsToDAGKey) ?? '';
+
 
 async function openFiles() {
   const handles = await untypedWindow.showOpenFilePicker!({ multiple: true });
@@ -331,6 +355,219 @@ async function patchEdited() {
 }
 
 
+function dagFunctions() {
+  try {
+    const functionCallsToDAG = ($functionsToDAG!.value as string).split('\n').map(s => s.trim()).filter(s => s);
+    let functionNamesToDAG = [];
+    let functionCallString: ObjDict<string> = {};
+    for (let functionLine of functionCallsToDAG) {
+      let openBracketIndex = functionLine.indexOf('(');
+      let functionName = openBracketIndex < 0 ? functionLine : functionLine.slice(0, openBracketIndex).trim();
+      functionNamesToDAG.push(functionName);
+  
+      if (!functionLine.includes('('))
+        functionLine += '()';
+      if (!functionLine.endsWith(';'))
+        functionLine += ';';
+      functionCallString[functionName] = functionLine;
+    }
+  
+    const pendingVariables = new Set<string>();
+    const pendingVariableOf = (fname: string) => {
+      const varName = '__pending_' + fname;
+      pendingVariables.add(varName);
+      return varName;
+    }
+  
+    const functionsToDAG = functionNamesToDAG.map(name => {
+      const func = allFunctions().find(f => f.name === name);
+      if (!func) {
+        alert(`Couldn't find a function with name ${name}`);
+        throw { name, functions: allFunctions() };
+      }
+      return func;
+    });
+    console.log(functionsToDAG);
+  
+    const { calling } = calls();
+  
+  
+    const relevantFuncs = new Set<FunctionInfo>();
+    const allProps = new Set<string>();
+    const funcPropMentions: ObjDict<Set<string>> = {};
+    const propMentionedIn: ObjDict<Set<string>> = {};
+    const funcAssigns: ObjDict<Set<string>> = {};
+    const assignedIn: ObjDict<FunctionInfo> = {};
+    const assignedInRoot: ObjDict<FunctionInfo> = {};
+  
+    const dependentOn = (prop: string) => [...propMentionedIn[prop]].filter(f => f !== assignedInRoot[prop].name);
+    const dependenciesOf = (func: FunctionInfo) => [...funcPropMentions[func.name]].filter(prop => assignedInRoot[prop] !== func)
+  
+    const generatedStartMark = `//<%generated%>`;
+    const generatedEndMark = `//<%/generated%>`;
+  
+    // const assignRE = 
+    const generatedRE = new RegExp(`[ \\t]*${generatedStartMark}.*?${generatedEndMark}[ \\t]*\\n`, 'gs');
+  
+    function dfs(root: FunctionInfo, node: FunctionInfo) {
+      relevantFuncs.add(node);
+  
+      for (const classProp of classProperties) {
+        const re = regexForName(classProp);
+        if (!re.test(node.code))
+          continue;
+  
+        allProps.add(classProp);
+        funcPropMentions[root.name] = (funcPropMentions[root.name] ?? new Set()).add(classProp);
+        propMentionedIn[classProp] = (propMentionedIn[classProp] ?? new Set()).add(root.name);
+  
+  
+        const reAssign = regexForAssignedName(classProp);
+        if (!reAssign.test(node.code))
+          continue;
+        const prop = classProp;
+  
+        // const assignedMatches = node.code.matchAll(assignRE);
+        // for (const match of assignedMatches) {
+        //   const prop = match.groups!.prop;
+  
+          // The following check was for when a RegExp was matching everything (but that was removed due to necessity to match ns_.something_)
+          if (!classProperties.includes(prop)) {
+            const errorMessage = `Unknown property found in <%assigned%> annotation: ${prop}`;
+            alert(errorMessage);
+            throw errorMessage;
+          }
+  
+          if (assignedIn[prop] && assignedIn[prop] !== node) {
+            const errorMessage = `Property ${prop} has been marked "assigned" previously in ${assignedIn[prop].name}\nand now also marked "assigned" in ${node.name}`;
+            alert(errorMessage);
+            throw errorMessage;
+          }
+  
+          assignedIn[prop] = node;
+          assignedInRoot[prop] = root;
+          funcAssigns[root.name] = (funcAssigns[root.name] ?? new Set()).add(prop);
+        // }
+      }
+  
+  
+      for (const child of calling[node.name] ?? []) {
+        dfs(root, child);
+      }
+    }
+  
+    for (const func of functionsToDAG) {
+      dfs(func, func);
+    }
+  
+    const unAnnotatedProperties = [...allProps.values().filter(dep => !annotatedProperties.includes(dep))];
+    if (unAnnotatedProperties.length > 0) {
+      const errorMessage = `There are ${unAnnotatedProperties.length} properties, which are mentioned in functionsToDAG, but are not annotated:\n`;
+      alert(errorMessage + unAnnotatedProperties.join('\n'));
+      console.error(errorMessage, unAnnotatedProperties);
+      return;
+    }
+  
+    
+    const assignREall = new RegExp(`//\\s*<%assigned%>\\s*:\\s*(?<prop>[\\w\\.]+)`, 'g');
+    // This one ^ can be made to match dots, because it's ok to match until the end
+  
+    let modifiedSomething = false;
+    const nextModifiedFunctions = [...modifiedFunctions()];
+    for (const func of relevantFuncs) {
+      let nextCode = func.code.replaceAll(generatedRE, ''); // Clean up previous generation
+      nextCode = nextCode.replaceAll(assignREall, (matchedString, ...args) => {
+        console.log('matchedString:', matchedString);
+        // ...args, because the replacement function behaves stupidly inconsistently with parameter count:
+        // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/replace
+        const groups = args.at(-1);
+        const prop = groups.prop;
+  
+        const indent = `\t\t\t\t\t\t\t`;
+  
+        return (
+          `${matchedString}\n`
+          + `${indent}${generatedStartMark}\n`
+          + dependentOn(prop).map(fname => `${indent}if (--${pendingVariableOf(fname)} == 0) ${functionCallString[fname]}\n`)
+          + `${indent}${generatedEndMark}`
+        );
+      });
+  
+      if (nextCode !== func.editedCode && func === selectedFunction()) {
+        mdModifiedModel.setValue(nextCode);
+      }
+  
+      func.editedCode = nextCode;
+      if (func.editedCode !== func.code) {
+        modifiedSomething = true;
+        if (!nextModifiedFunctions.includes(func))
+          nextModifiedFunctions.push(func);
+      } else {
+        // We could theoretically "unmodify" something
+        // but this entire code only works on .code (ignoring .editedCode) anyway
+        // So not worth thinking too much about it
+      }
+    }
+    // Clean up the rest of functions
+    for (const func of allFunctions()) {
+      if (relevantFuncs.has(func))
+        continue;
+  
+      func.editedCode = func.code.replaceAll(generatedRE, '');
+      if (func.editedCode !== func.code) {
+        if (func === selectedFunction())
+          mdModifiedModel.setValue(func.editedCode);
+  
+        modifiedSomething = true;
+        if (!nextModifiedFunctions.includes(func))
+          nextModifiedFunctions.push(func);
+      }
+    }
+  
+    if (!modifiedSomething) {
+      const warningMessage = `Somehow, no functions are modified`;
+      alert(warningMessage);
+      console.warn(warningMessage);
+    } else {
+      setModifiedFunctions(nextModifiedFunctions);
+    }
+    
+  
+  
+    const topLevelFunctions: FunctionInfo[] = [];
+  
+    for (const func of functionsToDAG) {
+      let topLevel = true; // Might have dependencies, but no dependencies from functions we are DAGing
+      for (const prop of dependenciesOf(func)) {
+        if (assignedInRoot[prop]) {
+          topLevel = false;
+          break;
+        }
+      }
+  
+      if (topLevel)
+        topLevelFunctions.push(func);
+    }
+  
+    if (topLevelFunctions.length == 0) {
+      const errorMessage = `There are no topLevelFunctions detected, circular dependencies?`;
+      alert(errorMessage);
+      throw errorMessage;
+    }
+  
+    console.log('topLevelFunctions:', topLevelFunctions);
+    const topLevelString = topLevelFunctions.map(f => functionCallString[f.name] + '\n').join('');
+    console.log('topLevelString:\n\n', topLevelString);
+
+    console.log('pendingVariables:', pendingVariables);
+    const pendingVariablesString = [...pendingVariables].map(varName => `std::atomic<int> ${varName}{1};\n`).join('');
+    console.log('pendingVariablesString:\n\n', pendingVariablesString);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+
 createEffect(function extractFunctionsFromFiles() {
   let functions: FunctionInfo[] = [];
   // {
@@ -398,18 +635,46 @@ function analyzeProperty(name: string) {
   return allFunctions().filter(func => func.code.includes(name));
 }
 
+const regexForName = (name: string) => new RegExp(`\\b${name.replaceAll('.', '\\.')}\\b`, 'g');
+const regexForAssignedName = (name: string) => new RegExp(`//\\s*<%assigned%>\\s*:\\s*${name.replaceAll('.', '\\.')}\\b`, 'g');
+/* Will match (for specific names):
+  //    <%assigned%>:    zhuk
+  //<%assigned%>:    Lak  
+  //  <%assigned%> : Vra
+*/
+
+
 const calls = createMemo(() => {
   const functions = allFunctions();
   const calling: ObjDict<FunctionInfo[]> = {};
   const calledFrom: ObjDict<FunctionInfo[]> = {};
 
-  for (const inner of functions) {
-    const regex = new RegExp(`\\b${inner.name}\\b`, 'g');
-    for (const outer of functions) {
-      if (outer !== inner && regex.test(outer.code)) {
-        calling[outer.name] = [...(calling[outer.name] ?? []), inner];
-        calledFrom[inner.name] = [...(calledFrom[inner.name] ?? []), outer];
-      }
+  // The following code worked, but produced "incorrect" calling ordering (not in the order of first appearance) 
+  // for (const inner of functions) {
+  //   const regex = regexForName(inner.name);
+  //   for (const outer of functions) {
+  //     if (outer !== inner && regex.test(outer.code)) {
+  //       calling[outer.name] = [...(calling[outer.name] ?? []), inner];
+  //       calledFrom[inner.name] = [...(calledFrom[inner.name] ?? []), outer];
+  //     }
+  //   }
+  // }
+
+  for (const outer of functions) {
+    for (const m of outer.code.matchAll(/\w+/g)) {
+      const name = m[0];
+
+      const inner = functions.find(f => f.name === name);
+      if (!inner || inner === outer)
+        continue;
+
+      calling[outer.name] = calling[outer.name] ?? [];
+      if (!calling[outer.name].includes(inner))
+        calling[outer.name].push(inner);
+
+      calledFrom[inner.name] = calledFrom[inner.name] ?? [];
+      if (!calledFrom[inner.name].includes(outer))
+        calledFrom[inner.name].push(outer);
     }
   }
 
@@ -623,6 +888,7 @@ const CallGraph = () => {
               return <div class="callGraphNode"
                 classList={{
                   selected: selectedFunction() === f,
+                  hasPropertyToHighlight: containsPropertyToHighlight(f),
                 }}
                 onClick={() => setSelectedFunction(f)}
                 style={{
@@ -645,15 +911,17 @@ const CallGraph = () => {
 
 
 
+let $functionsToDAG;
 
+console.warn('propertiesToHighlight:', propertiesToHighlight());
+const mdLanguage = languageVariant(propertyName() ?? '', allFunctions().map(fs => fs.name), propertiesToHighlight());
+let mdOriginalModel= editor.createModel('', mdLanguage.name);
+let mdModifiedModel = editor.createModel('', mdLanguage.name);
 
 export default function App() {
   let $property;
 
 
-  const mdLanguage = languageVariant(propertyName() ?? '', allFunctions().map(fs => fs.name));
-  let mdOriginalModel= editor.createModel('', mdLanguage.name);
-  let mdModifiedModel = editor.createModel('', mdLanguage.name);
   const $mainDiffEditorContainer = document.createElement('div');
   {
     $mainDiffEditorContainer.style.height = '70vh';
@@ -716,6 +984,16 @@ export default function App() {
     <button onClick={reloadFiles}>Reload Files</button>
     Property: <input ref={$property} /> <button onClick={() => setProperty($property!.value.trim())}>Analize</button>
     <button onClick={patchEdited}>Patch edited</button>
+    <div>
+      <textarea rows={10} cols={100}
+        ref={$functionsToDAG}
+        onInput={functionsToDAGchanged}
+        value={__initialFunctionsToDAG}></textarea>
+      <button onClick={dagFunctions}>DAG functions</button>
+      <textarea rows={10} cols={100}
+        onInput={e => setPropertiesToHighlightString(e.target.value)}
+        value={propertiesToHighlightString()}></textarea>
+    </div>
     <div><pre>
       Type: {propertyType()} <br />
       Name: <b>{propertyName()}</b> <br />
@@ -730,7 +1008,7 @@ export default function App() {
         const file = func.file;
         patchingInfo[file.name] = patchingInfo[file.name] ?? [];
 
-        const language = languageVariant(propertyName()!, allFunctions().map(fs => fs.name));
+        const language = languageVariant(propertyName()!, allFunctions().map(fs => fs.name), propertiesToHighlight());
 
         const de = document.createElement('div');
         de.style.height = '70vh';
