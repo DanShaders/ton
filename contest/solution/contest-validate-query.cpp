@@ -62,6 +62,19 @@ int ContestValidateQuery::globalTestIndex = 0;
  *   INITIAL PARSE & LOAD REQUIRED DATA
  *
  */
+td::Result<Ref<ShardState>> ContestValidateQuery::fetch_block_state(BlockIdExt block_id) {
+  Ref<vm::Cell> state_root = get_virt_state_root(block_id.root_hash);
+  if (state_root.is_null()) {
+    return td::Status::Error(PSTRING() << "cannot get hash of state root: " << block_id.to_str());
+  }
+  td::Bits256 state_root_hash = state_root->get_hash().bits();
+  auto it = virt_roots_.find(state_root_hash);
+  if (it == virt_roots_.end()) {
+    return td::Status::Error(PSTRING() << "cannot get state root from collated data: " << block_id.to_str());
+  }
+  TRY_RESULT(res, ShardStateQ::fetch(block_id, {}, it->second));
+  return Ref<ShardState>(res);
+}
 
 
 /**
@@ -125,6 +138,8 @@ void ContestValidateQuery::init_parse() {
   std::vector<BlockIdExt> prev_blks;
   bool after_split;
   auto res = block::unpack_block_prev_blk_try(block_root_, id_, prev_blks, mc_blkid_, after_split, nullptr, true);
+  //<%assigned%>: mc_blkid_
+
   if (res.is_error()) {
     reject_throw("cannot unpack block header : "s + res.to_string());
   }
@@ -152,11 +167,18 @@ void ContestValidateQuery::init_parse() {
     reject_throw("shard mismatch in the block header");
   }
   global_id_ = blk.global_id;
+  //<%assigned%>: global_id_
   vert_seqno_ = info.vert_seq_no;
+  //<%assigned%>: vert_seqno_
   start_lt_ = info.start_lt;
+  //<%assigned%>: start_lt_
   end_lt_ = info.end_lt;
+  //<%assigned%>: end_lt_
   now_ = info.gen_utime;
+  //<%assigned%>: now_
   before_split_ = info.before_split;
+  //<%assigned%>: before_split_
+
   // want_merge_ = info.want_merge;
   // want_split_ = info.want_split;
   bool is_key_block_ = info.key_block;
@@ -242,6 +264,8 @@ void ContestValidateQuery::extract_collated_data_from(Ref<vm::Cell> croot, int i
     if (!block::gen::unpack(cs, extra_collated_data_)) {
       reject_throw("invalid ExtraCollatedData");
     }
+    //<%assigned%>: extra_collated_data_
+
     have_extra_collated_data_ = true;
     return;
   }
@@ -331,10 +355,19 @@ void ContestValidateQuery::process_mc_state(Ref<MasterchainState> mc_state) {
     }
   }
   mc_state_ = Ref<MasterchainStateQ>(std::move(mc_state));
+  if (mc_state_.is_null()) {
+    fatal_throw(-666, "no previous masterchain state present");
+  }
+  //<%assigned%>: mc_state_
+
   mc_state_root_ = mc_state_->root_cell();
+  // ?? I Think this line ^ is duplicated in try_unpack_mc_state, maybe should remove it from there?
   if (mc_state_root_.is_null()) {
     fatal_throw(-666, "unable to load reference masterchain state "s + mc_blkid_.to_str());
+    // fatal_throw(-666, "latest masterchain state does not have a root cell");
   }
+  //<%assigned%>: mc_state_root_
+
   try_unpack_mc_state();
     // fatal_throw(-666, "cannot unpack reference masterchain state "s + mc_blkid_.to_str());
   register_mc_state(mc_state_);
@@ -349,13 +382,6 @@ void ContestValidateQuery::try_unpack_mc_state() {
   LOG(DEBUG) << "unpacking reference masterchain state";
   auto guard = error_ctx_add_guard("unpack last mc state");
   // try {
-    if (mc_state_.is_null()) {
-      fatal_throw(-666, "no previous masterchain state present");
-    }
-    mc_state_root_ = mc_state_->root_cell();
-    if (mc_state_root_.is_null()) {
-      fatal_throw(-666, "latest masterchain state does not have a root cell");
-    }
     auto res = block::ConfigInfo::extract_config(
         mc_state_root_, block::ConfigInfo::needShardHashes | block::ConfigInfo::needLibraries |
                             block::ConfigInfo::needValidatorSet | block::ConfigInfo::needWorkchainInfo |
@@ -737,7 +763,10 @@ tuple<shared_ptr<vm::CellUsageTree>, Ref<vm::Cell>> ContestValidateQuery::comput
     }
   }
   auto state_usage_tree_ = std::make_shared<vm::CellUsageTree>();
+  //<%assigned%>: state_usage_tree_
   prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr()); // !TEMP_THREAD likely breaks Merkle Update
+  //<%assigned%>: prev_state_root_
+
   return tuple(state_usage_tree_, prev_state_root_);
 }
 
@@ -865,10 +894,21 @@ void ContestValidateQuery::init_next_state() {
   ns_.mc_blk_ref_ = mc_blkid_;
   ns_.vert_seqno_ = vert_seqno_;
   ns_.before_split_ = before_split_;
-  ns_.processed_upto_ = block::MsgProcessedUptoCollection::unpack(id_.shard_full(), extra_collated_data_.proc_info);
-  if (!ns_.processed_upto_) {
-    reject_throw("failed top unpack processed upto");
-  }
+
+  // Moved forward to "fix_all_processed_upto"
+  // ns_.processed_upto_ = block::MsgProcessedUptoCollection::unpack(id_.shard_full(), extra_collated_data_.proc_info);
+  // if (!ns_.processed_upto_) {
+  //   reject_throw("failed top unpack processed upto");
+  // }
+
+  //<%assigned%>: ns_.id_
+  //<%assigned%>: ns_.global_id_
+  //<%assigned%>: ns_.utime_
+  //<%assigned%>: ns_.lt_
+  //<%assigned%>: ns_.mc_blk_ref_
+  //<%assigned%>: ns_.vert_seqno_
+  //<%assigned%>: ns_.before_split_
+
 }
 
 /**
@@ -1210,6 +1250,11 @@ void ContestValidateQuery::fix_processed_upto(block::MsgProcessedUptoCollection&
  * @returns True if all processed_upto values were successfully adjusted, false otherwise.
  */
 void ContestValidateQuery::fix_all_processed_upto() {
+  ns_.processed_upto_ = block::MsgProcessedUptoCollection::unpack(id_.shard_full(), extra_collated_data_.proc_info);
+  if (!ns_.processed_upto_) {
+    reject_throw("failed top unpack processed upto");
+  }
+
   CHECK(ps_.processed_upto_);
   fix_processed_upto(*ps_.processed_upto_);
     //return fatal_error("Cannot adjust old ProcessedUpto of our shard state");
@@ -1221,6 +1266,8 @@ void ContestValidateQuery::fix_all_processed_upto() {
 
   fix_processed_upto(*ns_.processed_upto_, true);
     //return fatal_error("Cannot adjust new ProcessedUpto of our shard state");
+  //<%assigned%>: ns_.processed_upto_
+
 
   for (auto& descr : neighbors_) {
     CHECK(descr.processed_upto);
@@ -2169,6 +2216,10 @@ void ContestValidateQuery::build_new_message_queue() {
   if (!ok) {
     reject_throw("failed to parse out msg dict");
   }
+
+  //<%assigned%>: ns_.out_msg_queue_
+  //<%assigned%>: ns_.dispatch_queue_
+  //<%assigned%>: ns_.out_msg_queue_size_
 }
 
 /**
@@ -5046,6 +5097,10 @@ void ContestValidateQuery::check_transactions() {
   // }
 
   // return check_account_transactions_result;
+
+
+
+  //<%assigned%>: ns_.account_dict_
 }
 
 
@@ -5100,6 +5155,8 @@ void ContestValidateQuery::check_new_state(const block::ValueFlow& value_flow_) 
   ton::BlockSeqno ref_mc_seqno =
       std::min(std::min(my_mc_seqno, min_shard_ref_mc_seqno_), ns_.processed_upto_->min_mc_seqno());
   ns_.min_ref_mc_seqno_ = ref_mc_seqno;
+  //<%assigned%>: ns_.min_ref_mc_seqno_
+
   // out_msg_queue_info:^OutMsgQueueInfo
   // -> _ out_queue:OutMsgQueue proc_info:ProcessedInfo
   //      ihr_pending:IhrPendingInfo = OutMsgQueueInfo;
@@ -5108,7 +5165,10 @@ void ContestValidateQuery::check_new_state(const block::ValueFlow& value_flow_) 
   // accounts:^ShardAccounts -> checked in precheck_account_updates() + other
   // ^[ overload_history:uint64 underload_history:uint64
   ns_.overload_history_ = ((ps_.overload_history_ << 1) | extra_collated_data_.overload);
+  //<%assigned%>: ns_.overload_history_
+
   ns_.underload_history_ = ((ps_.underload_history_ << 1) | extra_collated_data_.underload);
+  //<%assigned%>: ns_.underload_history_
 
   if (ns_.overload_history_ & ns_.underload_history_ & 1) {
     reject_throw(
@@ -5136,6 +5196,8 @@ void ContestValidateQuery::check_new_state(const block::ValueFlow& value_flow_) 
   block::CurrencyCollection old_total_validator_fees(ps_.total_validator_fees_);
   ns_.total_validator_fees_ = old_total_validator_fees + value_flow_.fees_collected - value_flow_.recovered;
   ns_.total_balance_ = value_flow_.to_next_blk;
+  //<%assigned%>: ns_.total_validator_fees_
+  //<%assigned%>: ns_.total_balance_
 }
 
 /**

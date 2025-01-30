@@ -30,6 +30,14 @@ ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice 
 
   testIndex = ++globalTestIndex;
   // msg_proc_lt_.reserve(100000); // !TEMP_BAD_THREAD
+
+  //<%assigned%>: shard_
+  //<%assigned%>: id_
+  //<%assigned%>: block_data
+  //<%assigned%>: collated_data
+  //<%assigned%>: main_promise
+  //<%assigned%>: shard_pfx_
+  //<%assigned%>: shard_pfx_len_
 }
 
 
@@ -147,6 +155,8 @@ void ContestValidateQuery::start_up() {
     td::BufferSlice result_state_update_ = build_state_update(state_usage_tree_, prev_state_root_); // reject_query("cannot build state update"); return;
 
     finish_query(result_state_update_);
+
+    generated_root();
   
     return;
   } catch (std::string error) {

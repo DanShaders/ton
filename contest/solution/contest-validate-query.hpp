@@ -233,8 +233,8 @@ public:
   int shard_pfx_len_;
   td::Bits256 created_by_;
 
-  // Ref<vm::Cell> prev_state_root_;
-  // std::shared_ptr<vm::CellUsageTree> state_usage_tree_;  // used to construct Merkle update
+  Ref<vm::Cell> prev_state_root_;
+  std::shared_ptr<vm::CellUsageTree> state_usage_tree_;  // used to construct Merkle update
 
   ErrorCtx error_ctx_;
 
@@ -361,19 +361,7 @@ public:
     return actor_id(this);
   }
 
-  td::Result<Ref<ShardState>> fetch_block_state(BlockIdExt block_id) {
-    Ref<vm::Cell> state_root = get_virt_state_root(block_id.root_hash);
-    if (state_root.is_null()) {
-      return td::Status::Error(PSTRING() << "cannot get hash of state root: " << block_id.to_str());
-    }
-    td::Bits256 state_root_hash = state_root->get_hash().bits();
-    auto it = virt_roots_.find(state_root_hash);
-    if (it == virt_roots_.end()) {
-      return td::Status::Error(PSTRING() << "cannot get state root from collated data: " << block_id.to_str());
-    }
-    TRY_RESULT(res, ShardStateQ::fetch(block_id, {}, it->second));
-    return Ref<ShardState>(res);
-  }
+  td::Result<Ref<ShardState>> fetch_block_state(BlockIdExt block_id);
 
   void after_get_mc_state(td::Result<Ref<ShardState>> res);
   void after_get_shard_state(int idx, td::Result<Ref<ShardState>> res);
@@ -476,7 +464,7 @@ public:
   void leave_multithreading();
 
   friend class MultithreadingGuard;
-
+  void generated_root();
 
   // Useless properties:
   // These were probably used in the original code, but are not used in the contest

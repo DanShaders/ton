@@ -76,7 +76,6 @@ aux_mc_states_
 
 ns_mutex_
 ps_
-ns_
 processed_upto_updated_
 sibling_out_msg_queue_
 sibling_processed_upto_
@@ -112,3 +111,39 @@ processed_account_dispatch_queues_
 have_unprocessed_account_dispatch_queue_
 
 workchain
+
+
+
+
+
+
+
+
+
+// ns_
+ns_.id_
+ns_.root_
+ns_.global_id_
+ns_.utime_
+ns_.lt_
+ns_.mc_blk_seqno_
+ns_.min_ref_mc_seqno_
+ns_.vert_seqno_
+ns_.mc_blk_ref_
+ns_.mc_blk_lt_
+ns_.before_split_
+ns_.account_dict_
+ns_.shard_libraries_
+ns_.mc_state_extra_
+ns_.overload_history_
+ns_.underload_history_
+ns_.total_balance_
+ns_.total_validator_fees_
+ns_.global_balance_
+ns_.out_msg_queue_
+ns_.ihr_pending_
+ns_.block_create_stats_
+ns_.processed_upto_
+ns_.dispatch_queue_
+ns_.out_msg_queue_size_
+
