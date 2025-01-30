@@ -46,11 +46,11 @@ std::string ErrorCtx::as_string() const {
  * @param collated_data Collated data (proofs of shard states)
  * @param promise The Promise to return the serialized state update to
  */
-ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data,
+ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice _block_data,
                                            td::BufferSlice collated_data, td::Promise<td::BufferSlice> promise)
     : shard_(block_id.shard_full())
     , id_(block_id)
-    , block_data(std::move(block_data))
+    , block_data(std::move(_block_data))
     , collated_data(std::move(collated_data))
     , main_promise(std::move(promise))
     , shard_pfx_(shard_.shard)
@@ -222,22 +222,22 @@ void ContestValidateQuery::start_up() {
     reject_query("error unpacking block candidate");
     return;
   }
-  if (prev_blocks.size() > 2) {
+  if (prev_blocks_.size() > 2) {
     soft_reject_query("cannot have more than two previous blocks");
     return;
   }
-  if (!prev_blocks.size()) {
+  if (!prev_blocks_.size()) {
     soft_reject_query("must have one or two previous blocks to generate a next block");
     return;
   }
-  if (prev_blocks.size() == 2) {
-    if (!(shard_is_parent(shard_, ShardIdFull(prev_blocks[0])) &&
-          shard_is_parent(shard_, ShardIdFull(prev_blocks[1])) && prev_blocks[0].id.shard < prev_blocks[1].id.shard)) {
+  if (prev_blocks_.size() == 2) {
+    if (!(shard_is_parent(shard_, ShardIdFull(prev_blocks_[0])) &&
+          shard_is_parent(shard_, ShardIdFull(prev_blocks_[1])) && prev_blocks_[0].id.shard < prev_blocks_[1].id.shard)) {
       soft_reject_query(
           "the two previous blocks for a merge operation are not siblings or are not children of current shard");
       return;
     }
-    for (const auto& blk : prev_blocks) {
+    for (const auto& blk : prev_blocks_) {
       if (!blk.id.seqno) {
         soft_reject_query("previous blocks for a block merge operation must have non-zero seqno");
         return;
@@ -246,14 +246,14 @@ void ContestValidateQuery::start_up() {
     // soft_reject_query("merging shards is not implemented yet");
     // return;
   } else {
-    CHECK(prev_blocks.size() == 1);
+    CHECK(prev_blocks_.size() == 1);
     // creating next block
-    if (!ShardIdFull(prev_blocks[0]).is_valid_ext()) {
+    if (!ShardIdFull(prev_blocks_[0]).is_valid_ext()) {
       soft_reject_query("previous block does not have a valid id");
       return;
     }
-    if (ShardIdFull(prev_blocks[0]) != shard_) {
-      if (!shard_is_parent(ShardIdFull(prev_blocks[0]), shard_)) {
+    if (ShardIdFull(prev_blocks_[0]) != shard_) {
+      if (!shard_is_parent(ShardIdFull(prev_blocks_[0]), shard_)) {
         soft_reject_query("previous block does not belong to the shard we are generating a new block for");
         return;
       }
@@ -264,13 +264,13 @@ void ContestValidateQuery::start_up() {
     }
   }
   // 4. load state(s) corresponding to previous block(s)
-  prev_states.resize(prev_blocks.size());
-  for (int i = 0; (unsigned)i < prev_blocks.size(); i++) {
+  prev_states_.resize(prev_blocks_.size());
+  for (int i = 0; (unsigned)i < prev_blocks_.size(); i++) {
     // 4.1. load state
-    LOG(DEBUG) << "sending wait_block_state() query #" << i << " for " << prev_blocks[i].to_str() << " to Manager";
+    LOG(DEBUG) << "sending wait_block_state() query #" << i << " for " << prev_blocks_[i].to_str() << " to Manager";
     ++pending;
     td::actor::send_closure_later(actor_id(this), &ContestValidateQuery::after_get_shard_state, i,
-                                  fetch_block_state(prev_blocks[i]));
+                                  fetch_block_state(prev_blocks_[i]));
   }
   // 5. request masterchain state referred to in the block
   ++pending;
@@ -345,9 +345,9 @@ bool ContestValidateQuery::init_parse() {
   }
   CHECK(mc_blkid_.id.is_masterchain_ext());
   mc_seqno_ = mc_blkid_.seqno();
-  prev_blocks = prev_blks;
-  after_merge_ = prev_blocks.size() == 2;
-  after_split_ = !after_merge_ && prev_blocks[0].shard_full() != shard_;
+  prev_blocks_ = prev_blks;
+  after_merge_ = prev_blocks_.size() == 2;
+  after_split_ = !after_merge_ && prev_blocks_[0].shard_full() != shard_;
   if (after_split != after_split_) {
     // ??? impossible
     return fatal_error("after_split mismatch in block header");
@@ -530,11 +530,11 @@ void ContestValidateQuery::after_get_shard_state(int idx, td::Result<Ref<ShardSt
     return;
   }
   // got state of previous block #i
-  CHECK((unsigned)idx < prev_blocks.size());
-  prev_states.at(idx) = res.move_as_ok();
-  CHECK(prev_states[idx].not_null());
-  CHECK(prev_states[idx]->get_shard() == ShardIdFull(prev_blocks[idx]));
-  CHECK(prev_states[idx]->root_cell().not_null());
+  CHECK((unsigned)idx < prev_blocks_.size());
+  prev_states_.at(idx) = res.move_as_ok();
+  CHECK(prev_states_[idx].not_null());
+  CHECK(prev_states_[idx]->get_shard() == ShardIdFull(prev_blocks_[idx]));
+  CHECK(prev_states_[idx]->root_cell().not_null());
 
   /// Вызывается один раз в after_get_shard_state или after_get_mc_state
   if (!pending) {
@@ -848,7 +848,7 @@ bool ContestValidateQuery::check_this_shard_mc_info() {
     LOG(INFO) << "creating first block for workchain " << workchain();
     return reject_query(PSTRING() << "cannot create first block for workchain " << workchain()
                                   << " after previous block "
-                                  << (prev_blocks.size() ? prev_blocks[0].to_str() : "(null)")
+                                  << (prev_blocks_.size() ? prev_blocks_[0].to_str() : "(null)")
                                   << " because no shard for this workchain is declared yet");
   }
   auto left = config_->get_shard_hash(shard_ - 1, false);
@@ -863,7 +863,7 @@ bool ContestValidateQuery::check_this_shard_mc_info() {
           PSTRING() << "cannot generate new shardchain block for " << shard_.to_str()
                     << " after a supposed split or merge event because this event is not reflected in the masterchain");
     }
-    if (!check_prev_block(left->blk_, prev_blocks[0])) {
+    if (!check_prev_block(left->blk_, prev_blocks_[0])) {
       return false;
     }
     if (left->before_split_) {
@@ -910,22 +910,22 @@ bool ContestValidateQuery::check_this_shard_mc_info() {
           PSTRING() << "cannot create new block for shard " << shard_.to_str()
                     << " after a purported split because existing shard configuration suggests a merge");
     } else if (after_merge_) {
-      if (!(check_prev_block_exact(left->blk_, prev_blocks[0]) &&
-            check_prev_block_exact(right->blk_, prev_blocks[1]))) {
+      if (!(check_prev_block_exact(left->blk_, prev_blocks_[0]) &&
+            check_prev_block_exact(right->blk_, prev_blocks_[1]))) {
         return false;
       }
     } else {
       auto cseqno = std::max(left->seqno(), right->seqno());
-      if (prev_blocks[0].seqno() <= cseqno) {
+      if (prev_blocks_[0].seqno() <= cseqno) {
         return reject_query(PSTRING() << "cannot create new block for shard " << shard_.to_str()
-                                      << " after previous block " << prev_blocks[0].to_str()
+                                      << " after previous block " << prev_blocks_[0].to_str()
                                       << " because masterchain contains newer possible ancestors "
                                       << left->blk_.to_str() << " and " << right->blk_.to_str());
       }
-      if (prev_blocks[0].seqno() >= cseqno + 8) {
+      if (prev_blocks_[0].seqno() >= cseqno + 8) {
         return reject_query(
             PSTRING() << "cannot create new block for shard " << shard_.to_str() << " after previous block "
-                      << prev_blocks[0].to_str()
+                      << prev_blocks_[0].to_str()
                       << " because this would lead to an unregistered chain of length > 8 (masterchain contains only "
                       << left->blk_.to_str() << " and " << right->blk_.to_str() << ")");
       }
@@ -941,11 +941,11 @@ bool ContestValidateQuery::check_this_shard_mc_info() {
           PSTRING() << "cannot create new block for shard " << shard_.to_str()
                     << " after a purported merge because existing shard configuration suggests a split");
     } else if (after_split_) {
-      if (!(check_prev_block_exact(left->blk_, prev_blocks[0]))) {
+      if (!(check_prev_block_exact(left->blk_, prev_blocks_[0]))) {
         return false;
       }
     } else {
-      if (!(check_prev_block(left->blk_, prev_blocks[0]))) {
+      if (!(check_prev_block(left->blk_, prev_blocks_[0]))) {
         return false;
       }
     }
@@ -972,14 +972,14 @@ bool ContestValidateQuery::check_this_shard_mc_info() {
  * @returns True if the previous state is computed successfully, false otherwise.
  */
 bool ContestValidateQuery::compute_prev_state() {
-  CHECK(prev_states.size() == 1u + after_merge_);
+  CHECK(prev_states_.size() == 1u + after_merge_);
 
-  prev_state_root_ = prev_states[0]->root_cell();
+  prev_state_root_ = prev_states_[0]->root_cell();
   CHECK(prev_state_root_.not_null());
   if (after_merge_) {
-    Ref<vm::Cell> aux_root = prev_states[1]->root_cell();
-    if (!block::gen::t_ShardState.cell_pack_split_state(prev_state_root_, prev_states[0]->root_cell(),
-                                                        prev_states[1]->root_cell())) {
+    Ref<vm::Cell> aux_root = prev_states_[1]->root_cell();
+    if (!block::gen::t_ShardState.cell_pack_split_state(prev_state_root_, prev_states_[0]->root_cell(),
+                                                        prev_states_[1]->root_cell())) {
       return fatal_error(-667, "cannot construct mechanically merged previously state");
     }
   }
@@ -997,7 +997,7 @@ bool ContestValidateQuery::compute_prev_state() {
  */
 bool ContestValidateQuery::unpack_merge_prev_state() {
   LOG(DEBUG) << "unpack/merge previous states";
-  CHECK(prev_states.size() == 2);
+  CHECK(prev_states_.size() == 2);
   // 2. extract the two previous states
   Ref<vm::Cell> root0, root1;
   if (!block::gen::t_ShardState.cell_unpack_split_state(prev_state_root_, root0, root1)) {
@@ -1005,13 +1005,13 @@ bool ContestValidateQuery::unpack_merge_prev_state() {
   }
   // 3. unpack previous states
   // 3.1. unpack left ancestor
-  if (!unpack_one_prev_state(ps_, prev_blocks.at(0), std::move(root0))) {
-    return fatal_error("cannot unpack the state of left ancestor "s + prev_blocks.at(0).to_str());
+  if (!unpack_one_prev_state(ps_, prev_blocks_.at(0), std::move(root0))) {
+    return fatal_error("cannot unpack the state of left ancestor "s + prev_blocks_.at(0).to_str());
   }
   // 3.2. unpack right ancestor
   block::ShardState ss1;
-  if (!unpack_one_prev_state(ss1, prev_blocks.at(1), std::move(root1))) {
-    return fatal_error("cannot unpack the state of right ancestor "s + prev_blocks.at(1).to_str());
+  if (!unpack_one_prev_state(ss1, prev_blocks_.at(1), std::move(root1))) {
+    return fatal_error("cannot unpack the state of right ancestor "s + prev_blocks_.at(1).to_str());
   }
   // 4. merge the two ancestors of the current state
   LOG(INFO) << "merging the two previous states";
@@ -1038,9 +1038,9 @@ bool ContestValidateQuery::unpack_prev_state() {
     }
     return true;
   }
-  CHECK(prev_states.size() == 1);
+  CHECK(prev_states_.size() == 1);
   // unpack previous state
-  return unpack_one_prev_state(ps_, prev_blocks.at(0), prev_state_root_) && (!after_split_ || split_prev_state(ps_));
+  return unpack_one_prev_state(ps_, prev_blocks_.at(0), prev_state_root_) && (!after_split_ || split_prev_state(ps_));
 }
 
 /**
@@ -1518,7 +1518,7 @@ bool ContestValidateQuery::fix_all_processed_upto() {
  */
 bool ContestValidateQuery::add_trivial_neighbor_after_merge() {
   LOG(DEBUG) << "in add_trivial_neighbor_after_merge()";
-  CHECK(prev_blocks.size() == 2);
+  CHECK(prev_blocks_.size() == 2);
   int found = 0;
   std::size_t n = neighbors_.size();
   for (std::size_t i = 0; i < n; i++) {
@@ -1529,7 +1529,7 @@ bool ContestValidateQuery::add_trivial_neighbor_after_merge() {
       if (!ton::shard_is_parent(shard_, nb.shard()) || found > 2) {
         return fatal_error("impossible shard configuration in add_trivial_neighbor_after_merge()");
       }
-      auto prev_shard = prev_blocks.at(found - 1).shard_full();
+      auto prev_shard = prev_blocks_.at(found - 1).shard_full();
       if (nb.shard() != prev_shard) {
         return fatal_error("neighbor shard "s + nb.shard().to_str() + " does not match that of our ancestor " +
                            prev_shard.to_str());
@@ -1562,19 +1562,19 @@ bool ContestValidateQuery::add_trivial_neighbor() {
   if (after_merge_) {
     return add_trivial_neighbor_after_merge();
   }
-  CHECK(prev_blocks.size() == 1);
-  if (!prev_blocks[0].seqno()) {
+  CHECK(prev_blocks_.size() == 1);
+  if (!prev_blocks_[0].seqno()) {
     // skipping
     LOG(DEBUG) << "no trivial neighbor because previous block has zero seqno";
     return true;
   }
   CHECK(prev_state_root_.not_null());
-  auto descr_ref = block::McShardDescr::from_state(prev_blocks[0], prev_state_root_);
+  auto descr_ref = block::McShardDescr::from_state(prev_blocks_[0], prev_state_root_);
   if (descr_ref.is_null()) {
     return reject_query("cannot deserialize header of previous state");
   }
   CHECK(descr_ref.not_null());
-  CHECK(descr_ref->blk_ == prev_blocks[0]);
+  CHECK(descr_ref->blk_ == prev_blocks_[0]);
   CHECK(ps_.out_msg_queue_);
   ton::ShardIdFull prev_shard = descr_ref->shard();
   // Possible cases are:

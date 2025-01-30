@@ -99,8 +99,8 @@ class ContestValidateQuery : public td::actor::Actor {
   int pending{0};
   const ShardIdFull shard_;
   const BlockIdExt id_;
-  std::vector<BlockIdExt> prev_blocks;
-  std::vector<Ref<ShardState>> prev_states;
+  std::vector<BlockIdExt> prev_blocks_;
+  std::vector<Ref<ShardState>> prev_states_;
   td::BufferSlice block_data, collated_data;
   td::Promise<td::BufferSlice> main_promise;
   bool after_merge_{false};
