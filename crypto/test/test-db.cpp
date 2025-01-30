@@ -1671,7 +1671,7 @@ TEST(Cell, MerkleUpdateArray) {
   auto update = MerkleUpdate::generate(usage_cell, arr.root(), usage_tree.get());
   CellStorageStat stat;
   stat.compute_used_storage(update, false);
-  ASSERT_EQ(stat.cells, 81u);
+  ASSERT_EQ(stat.get_cells(), 81u);
   //CellSlice(NoVm(), update).print_rec(std::cerr);
 
   check_merkle_update(root, arr.root(), update);
@@ -1714,7 +1714,7 @@ TEST(Cell, MerkleUpdateCombineArray) {
     CellStorageStat stat;
     stat.compute_used_storage(updates[0], false);
     if (size != 0) {
-      ASSERT_EQ(size, stat.cells);
+      ASSERT_EQ(size, stat.get_cells());
     }
   };
   apply_op([] {});
@@ -2346,7 +2346,7 @@ TEST(TonDb, CellStat) {
     vm::NewCellStorageStat new_stat;
     new_stat.add_cell({});
     new_stat.add_cell(B);
-    ASSERT_EQ(stat.cells, new_stat.get_stat().cells);
+    ASSERT_EQ(stat.get_cells(), new_stat.get_stat().cells);
     ASSERT_EQ(stat.bits, new_stat.get_stat().bits);
 
     vm::CellStorageStat proof_stat;
@@ -2355,7 +2355,7 @@ TEST(TonDb, CellStat) {
     vm::NewCellStorageStat new_proof_stat;
     new_proof_stat.add_proof(B, usage_tree.get());
     CHECK(new_proof_stat.get_stat().cells == 0);
-    CHECK(new_proof_stat.get_proof_stat().cells <= proof_stat.cells);
+    CHECK(new_proof_stat.get_proof_stat().cells <= proof_stat.get_cells());
     //CHECK(new_proof_stat.get_proof_stat().cells + new_proof_stat.get_proof_stat().external_refs >= proof_stat.cells);
 
     vm::NewCellStorageStat new_all_stat;
@@ -2367,7 +2367,7 @@ TEST(TonDb, CellStat) {
     auto AB_stat = new_stat.get_stat() + const_cast<vm::NewCellStorageStat &>(new_stat).tentative_add_cell(A);
     new_stat.add_cell(A);
     CHECK(AB_stat == new_stat.get_stat());
-    ASSERT_EQ(stat.cells, new_stat.get_stat().cells);
+    ASSERT_EQ(stat.get_cells(), new_stat.get_stat().cells);
     ASSERT_EQ(stat.bits, new_stat.get_stat().bits);
 
     CHECK(usage_tree.use_count() == 1);

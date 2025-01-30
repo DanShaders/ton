@@ -313,7 +313,7 @@ td::RefInt256 create_smartcontract(td::RefInt256 smc_addr, Ref<vm::Cell> code, R
   if (verbosity > 2) {
     std::cerr << "storage is:\n";
     vm::load_cell_slice(storage).print_rec(std::cerr);
-    std::cerr << "stats: bits=" << stats.bits << ", cells=" << stats.cells << std::endl;
+    std::cerr << "stats: bits=" << stats.bits << ", cells=" << stats.get_cells() << std::endl;
     std::cerr << "block::gen::AccountStorage.validate_ref() = " << block::gen::t_AccountStorage.validate_ref(storage)
               << std::endl;
     std::cerr << "block::tlb::AccountStorage.validate_ref() = " << block::tlb::t_AccountStorage.validate_ref(storage)
@@ -338,7 +338,7 @@ td::RefInt256 create_smartcontract(td::RefInt256 smc_addr, Ref<vm::Cell> code, R
   PDO(cb.store_long_rchk_bool(workchain_id, ctor == 2 ? 8 : 32) && cb.store_bits_bool(addr.cbits(), 256));
   THRERR("Cannot serialize addr:MsgAddressInt of the new smart contract");
   // storage_stat:StorageInfo -> storage_stat.used:StorageUsed
-  PDO(block::store_UInt7(cb, stats.cells)              // cells:(VarUInteger 7)
+  PDO(block::store_UInt7(cb, stats.get_cells())        // cells:(VarUInteger 7)
       && block::store_UInt7(cb, stats.bits)            // bits:(VarUInteger 7)
       && block::store_UInt7(cb, stats.public_cells));  // public_cells:(VarUInteger 7)
   THRERR("Cannot serialize used:StorageUsed of the new smart contract");

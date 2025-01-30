@@ -111,7 +111,6 @@ class NewCellStorageStat {
 };
 
 struct CellStorageStat {
-  unsigned long long cells;
   unsigned long long bits;
   unsigned long long public_cells;
   struct CellInfo {
@@ -121,13 +120,13 @@ struct CellStorageStat {
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)
-      : cells(0), bits(0), public_cells(0), limit_cells(limit_cells) {
+    : bits(0), public_cells(0), limit_cells(limit_cells), cells_(0) {
   }
   void clear_seen() {
-    seen.clear();
+    cells_.clear();
   }
   void clear() {
-    cells = bits = public_cells = 0;
+    cells_ = bits = public_cells = 0;
     clear_limit();
     clear_seen();
   }
@@ -148,6 +147,16 @@ struct CellStorageStat {
 
   unsigned long long limit_cells = std::numeric_limits<unsigned long long>::max();
   unsigned long long limit_bits = std::numeric_limits<unsigned long long>::max();
+
+  unsigned long long get_cells() const {
+    return cells_;
+  }
+  void set_cells(const unsigned long long cells) {
+    cells_ = cells;
+  }
+
+ private:
+   unsigned long long cells_;
 };
 
 struct VmStorageStat {

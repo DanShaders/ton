@@ -1015,7 +1015,7 @@ class Query {
           vm::CellStorageStat sstat;                  // for message size
           sstat.add_used_storage(msg.init, true, 3);  // message init
           sstat.add_used_storage(msg.body, true, 3);  // message body (the root cell itself is not counted)
-          res += msg_prices[is_masterchain || dest_is_masterchain]->compute_fwd_fees(sstat.cells, sstat.bits);
+          res += msg_prices[is_masterchain || dest_is_masterchain]->compute_fwd_fees(sstat.get_cells(), sstat.bits);
           break;
         }
         case block::gen::OutAction::action_reserve_currency:
@@ -1046,7 +1046,7 @@ class Query {
     {
       vm::CellStorageStat sstat;                      // for message size
       sstat.add_used_storage(raw_.message, true, 3);  // message init
-      in_fwd_fee += msg_prices[is_masterchain]->compute_fwd_fees(sstat.cells, sstat.bits);
+      in_fwd_fee += msg_prices[is_masterchain]->compute_fwd_fees(sstat.get_cells(), sstat.bits);
     }
 
     vm::GasLimits gas_limits = compute_gas_limits(td::make_refint(raw_.source->get_balance()), gas_limits_prices);
@@ -1398,7 +1398,8 @@ class GetRawAccountState : public td::actor::Actor {
       }
       unsigned long long u = 0;
       vm::CellStorageStat storage_stat;
-      u |= storage_stat.cells = block::tlb::t_VarUInteger_7.as_uint(*storage_used.cells);
+      storage_stat.set_cells(block::tlb::t_VarUInteger_7.as_uint(*storage_used.cells));
+      u |= storage_stat.get_cells();
       u |= storage_stat.bits = block::tlb::t_VarUInteger_7.as_uint(*storage_used.bits);
       u |= storage_stat.public_cells = block::tlb::t_VarUInteger_7.as_uint(*storage_used.public_cells);
       //LOG(DEBUG) << "last_paid=" << res.storage_last_paid << "; cells=" << storage_stat.cells

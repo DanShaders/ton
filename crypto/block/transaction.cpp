@@ -269,10 +269,11 @@ bool Account::unpack_storage_info(vm::CellSlice& cs) {
   }
   unsigned long long u = 0;
   /// Здесь мы читаем число cells аккаунта
-  u |= storage_stat.cells = block::tlb::t_VarUInteger_7.as_uint(*used.cells);
+  storage_stat.set_cells(block::tlb::t_VarUInteger_7.as_uint(*used.cells));
+  u |= storage_stat.get_cells();
   u |= storage_stat.bits = block::tlb::t_VarUInteger_7.as_uint(*used.bits);
   u |= storage_stat.public_cells = block::tlb::t_VarUInteger_7.as_uint(*used.public_cells);
-  LOG(DEBUG) << "last_paid=" << last_paid << "; cells=" << storage_stat.cells << " bits=" << storage_stat.bits
+  LOG(DEBUG) << "last_paid=" << last_paid << "; cells=" << storage_stat.get_cells() << " bits=" << storage_stat.bits
              << " public_cells=" << storage_stat.public_cells;
   return (u != std::numeric_limits<td::uint64>::max());
 }
@@ -623,7 +624,7 @@ bool Account::belongs_to_shard(ton::ShardIdFull shard) const {
  */
 void add_partial_storage_payment(td::BigInt256& payment, ton::UnixTime delta, const block::StoragePrices& prices,
                                  const vm::CellStorageStat& storage, bool is_mc) {
-  td::BigInt256 c{(long long)storage.cells}, b{(long long)storage.bits};
+  td::BigInt256 c{(long long)storage.get_cells()}, b{(long long)storage.bits};
   if (is_mc) {
     // storage.cells * prices.mc_cell_price + storage.bits * prices.mc_bit_price;
     c.mul_short(prices.mc_cell_price);
@@ -787,9 +788,9 @@ bool Transaction::unpack_input_msg(bool ihr_delivered, const ActionPhaseConfig* 
       vm::CellStorageStat sstat;                                     // for message size
       auto cell_info = sstat.compute_used_storage(cs).move_as_ok();  // message body
       sstat.bits -= cs.size();                                       // bits in the root cells are free
-      sstat.cells--;                                                 // the root cell itself is not counted as a cell
-      LOG(DEBUG) << "storage paid for a message: " << sstat.cells << " cells, " << sstat.bits << " bits";
-      if (sstat.bits > cfg->size_limits.max_msg_bits || sstat.cells > cfg->size_limits.max_msg_cells) {
+      sstat.set_cells(sstat.get_cells() - 1);                        // the root cell itself is not counted as a cell
+      LOG(DEBUG) << "storage paid for a message: " << sstat.get_cells() << " cells, " << sstat.bits << " bits";
+      if (sstat.bits > cfg->size_limits.max_msg_bits || sstat.get_cells() > cfg->size_limits.max_msg_cells) {
         LOG(DEBUG) << "inbound external message too large, invalid";
         return false;
       }
@@ -801,7 +802,7 @@ bool Transaction::unpack_input_msg(bool ihr_delivered, const ActionPhaseConfig* 
       CHECK(cfg);
       const MsgPrices& msg_prices = cfg->fetch_msg_prices(account.is_masterchain());
       // compute forwarding fees
-      auto fees_c = msg_prices.compute_fwd_ihr_fees(sstat.cells, sstat.bits, true);
+      auto fees_c = msg_prices.compute_fwd_ihr_fees(sstat.get_cells(), sstat.bits, true);
       LOG(DEBUG) << "computed fwd fees = " << fees_c.first << " + " << fees_c.second;
 
       if (account.is_special) {
@@ -2092,7 +2093,8 @@ int Transaction::try_action_change_library(vm::CellSlice& cs, ActionPhase& ap, c
       }
       vm::CellStorageStat sstat;
       auto cell_info = sstat.compute_used_storage(lib_ref).move_as_ok();
-      if (sstat.cells > cfg.size_limits.max_library_cells || cell_info.max_merkle_depth > max_allowed_merkle_depth) {
+      if (sstat.get_cells() > cfg.size_limits.max_library_cells ||
+          cell_info.max_merkle_depth > max_allowed_merkle_depth) {
         return 43;
       }
       vm::CellBuilder cb;
@@ -2526,7 +2528,7 @@ int Transaction::try_action_send_msg(const vm::CellSlice& cs0, ActionPhase& ap, 
   }
   auto collect_fine = [&] {
     if (cfg.action_fine_enabled && !account.is_special) {
-      td::uint64 fine = fine_per_cell * std::min<td::uint64>(max_cells, sstat.cells);
+      td::uint64 fine = fine_per_cell * std::min<td::uint64>(max_cells, sstat.get_cells());
       if (ap.remaining_balance.grams->cmp(fine) < 0) {
         fine = ap.remaining_balance.grams->to_long();
       }
@@ -2534,12 +2536,12 @@ int Transaction::try_action_send_msg(const vm::CellSlice& cs0, ActionPhase& ap, 
       ap.remaining_balance.grams -= fine;
     }
   };
-  if (sstat.cells > max_cells && max_cells < cfg.size_limits.max_msg_cells) {
+  if (sstat.get_cells() > max_cells && max_cells < cfg.size_limits.max_msg_cells) {
     LOG(DEBUG) << "not enough funds to process a message (max_cells=" << max_cells << ")";
     collect_fine();
     return check_skip_invalid(40);
   }
-  if (sstat.bits > cfg.size_limits.max_msg_bits || sstat.cells > max_cells) {
+  if (sstat.bits > cfg.size_limits.max_msg_bits || sstat.get_cells() > max_cells) {
     LOG(DEBUG) << "message too large, invalid";
     collect_fine();
     return check_skip_invalid(40);
@@ -2549,10 +2551,10 @@ int Transaction::try_action_send_msg(const vm::CellSlice& cs0, ActionPhase& ap, 
     collect_fine();
     return check_skip_invalid(40);
   }
-  LOG(DEBUG) << "storage paid for a message: " << sstat.cells << " cells, " << sstat.bits << " bits";
+  LOG(DEBUG) << "storage paid for a message: " << sstat.get_cells() << " cells, " << sstat.bits << " bits";
 
   // compute forwarding fees
-  auto fees_c = msg_prices.compute_fwd_ihr_fees(sstat.cells, sstat.bits, info.ihr_disabled);
+  auto fees_c = msg_prices.compute_fwd_ihr_fees(sstat.get_cells(), sstat.bits, info.ihr_disabled);
   LOG(DEBUG) << "computed fwd fees = " << fees_c.first << " + " << fees_c.second;
 
   if (account.is_special) {
@@ -2752,7 +2754,7 @@ int Transaction::try_action_send_msg(const vm::CellSlice& cs0, ActionPhase& ap, 
   }
 
   ap.tot_msg_bits += sstat.bits + new_msg_bits;
-  ap.tot_msg_cells += sstat.cells + 1;
+  ap.tot_msg_cells += sstat.get_cells() + 1;
 
   return 0;
 }
@@ -2935,7 +2937,8 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
     storage_stat.clear();
   }
   td::Status res;
-  if (storage_stat.cells > size_limits.max_acc_state_cells || storage_stat.bits > size_limits.max_acc_state_bits) {
+  if (storage_stat.get_cells() > size_limits.max_acc_state_cells ||
+      storage_stat.bits > size_limits.max_acc_state_bits) {
     res = td::Status::Error(PSTRING() << "account state is too big");
   } else if (account.is_masterchain() && !cell_equal(account.library, new_library) &&
              get_public_libraries_count(new_library) > size_limits.max_acc_public_libraries) {
@@ -3006,9 +3009,9 @@ bool Transaction::prepare_bounce_phase(const ActionPhaseConfig& cfg) {
   // preliminary storage estimation of the resulting message
   sstat.compute_used_storage(info.value->prefetch_ref());
   bp.msg_bits = sstat.bits;
-  bp.msg_cells = sstat.cells;
+  bp.msg_cells = sstat.get_cells();
   // compute forwarding fees
-  bp.fwd_fees = msg_prices.compute_fwd_fees(sstat.cells, sstat.bits);
+  bp.fwd_fees = msg_prices.compute_fwd_fees(sstat.get_cells(), sstat.bits);
   // check whether the message has enough funds
   auto msg_balance = msg_balance_remaining;
   if (compute_phase && compute_phase->gas_fees.not_null()) {
@@ -3121,7 +3124,7 @@ bool Account::store_acc_status(vm::CellBuilder& cb, int acc_status) const {
 static td::optional<vm::CellStorageStat> try_update_storage_stat(const vm::CellStorageStat& old_stat,
                                                                  td::Ref<vm::CellSlice> old_cs,
                                                                  td::Ref<vm::Cell> new_cell) {
-  if (old_stat.cells == 0 || old_cs.is_null()) {
+  if (old_stat.get_cells() == 0 || old_cs.is_null()) {
     return {};
   }
   vm::CellSlice new_cs = vm::CellSlice(vm::NoVm(), new_cell);
@@ -3138,7 +3141,7 @@ static td::optional<vm::CellStorageStat> try_update_storage_stat(const vm::CellS
   }
 
   vm::CellStorageStat new_stat;
-  new_stat.cells = old_stat.cells;
+  new_stat.set_cells(old_stat.get_cells());
   new_stat.bits = old_stat.bits - old_cs->size() + new_cs.size();
   new_stat.public_cells = old_stat.public_cells;
   return new_stat;
@@ -3235,7 +3238,7 @@ bool Transaction::compute_state() {
   }
   CHECK(cb.store_long_bool(1, 1)                       // account$1
         && cb.append_cellslice_bool(account.my_addr)   // addr:MsgAddressInt
-        && block::store_UInt7(cb, stats.cells)         // storage_used$_ cells:(VarUInteger 7)
+        && block::store_UInt7(cb, stats.get_cells())   // storage_used$_ cells:(VarUInteger 7)
         && block::store_UInt7(cb, stats.bits)          //   bits:(VarUInteger 7)
         && block::store_UInt7(cb, stats.public_cells)  //   public_cells:(VarUInteger 7)
         && cb.store_long_bool(last_paid, 32));         // last_paid:uint32
