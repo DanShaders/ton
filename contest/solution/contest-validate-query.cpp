@@ -1497,6 +1497,9 @@ void ContestValidateQuery::unpack_block_data() {
   out_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(outmsg_cs), 256, block::tlb::aug_OutMsgDescr);
   account_blocks_dict_ = std::make_unique<vm::AugmentedDictionary>(
       vm::load_cell_slice_ref(std::move(extra.account_blocks)), 256, block::tlb::aug_ShardAccountBlocks);
+
+  //<%assigned%>: account_blocks_dict_
+
   LOG(DEBUG) << "validating InMsgDescr";
   if (!in_msg_dict_->validate_all()) {
     reject_throw("InMsgDescr dictionary is invalid");

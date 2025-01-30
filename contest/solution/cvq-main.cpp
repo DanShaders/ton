@@ -148,10 +148,10 @@ void ContestValidateQuery::start_up() {
     check_processed_upto(); // reject_query("invalid ProcessedInfo"); return;
     check_in_queue(); // reject_query("cannot check inbound message queues"); return;
     check_transactions(); // // LOG(ERROR) << "Test index #" << testIndex << ": another reject_query here"; reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
-    postcheck_account_updates(); // reject_query("invalid AccountState update"); return;
-
-
-
+    
+    
+    
+    // _postcheck_account_updates(); // reject_query("invalid AccountState update"); return;
     // _check_message_processing_order(); // reject_query("some messages have been processed by transactions in incorrect order"); return;
     // _check_new_state(); // reject_query("the header of the new shardchain state is invalid"); return;  
     // _postcheck_value_flow(); // reject_query("new ValueFlow is invalid"); return;

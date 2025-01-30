@@ -64,7 +64,6 @@ const annotatedProperties: string[] = [
 	'import_fees_',
 
 
-
 	'after_merge_',
 	'after_split_',
 	'mc_seqno_',
@@ -72,11 +71,14 @@ const annotatedProperties: string[] = [
 	'aux_mc_states_',
 
 
-
 	// Added for: check_message_processing_order()
 	'msg_proc_lt_',
 	'in_msg_emitted_lt_',
 	'out_msg_emitted_lt_',
+
+
+	// Added for: postcheck_account_updates()
+	'account_blocks_dict_',
 ];
 
 export default annotatedProperties;
