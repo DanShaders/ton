@@ -249,6 +249,8 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
   // NB: be careful with special cells
   auto total_hash_count = level_mask.get_hashes_count();
   auto hash_i_offset = total_hash_count - hash_count;
+
+  static ABSL_CACHELINE_ALIGNED TD_THREAD_LOCAL uint8_t buffer[1024] = {};
   for (td::uint32 level_i = 0, hash_i = 0, level = level_mask.get_level(); level_i <= level; level_i++) {
     if (!level_mask.is_significant(level_i)) {
       continue;
@@ -259,40 +261,32 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     if (hash_i < hash_i_offset) {
       continue;
     }
-    unsigned char tmp[2];
-    tmp[0] = info.d1(level_mask.apply(level_i));
-    tmp[1] = info.d2();
 
-    static TD_THREAD_LOCAL digest::SHA256* hasher;
-    td::init_thread_local<digest::SHA256>(hasher);
-    hasher->reset();
-
-    hasher->feed(tmp, 2);
+    buffer[0] = info.d1(level_mask.apply(level_i));
+    buffer[1] = info.d2();
+    size_t buffer_size = 2;
 
     if (hash_i == hash_i_offset) {
       DCHECK(level_i == 0 || type == SpecialType::PrunnedBranch);
-      hasher->feed(data_ptr, (bits + 7) >> 3);
+      memcpy(buffer + 2, data_ptr, (bits + 7) >> 3);
+      buffer_size += (bits + 7) >> 3;
     } else {
       DCHECK(level_i != 0 && type != SpecialType::PrunnedBranch);
-      hasher->feed(hashes_ptr[hash_i - hash_i_offset - 1].as_slice());
+      memcpy(buffer + 2, hashes_ptr[hash_i - hash_i_offset - 1].as_slice().ubegin(), sizeof(Hash));
+      buffer_size += sizeof(Hash);
     }
 
     auto dest_i = hash_i - hash_i_offset;
+    const auto level_i_val = (type == SpecialType::MerkleProof || type == SpecialType::MerkleUpdate) ? level_i + 1 : level_i;
 
     // calc depth
     td::uint16 depth = 0;
     for (int i = 0; i < info.refs_count_; i++) {
-      td::uint16 child_depth = 0;
-      if (type == SpecialType::MerkleProof || type == SpecialType::MerkleUpdate) {
-        child_depth = refs_ptr[i]->get_depth(level_i + 1);
-      } else {
-        child_depth = refs_ptr[i]->get_depth(level_i);
-      }
+      const td::uint16 child_depth = refs_ptr[i]->get_depth(level_i_val);
 
       // add depth into hash
-      td::uint8 child_depth_buf[depth_bytes];
-      store_depth(child_depth_buf, child_depth);
-      hasher->feed(td::Slice(child_depth_buf, depth_bytes));
+      store_depth(buffer + buffer_size, child_depth);
+      buffer_size += depth_bytes;
 
       depth = std::max(depth, child_depth);
     }
@@ -305,13 +299,18 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     depth_ptr[dest_i] = depth;
 
     // children hash
-    for (int i = 0; i < info.refs_count_; i++) {
-      if (type == SpecialType::MerkleProof || type == SpecialType::MerkleUpdate) {
-        hasher->feed(refs_ptr[i]->get_hash(level_i + 1).as_slice());
-      } else {
-        hasher->feed(refs_ptr[i]->get_hash(level_i).as_slice());
-      }
+    for (int i = 0; i < info.refs_count_; ++i) {
+      assert(buffer_size + sizeof(Hash) < std::size(buffer));
+      memcpy(buffer + buffer_size, refs_ptr[i]->get_hash(level_i_val).as_slice().ubegin(), sizeof(Hash));
+      buffer_size += sizeof(Hash);
     }
+
+    /// Делаем вычисление за одну операцию, это быстрее и для SHA256_CTX, и digest::SHA256
+
+    static TD_THREAD_LOCAL digest::SHA256* hasher;
+    td::init_thread_local<digest::SHA256>(hasher);
+    hasher->reset();
+    hasher->feed(buffer, buffer_size);
     auto extracted_size = hasher->extract(hashes_ptr[dest_i].as_slice());
     DCHECK(extracted_size == hash_bytes);
   }
