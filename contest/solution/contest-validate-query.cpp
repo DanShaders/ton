@@ -2264,8 +2264,21 @@ void ContestValidateQuery::build_new_message_queue() {
   }
 
   //<%assigned%>: ns_.out_msg_queue_
+							//<%generated%>
+							if (--__pending_precheck_message_queue_update == 0) precheck_message_queue_update();
+							if (--__pending_check_out_msg_descr == 0) check_out_msg_descr();
+							if (--__pending_build_state_update == 0) build_state_update();
+							//<%/generated%>
   //<%assigned%>: ns_.dispatch_queue_
+							//<%generated%>
+							if (--__pending_unpack_dispatch_queue_update == 0) unpack_dispatch_queue_update();
+							if (--__pending_build_state_update == 0) build_state_update();
+							//<%/generated%>
   //<%assigned%>: ns_.out_msg_queue_size_
+							//<%generated%>
+							if (--__pending_precheck_message_queue_update == 0) precheck_message_queue_update();
+							if (--__pending_build_state_update == 0) build_state_update();
+							//<%/generated%>
 }
 
 /**
