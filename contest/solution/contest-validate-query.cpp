@@ -3317,11 +3317,23 @@ void ContestValidateQuery::check_in_msg_descr() {
   // }
 
   //<%assigned%>: proc_lt_
+							//<%generated%>
+							if (--__pending_check_processed_upto == 0) check_processed_upto();
+							//<%/generated%>
   //<%assigned%>: proc_hash_
+							//<%generated%>
+							if (--__pending_check_processed_upto == 0) check_processed_upto();
+							//<%/generated%>
   //<%assigned%>: in_msg_emitted_lt_
+							//<%generated%>
+							if (--__pending_check_message_processing_order == 0) check_message_processing_order();
+							//<%/generated%>
 
   //<%replace_usage%>: removed_dispatch_queue_messages_ -> removed_dispatch_queue_messages_st1_
   //<%assigned%>: removed_dispatch_queue_messages_
+							//<%generated%>
+							if (--__pending_check_dispatch_queue_update == 0) check_dispatch_queue_update();
+							//<%/generated%>
 
 }
 

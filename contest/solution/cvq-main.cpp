@@ -144,10 +144,10 @@ void ContestValidateQuery::start_up() {
     precheck_message_queue_update(); // reject_query("invalid OutMsgQueue update"); return;
     unpack_dispatch_queue_update(); // reject_query("invalid DispatchQueue update"); return;
     unpack_dispatch_queue_update_after();
-    check_in_msg_descr(); // reject_query("invalid InMsgDescr"); return;
     
     
     
+    // _check_in_msg_descr(); // reject_query("invalid InMsgDescr"); return;
     // _check_out_msg_descr(); // reject_query("invalid OutMsgDescr"); return;
     // _check_dispatch_queue_update(); // reject_query("invalid OutMsgDescr"); return;
     // _check_processed_upto(); // reject_query("invalid ProcessedInfo"); return;

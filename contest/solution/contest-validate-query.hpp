@@ -482,13 +482,13 @@ public:
 
 
   //<{generated_atomic_vars
-  std::atomic<int> __pending_check_processed_upto{2};
-  std::atomic<int> __pending_check_message_processing_order{2};
-  std::atomic<int> __pending_check_dispatch_queue_update{1};
+  std::atomic<int> __pending_check_processed_upto{4};
+  std::atomic<int> __pending_check_message_processing_order{3};
+  std::atomic<int> __pending_check_dispatch_queue_update{2};
   std::atomic<int> __pending_check_in_queue{2};
   std::atomic<int> __pending_postcheck_account_updates{1};
   std::atomic<int> __pending_postcheck_value_flow{2};
-  std::atomic<int> __pending_build_state_update{6}; 
+  std::atomic<int> __pending_build_state_update{6};
   //generated_atomic_vars}/>
 
 
