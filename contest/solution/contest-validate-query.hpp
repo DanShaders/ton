@@ -62,6 +62,8 @@ using MyMap = std::unordered_map<K, V>;
 
 using std::shared_ptr;
 using std::tuple;
+using std::lock_guard;
+using std::mutex;
 // template <typename... Args>
 // using tup = std::tuple<... Args>;
 
@@ -255,6 +257,7 @@ public:
   bool have_extra_collated_data_ = false;
 
   Ref<vm::Cell> recover_create_msg_, mint_msg_;  // from McBlockExtra (UNCHECKED)
+  // !REMOVE I guess? The above two seem always unassigned
 
   std::unique_ptr<block::ConfigInfo> config_;
   std::unique_ptr<block::ShardConfig> old_shard_conf_;  // from reference mc state
@@ -275,7 +278,7 @@ public:
   ton::LogicalTime prev_key_block_lt_;
   std::unique_ptr<block::BlockLimits> block_limits_;
   std::unique_ptr<block::BlockLimitStatus> block_limit_status_;
-  td::uint64 total_gas_used_{0}, total_special_gas_used_{0};
+  std::atomic<td::uint64> total_gas_used_{0}, total_special_gas_used_{0};
 
   LogicalTime start_lt_, end_lt_;
   UnixTime now_{~0u};
@@ -302,6 +305,7 @@ public:
   block::ValueFlow value_flow_;
   // block::CurrencyCollection import_created_; // Doesn't exist
   block::CurrencyCollection transaction_fees_, total_burned_{0}, fees_burned_{0};
+  mutex total_burned_mutex;
   td::RefInt256 import_fees_;
 
   ton::LogicalTime proc_lt_{0}, claimed_proc_lt_{0}, min_enq_lt_{~0ULL};
@@ -317,6 +321,7 @@ public:
   MyMap<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;
   MyMap<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> new_dispatch_queue_messages_;
   std::set<StdSmcAddress> account_expected_defer_all_messages_;
+  std::mutex account_expected_defer_all_messages_mutex_;
   td::uint64 old_out_msg_queue_size_ = 0;
   bool out_msg_queue_size_known_ = false;
   bool have_out_msg_queue_size_in_state_ = false;

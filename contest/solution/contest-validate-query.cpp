@@ -411,8 +411,12 @@ void ContestValidateQuery::try_unpack_mc_state() {
                    << " (upgrade validator software?)";
     }
 
-    old_shard_conf_ = std::make_unique<block::ShardConfig>(*config_);
+    old_shard_conf_ = std::make_unique<block::ShardConfig>(*config_); // Not used
     new_shard_conf_ = std::make_unique<block::ShardConfig>(*config_);
+    //<%assigned%>: config_ (it's probably available earlier, but who knows if two lines above affect it in any way)
+    //<%assigned%>: old_shard_conf_
+    //<%assigned%>: new_shard_conf_
+
     if (global_id_ != config_->get_global_blockchain_id()) {
       reject_throw(PSTRING() << "blockchain global id mismatch: new block has " << global_id_
                                     << " while the masterchain configuration expects "
@@ -440,6 +444,9 @@ void ContestValidateQuery::try_unpack_mc_state() {
     block_limits_ = limits.move_as_ok();
     block_limits_->start_lt = start_lt_;
     block_limit_status_ = std::make_unique<block::BlockLimitStatus>(*block_limits_);
+    //<%assigned%>: block_limits_
+    //<%assigned%>: block_limit_status_ (it looks like it's not needed after I removed what seemed like an excessive call)
+
 
     fetch_config_params();
     check_this_shard_mc_info(); //fatal_throw("masterchain configuration does not admit creating block "s + id_.to_str());
@@ -447,6 +454,11 @@ void ContestValidateQuery::try_unpack_mc_state() {
     store_out_msg_queue_size_ = config_->has_capability(ton::capStoreOutMsgQueueSize);
     msg_metadata_enabled_ = config_->has_capability(ton::capMsgMetadata);
     deferring_messages_enabled_ = config_->has_capability(ton::capDeferMessages);
+
+    //<%assigned%>: store_out_msg_queue_size_
+    //<%assigned%>: msg_metadata_enabled_
+    //<%assigned%>: deferring_messages_enabled_
+
   // } catch (vm::VmError& err) {
   //   return fatal_error(-666, err.get_msg());
   // } catch (vm::VmVirtError& err) {
@@ -468,6 +480,7 @@ void ContestValidateQuery::fetch_config_params() {
       fatal_throw(res.move_as_error());
     }
     storage_prices_ = res.move_as_ok();
+    //<%assigned%>: storage_prices_
   }
   {
     // recover (not generate) rand seed from block header
@@ -519,6 +532,8 @@ void ContestValidateQuery::fetch_config_params() {
     compute_phase_cfg_.size_limits = size_limits;
     compute_phase_cfg_.precompiled_contracts = config_->get_precompiled_contracts_config();
     compute_phase_cfg_.allow_external_unfreeze = compute_phase_cfg_.global_version >= 8;
+    //<%assigned%>: compute_phase_cfg_
+    //<%assigned%>: storage_phase_cfg_
   }
   {
     // compute action_phase_cfg
@@ -545,6 +560,7 @@ void ContestValidateQuery::fetch_config_params() {
     action_phase_cfg_.message_skip_enabled = config_->get_global_version() >= 8;
     action_phase_cfg_.disable_custom_fess = config_->get_global_version() >= 8;
     action_phase_cfg_.mc_blackhole_addr = config_->get_burning_config().blackhole_addr;
+    //<%assigned%>: action_phase_cfg_
   }
   {
     // fetch block_grams_created
@@ -1498,6 +1514,8 @@ void ContestValidateQuery::unpack_block_data() {
   account_blocks_dict_ = std::make_unique<vm::AugmentedDictionary>(
       vm::load_cell_slice_ref(std::move(extra.account_blocks)), 256, block::tlb::aug_ShardAccountBlocks);
 
+  //<%assigned%>: in_msg_dict_
+  //<%assigned%>: out_msg_dict_
   //<%assigned%>: account_blocks_dict_
 
   LOG(DEBUG) << "validating InMsgDescr";
@@ -2039,7 +2057,7 @@ void ContestValidateQuery::build_new_message_queue() {
         if (!ns_.out_msg_queue_->set_builder(queue_key, cb, vm::Dictionary::SetMode::Add)) {
           return fatal_error("failed to store message to out msg queue for msg_export_new");
         }
-        ++ns_.out_msg_queue_size_.value();
+        ++ns_.out_msg_queue_size_.value(); // !IMPORTANT: make attomic?
         break;
       }
       case block::gen::OutMsg::msg_export_imm: {
@@ -2461,8 +2479,7 @@ void ContestValidateQuery::precheck_message_queue_update() {
  *
  * @returns True if the check is successful, false otherwise.
  */
-void ContestValidateQuery::check_account_dispatch_queue_update(td::Bits256 addr, Ref<vm::CellSlice> old_queue_csr,
-                                                               Ref<vm::CellSlice> new_queue_csr) {
+void ContestValidateQuery::check_account_dispatch_queue_update(td::Bits256 addr, Ref<vm::CellSlice> old_queue_csr, Ref<vm::CellSlice> new_queue_csr) {
   vm::Dictionary old_dict{64};
   td::uint64 old_dict_size = 0;
   if (!block::unpack_account_dispatch_queue(old_queue_csr, old_dict, old_dict_size)) {
@@ -2554,6 +2571,7 @@ void ContestValidateQuery::check_account_dispatch_queue_update(td::Bits256 addr,
                                     << " was present in the queue");
     }
     if (max_removed_lt != old_max_lt.to_ulong()) {
+      lock_guard _(account_expected_defer_all_messages_mutex_); // !TEMP_THREAD_SOLUTION
       // Some old messages are still in DispatchQueue, meaning that all new messages from this account must be deferred
       account_expected_defer_all_messages_.insert(addr);
     }
@@ -2586,6 +2604,8 @@ void ContestValidateQuery::unpack_dispatch_queue_update() {
     if (!res) {
       reject_throw("invalid DispatchQueue dictionary in the new state");
     }
+
+    //<%assigned%>: account_expected_defer_all_messages_
 
     if (have_out_msg_queue_size_in_state_ &&
         old_out_msg_queue_size_ <= compute_phase_cfg_.size_limits.defer_out_queue_size_limit) {
@@ -4308,7 +4328,7 @@ std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBi
  */
 void ContestValidateQuery::check_one_transaction(block::Account& account, ton::LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first, bool is_last) {
   // return true; // !TEMP_THREAD_TEST
-  // LOG(ERROR) << "Test index #" << testIndex << ": check_one_transaction, current thread id: "<< render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
+  // LOG(ERROR) << "Test index #" << testIndex << ": _check_one_transaction, current thread id: "<< render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   LOG(DEBUG) << "checking transaction " << lt << " of account " << account.addr.to_hex();
   const StdSmcAddress& addr = account.addr;
   block::gen::Transaction::Record trans;
@@ -4498,6 +4518,10 @@ void ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     }
     if (tag != block::gen::OutMsg::msg_export_ext) {
       bool is_deferred = tag == block::gen::OutMsg::msg_export_new_defer;
+      lock_guard _(account_expected_defer_all_messages_mutex_); // !TEMP_THREAD_SOLUTION
+
+      // Because of the following lines, check_one_transaction executions for a specific account
+      // can't be parallelized ... at least not as easily, maybe later
       if (account_expected_defer_all_messages_.count(ss_addr) && !is_deferred) {
         reject_throw(
             PSTRING() << "outbound message #" << i + 1 << " on account " << workchain() << ":" << ss_addr.to_hex()
@@ -4720,10 +4744,14 @@ void ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     reject_throw(PSTRING() << "cannot re-create the serialization of  transaction " << lt
                                   << " for smart contract " << addr.to_hex());
   }
-  if (!trs->update_limits(*block_limit_status_, /* with_gas = */ false, /* with_size = */ false)) {
-    fatal_throw(PSTRING() << "cannot update block limit status to include transaction " << lt << " of account "
-                                 << addr.to_hex());
-  }
+  // !CAREFUL_REMOVAL: the following call to update_limits always returns true,
+  // _block_limit_status_ is modified, but never used afterwards
+  // and this modification hinders parallelization,
+  // so I removed it.
+  // if (!trs->update_limits(*_block_limit_status_, /* with_gas = */ false, /* with_size = */ false)) {
+  //   fatal_throw(PSTRING() << "cannot update block limit status to include transaction " << lt << " of account "
+  //                                << addr.to_hex());
+  // }
 
   // Collator should stop if total gas usage exceeds limits, including transactions on special accounts, but without
   // ticktocks and mint/recover.
@@ -4731,19 +4759,25 @@ void ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   if (!is_special_tx && !trs->gas_limit_overridden && trans_type == block::transaction::Transaction::tr_ord) {
     (account.is_special ? total_special_gas_used_ : total_gas_used_) += trs->gas_used();
   }
-  if (total_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.gas_limit) {
-    reject_throw(PSTRING() << "gas block limits are exceeded: total_gas_used > gas_limit_hard + trx_gas_limit ("
-                                  << "total_gas_used=" << total_gas_used_
-                                  << ", gas_limit_hard=" << block_limits_->gas.hard()
-                                  << ", trx_gas_limit=" << compute_phase_cfg_.gas_limit << ")");
-  }
-  if (total_special_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.special_gas_limit) {
-    reject_throw(
-        PSTRING() << "gas block limits are exceeded: total_special_gas_used > gas_limit_hard + special_gas_limit ("
-                  << "total_special_gas_used=" << total_special_gas_used_
-                  << ", gas_limit_hard=" << block_limits_->gas.hard()
-                  << ", special_gas_limit=" << compute_phase_cfg_.special_gas_limit << ")");
-  }
+
+  // !CAREFUL_REARRANGEMENT
+  // The following checks are better located outside, to execute them less
+  // I assume there can't be any transactions, which collectively used so much gas to overflow int's
+  // otherwise even the initial code won't be correct,
+  // since you could get an overflow with "(gas.hard()-1) + (2^64 - 1)"
+  // if (_total_gas_used_ > _block_limits_->gas.hard() + _compute_phase_cfg_.gas_limit) {
+  //   reject_throw(PSTRING() << "gas block limits are exceeded: total_gas_used > gas_limit_hard + trx_gas_limit ("
+  //                                 << "total_gas_used=" << __total_gas_used_
+  //                                 << ", gas_limit_hard=" << _block_limits_->gas.hard()
+  //                                 << ", trx_gas_limit=" << _compute_phase_cfg_.gas_limit << ")");
+  // }
+  // if (_total_special_gas_used_ > _block_limits_->gas.hard() + _compute_phase_cfg_.special_gas_limit) {
+  //   reject_throw(
+  //       PSTRING() << "gas block limits are exceeded: total_special_gas_used > gas_limit_hard + special_gas_limit ("
+  //                 << "total_special_gas_used=" << _total_special_gas_used_
+  //                 << ", gas_limit_hard=" << _block_limits_->gas.hard()
+  //                 << ", special_gas_limit=" << _compute_phase_cfg_.special_gas_limit << ")");
+  // }
 
   auto trans_root2 = trs->commit(account);
   if (trans_root2.is_null()) {
@@ -4790,8 +4824,10 @@ void ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
         << "transaction " << lt << " of " << addr.to_hex()
         << " is invalid: it has produced a set of outbound messages different from that listed in the transaction");
   }
-  total_burned_ += trs->blackhole_burned;
-  //<%assigned%>: total_burned_
+  {
+    lock_guard _(total_burned_mutex); // !TEMP_THREAD_SOLUTION
+    total_burned_ += trs->blackhole_burned;
+  }
 
 
   // check new balance and value flow
@@ -4822,7 +4858,7 @@ void ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
  * @returns True if the account transactions are valid, false otherwise.
  */
 void ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root) {
-  // LOG(ERROR) << "Test index #" << testIndex << " entered check_account_transactionS"; // !DEBUG_BAD_THREAD_SEARCH
+  // LOG(ERROR) << "Test index #" << testIndex << " entered _check_account_transactionS"; // !DEBUG_BAD_THREAD_SEARCH
 
   block::gen::AccountBlock::Record acc_blk;
   CHECK(tlb::csr_unpack(std::move(acc_blk_root), acc_blk) && acc_blk.account_addr == acc_addr); // !REMOVE_DEBUG_TEMP
@@ -4928,7 +4964,7 @@ void ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
 
 // bool check_account_transactions_result;
 // void launch_check_account_transactions(ContestValidateQuery* cvq, const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root) {
-//   check_account_transactions_result = check_account_transactions_result && cvq->check_account_transactions(acc_addr, acc_blk_root); // ??TODO: bad concurrency?
+//   check_account_transactions_result = check_account_transactions_result && cvq->_check_account_transactions(acc_addr, acc_blk_root); // ??TODO: bad concurrency?
 // }
 
 
@@ -4962,7 +4998,7 @@ void ContestValidateQuery::check_transactions() {
   // bool ok = account_blocks_dict_->check_for_each_extra(
   //     [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
   //       CHECK(key_len == 256);
-  //       return check_account_transactions(key, std::move(value));
+  //       return _check_account_transactions(key, std::move(value));
   //     });
   // return ok;
 
@@ -5000,7 +5036,7 @@ void ContestValidateQuery::check_transactions() {
 
   /*
   for (int i = 0; i < keys.size(); i++) {
-    if (!check_account_transactions((td::ConstBitPtr)keys[i], td::Ref<vm::CellSlice>(&values[i])))
+    if (!_check_account_transactions((td::ConstBitPtr)keys[i], td::Ref<vm::CellSlice>(&values[i])))
       return false;
   }
   return true;
@@ -5073,7 +5109,7 @@ void ContestValidateQuery::check_transactions() {
         std::launch::async,
         [this, i, keys, values, &check_account_transactions_result] {
           // try {
-            return check_account_transactions((td::ConstBitPtr)keys[i], td::Ref<vm::CellSlice>(&values[i]));
+            return _check_account_transactions((td::ConstBitPtr)keys[i], td::Ref<vm::CellSlice>(&values[i]));
           // } catch (...) {
           //   return false;
           // }
@@ -5098,7 +5134,7 @@ void ContestValidateQuery::check_transactions() {
   // enter_multithreading();
   // for (size_t i = 0; i < keys.size(); i++) {
   //   auto t = std::thread([this, i, keys, values, &check_account_transactions_result] () {
-  //     if (!this->check_account_transactions((td::ConstBitPtr)keys[i], td::Ref<vm::CellSlice>(&values[i])))
+  //     if (!this->_check_account_transactions((td::ConstBitPtr)keys[i], td::Ref<vm::CellSlice>(&values[i])))
   //       check_account_transactions_result = false;
   //   });
   //   t.join();
@@ -5120,10 +5156,27 @@ void ContestValidateQuery::check_transactions() {
   // return check_account_transactions_result;
 
 
-
   //<%assigned%>: ns_.account_dict_
   //<%assigned%>: msg_proc_lt_
-  
+  //<%assigned%>: total_burned_
+  //<%assigned%>: total_gas_used_
+  //<%assigned%>: total_special_gas_used_
+
+  if (total_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.gas_limit) {
+    reject_throw(PSTRING() << "gas block limits are exceeded: total_gas_used > gas_limit_hard + trx_gas_limit ("
+                                  << "total_gas_used=" << total_gas_used_
+                                  << ", gas_limit_hard=" << block_limits_->gas.hard()
+                                  << ", trx_gas_limit=" << compute_phase_cfg_.gas_limit << ")");
+  }
+  if (total_special_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.special_gas_limit) {
+    reject_throw(
+        PSTRING() << "gas block limits are exceeded: total_special_gas_used > gas_limit_hard + special_gas_limit ("
+                  << "total_special_gas_used=" << total_special_gas_used_
+                  << ", gas_limit_hard=" << block_limits_->gas.hard()
+                  << ", special_gas_limit=" << compute_phase_cfg_.special_gas_limit << ")");
+  }
+
+
 }
 
 

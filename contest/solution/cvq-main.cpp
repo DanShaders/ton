@@ -32,6 +32,7 @@ ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice 
   // msg_proc_lt_.reserve(100000); // !TEMP_BAD_THREAD
 
   //<%assigned%>: shard_
+  //<%assigned%>: workchain (available as computable from shard_)
   //<%assigned%>: id_
   //<%assigned%>: block_data
   //<%assigned%>: collated_data
