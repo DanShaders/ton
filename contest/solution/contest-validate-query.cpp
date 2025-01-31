@@ -2618,6 +2618,13 @@ void ContestValidateQuery::unpack_dispatch_queue_update() {
 
     //<%assigned%>: account_expected_defer_all_messages_
 
+    //<%replace_usage%>: removed_dispatch_queue_messages_ -> removed_dispatch_queue_messages_st1_
+    //<%assigned%>: removed_dispatch_queue_messages_st1_
+
+    //<%replace_usage%>: new_dispatch_queue_messages_ -> new_dispatch_queue_messages_st1_
+    //<%assigned%>: new_dispatch_queue_messages_st1_
+
+
     if (have_out_msg_queue_size_in_state_ &&
         old_out_msg_queue_size_ <= compute_phase_cfg_.size_limits.defer_out_queue_size_limit) {
       // Check that at least one message was taken from each AccountDispatchQueue
@@ -3309,6 +3316,10 @@ void ContestValidateQuery::check_in_msg_descr() {
   //<%assigned%>: proc_lt_
   //<%assigned%>: proc_hash_
   //<%assigned%>: in_msg_emitted_lt_
+
+  //<%replace_usage%>: removed_dispatch_queue_messages_ -> removed_dispatch_queue_messages_st1_
+  //<%assigned%>: removed_dispatch_queue_messages_
+
 }
 
 /**
@@ -3957,6 +3968,9 @@ void ContestValidateQuery::check_out_msg_descr() {
   //<%assigned%>: min_enq_lt_
   //<%assigned%>: min_enq_hash_
   //<%assigned%>: out_msg_emitted_lt_
+
+  //<%replace_usage%>: new_dispatch_queue_messages_ -> new_dispatch_queue_messages_st1_
+  //<%assigned%>: new_dispatch_queue_messages_
 }
 
 /**

@@ -117,6 +117,11 @@ const annotatedProperties: string[] = [
 	'proc_hash_',
 	'min_enq_lt_',
 	'min_enq_hash_',
+
+
+	// Added for: check_dispatch_queue_update()
+	'removed_dispatch_queue_messages_',
+	'new_dispatch_queue_messages_',
 ];
 
 export default annotatedProperties;

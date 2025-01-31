@@ -145,10 +145,10 @@ void ContestValidateQuery::start_up() {
     unpack_dispatch_queue_update(); // reject_query("invalid DispatchQueue update"); return;
     check_in_msg_descr(); // reject_query("invalid InMsgDescr"); return;
     check_out_msg_descr(); // reject_query("invalid OutMsgDescr"); return;
-    check_dispatch_queue_update(); // reject_query("invalid OutMsgDescr"); return;
     
     
     
+    // _check_dispatch_queue_update(); // reject_query("invalid OutMsgDescr"); return;
     // _check_processed_upto(); // reject_query("invalid ProcessedInfo"); return;
     // _check_in_queue(); // reject_query("cannot check inbound message queues"); return;
     // _check_transactions(); // // LOG(ERROR) << "Test index #" << testIndex << ": another reject_query here"; reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;

@@ -13,6 +13,7 @@ using namespace std::literals::string_literals;
 
 void ContestValidateQuery::generated_root() {
 	// <{generated_root
+	check_dispatch_queue_update();
 	check_processed_upto();
 	check_transactions();
 	check_new_state();
