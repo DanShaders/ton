@@ -494,7 +494,7 @@ function dagFunctions() {
         return (
           `${matchedString}\n`
           + `${indent}${generatedStartMark}\n`
-          + dependentOn(prop).map(fname => `${indent}if (--${pendingVariableOf_inc(fname)} == 0) ${functionCallString[fname]}\n`)
+          + dependentOn(prop).map(fname => `${indent}if (--${pendingVariableOf_inc(fname)} == 0) ${functionCallString[fname]}\n`).join('')
           + `${indent}${generatedEndMark}`
         );
       });
@@ -563,13 +563,16 @@ function dagFunctions() {
   
     console.log('topLevelFunctions:', topLevelFunctions);
     const topLevelString = topLevelFunctions.map(f => functionCallString[f.name] + '\n').join('');
-    console.log('topLevelString:\n\n', topLevelString);
+    console.log('topLevelString:\n\n' + topLevelString);
 
     console.log('pendingVariables:', pendingVariables);
     const pendingVariablesString = Object.entries(pendingVariables)
       .map(([varName, varCount]) => `std::atomic<int> ${varName}{${varCount}};\n`).join('');
-    console.log('pendingVariablesString:\n\n', pendingVariablesString);
+    console.log('pendingVariablesString:\n\n' + pendingVariablesString);
 
+    const pendingVariableCheckString = Object.keys(pendingVariables)
+      .map(varName => `if (${varName} != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable ${varName} ended up as: " << ${varName};\n`).join('');
+    console.log('pendingVariableCheckString:\n\n' + pendingVariableCheckString);
   } catch (error) {
     console.error(error);
   }

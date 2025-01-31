@@ -5157,10 +5157,25 @@ void ContestValidateQuery::check_transactions() {
 
 
   //<%assigned%>: ns_.account_dict_
+							//<%generated%>
+							if (--__pending_postcheck_account_updates == 0) postcheck_account_updates();
+							if (--__pending_postcheck_value_flow == 0) postcheck_value_flow();
+							if (--__pending_build_state_update == 0) build_state_update();
+							//<%/generated%>
   //<%assigned%>: msg_proc_lt_
+							//<%generated%>
+							if (--__pending_check_message_processing_order == 0) check_message_processing_order();
+							//<%/generated%>
   //<%assigned%>: total_burned_
+							//<%generated%>
+							if (--__pending_postcheck_value_flow == 0) postcheck_value_flow();
+							//<%/generated%>
   //<%assigned%>: total_gas_used_
+							//<%generated%>
+							//<%/generated%>
   //<%assigned%>: total_special_gas_used_
+							//<%generated%>
+							//<%/generated%>
 
   if (total_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.gas_limit) {
     reject_throw(PSTRING() << "gas block limits are exceeded: total_gas_used > gas_limit_hard + trx_gas_limit ("

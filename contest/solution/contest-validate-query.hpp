@@ -481,7 +481,10 @@ public:
 
 
   //<%generated_vars%>
-  std::atomic<int> __pending_build_state_update{5};
+  std::atomic<int> __pending_postcheck_account_updates{1};
+  std::atomic<int> __pending_postcheck_value_flow{2};
+  std::atomic<int> __pending_build_state_update{6};
+  std::atomic<int> __pending_check_message_processing_order{1};
   //<%/generated_vars%>
 
 

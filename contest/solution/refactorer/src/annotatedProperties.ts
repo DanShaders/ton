@@ -79,6 +79,30 @@ const annotatedProperties: string[] = [
 
 	// Added for: postcheck_account_updates()
 	'account_blocks_dict_',
+
+
+	// Added for: check_transactions()
+	'verbosity', // Inited with 0, never changed
+	'workchain',
+	'ns_mutex_',
+	'config_',
+	'old_shard_conf_',
+	'new_shard_conf_',
+	'block_limits_',
+	'compute_phase_cfg_',
+	'total_gas_used_',
+	'total_special_gas_used_',
+	'storage_phase_cfg_',
+	'action_phase_cfg_',
+	'in_msg_dict_',
+	'out_msg_dict_',
+	'msg_proc_lt_mutex_',
+	'account_expected_defer_all_messages_',
+	'msg_metadata_enabled_',
+	'deferring_messages_enabled_',
+	'store_out_msg_queue_size_', // Was not mentioned, but was assigned next to the previous two
+	'recover_create_msg_', // Never assigned
+	'mint_msg_', // Never assigned
 ];
 
 export default annotatedProperties;
