@@ -1207,20 +1207,22 @@ void ContestValidateQuery::prepare_out_msg_queue_size() {
     old_out_msg_queue_size_ = ps_.out_msg_queue_size_.value();
     out_msg_queue_size_known_ = true;
     have_out_msg_queue_size_in_state_ = true;
-    return;
-  }
-  if (ps_.out_msg_queue_->is_empty()) {
+
+  } else if (ps_.out_msg_queue_->is_empty()) {
     old_out_msg_queue_size_ = 0;
     out_msg_queue_size_known_ = true;
     have_out_msg_queue_size_in_state_ = true;
-    return;
+
+  } else if (!store_out_msg_queue_size_) {  // Don't need it
+  } else {
+    old_out_msg_queue_size_ = 0;
+    out_msg_queue_size_known_ = true;
+    fatal_throw("unknown queue sizes");
   }
-  if (!store_out_msg_queue_size_) {  // Don't need it
-    return;
-  }
-  old_out_msg_queue_size_ = 0;
-  out_msg_queue_size_known_ = true;
-  fatal_throw("unknown queue sizes");
+
+  //<%assigned%>: old_out_msg_queue_size_
+  //<%assigned%>: out_msg_queue_size_known_ (never used)
+  //<%assigned%>: have_out_msg_queue_size_in_state_
 }
 
 
@@ -2617,6 +2619,7 @@ void ContestValidateQuery::unpack_dispatch_queue_update() {
   }
 
   //<%assigned%>: account_expected_defer_all_messages_
+  //<%assigned%>: processed_account_dispatch_queues_
 
   //<%replace_usage%>: removed_dispatch_queue_messages_ -> removed_dispatch_queue_messages_st1_
   //<%assigned%>: removed_dispatch_queue_messages_st1_
@@ -2651,6 +2654,9 @@ void ContestValidateQuery::unpack_dispatch_queue_update_after() {
   }
 
   //<%assigned%>: have_unprocessed_account_dispatch_queue_
+							//<%generated%>
+							if (--__pending_check_in_msg_descr == 0) check_in_msg_descr();
+							//<%/generated%>
 }
 
 

@@ -185,6 +185,7 @@ bool ContestValidateQuery::fatal_error(std::string err_msg, int err_code) {
  */
 void ContestValidateQuery::finish_query() {
   // <{generated_atomic_zero_checks
+  if (__pending_check_in_msg_descr != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_in_msg_descr ended up as: " << __pending_check_in_msg_descr;
   if (__pending_check_processed_upto != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_processed_upto ended up as: " << __pending_check_processed_upto;
   if (__pending_check_message_processing_order != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_message_processing_order ended up as: " << __pending_check_message_processing_order;
   if (__pending_check_dispatch_queue_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_dispatch_queue_update ended up as: " << __pending_check_dispatch_queue_update;
