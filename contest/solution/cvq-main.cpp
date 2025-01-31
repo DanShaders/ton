@@ -143,6 +143,7 @@ void ContestValidateQuery::start_up() {
     build_new_message_queue(); // reject_query("cannot build a new message queue"); return;
     precheck_message_queue_update(); // reject_query("invalid OutMsgQueue update"); return;
     unpack_dispatch_queue_update(); // reject_query("invalid DispatchQueue update"); return;
+    unpack_dispatch_queue_update_after();
     check_in_msg_descr(); // reject_query("invalid InMsgDescr"); return;
     
     

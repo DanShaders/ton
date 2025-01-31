@@ -430,6 +430,7 @@ public:
   void check_account_dispatch_queue_update(td::Bits256 addr, Ref<vm::CellSlice> old_queue_csr,
                                            Ref<vm::CellSlice> new_queue_csr);
   void unpack_dispatch_queue_update();
+  void unpack_dispatch_queue_update_after();
   bool update_max_processed_lt_hash(ton::LogicalTime lt, const ton::Bits256& hash); // Useless return value
   bool update_min_enqueued_lt_hash(ton::LogicalTime lt, const ton::Bits256& hash); // Useless return value
   void check_imported_message(Ref<vm::Cell> msg_env);
@@ -480,7 +481,7 @@ public:
 
 
 
-  //<%generated_vars%>
+  //<{generated_atomic_vars
   std::atomic<int> __pending_check_processed_upto{2};
   std::atomic<int> __pending_check_message_processing_order{2};
   std::atomic<int> __pending_check_dispatch_queue_update{1};
@@ -488,7 +489,7 @@ public:
   std::atomic<int> __pending_postcheck_account_updates{1};
   std::atomic<int> __pending_postcheck_value_flow{2};
   std::atomic<int> __pending_build_state_update{6}; 
-  //<%/generated_vars%>
+  //generated_atomic_vars}/>
 
 
 

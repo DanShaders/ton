@@ -2600,56 +2600,59 @@ void ContestValidateQuery::check_account_dispatch_queue_update(td::Bits256 addr,
  */
 void ContestValidateQuery::unpack_dispatch_queue_update() {
   LOG(INFO) << "checking the difference between the old and the new dispatch queues";
-  try {
-    CHECK(ps_.dispatch_queue_ && ns_.dispatch_queue_);
-    CHECK(out_msg_dict_);
-    bool res = ps_.dispatch_queue_->scan_diff(
-        *ns_.dispatch_queue_,
-        [this](td::ConstBitPtr key, int key_len, Ref<vm::CellSlice> old_val_extra, Ref<vm::CellSlice> new_val_extra) {
-          CHECK(key_len == 256);
-          check_account_dispatch_queue_update(key, ps_.dispatch_queue_->extract_value(std::move(old_val_extra)),
-                                                     ns_.dispatch_queue_->extract_value(std::move(new_val_extra)));
-          return true;
-        },
-        2 /* check augmentation of changed nodes in the new dict */);
-    if (!res) {
-      reject_throw("invalid DispatchQueue dictionary in the new state");
-    }
 
-    //<%assigned%>: account_expected_defer_all_messages_
-
-    //<%replace_usage%>: removed_dispatch_queue_messages_ -> removed_dispatch_queue_messages_st1_
-    //<%assigned%>: removed_dispatch_queue_messages_st1_
-
-    //<%replace_usage%>: new_dispatch_queue_messages_ -> new_dispatch_queue_messages_st1_
-    //<%assigned%>: new_dispatch_queue_messages_st1_
-
-
-    if (have_out_msg_queue_size_in_state_ &&
-        old_out_msg_queue_size_ <= compute_phase_cfg_.size_limits.defer_out_queue_size_limit) {
-      // Check that at least one message was taken from each AccountDispatchQueue
-      try {
-        have_unprocessed_account_dispatch_queue_ = false;
-        td::uint64 total_account_dispatch_queues = 0;
-        ps_.dispatch_queue_->check_for_each([&](Ref<vm::CellSlice>, td::ConstBitPtr, int n) -> bool {
-          ++total_account_dispatch_queues;
-          if (total_account_dispatch_queues > processed_account_dispatch_queues_) {
-            return false;
-          }
-          return true;
-        });
-        have_unprocessed_account_dispatch_queue_ =
-            (total_account_dispatch_queues != processed_account_dispatch_queues_);
-      } catch (vm::VmVirtError&) {
-        // VmVirtError can happen if we have only a proof of ShardState
-        have_unprocessed_account_dispatch_queue_ = true;
-      }
-    }
-  } catch (vm::VmError& err) {
-    reject_throw("invalid DispatchQueue dictionary difference between the old and the new state: "s +
-                        err.get_msg());
+  CHECK(ps_.dispatch_queue_ && ns_.dispatch_queue_);
+  CHECK(out_msg_dict_);
+  bool res = ps_.dispatch_queue_->scan_diff(
+      *ns_.dispatch_queue_,
+      [this](td::ConstBitPtr key, int key_len, Ref<vm::CellSlice> old_val_extra, Ref<vm::CellSlice> new_val_extra) {
+        CHECK(key_len == 256);
+        check_account_dispatch_queue_update(key, ps_.dispatch_queue_->extract_value(std::move(old_val_extra)),
+                                                    ns_.dispatch_queue_->extract_value(std::move(new_val_extra)));
+        return true;
+      },
+      2 /* check augmentation of changed nodes in the new dict */);
+  if (!res) {
+    reject_throw("invalid DispatchQueue dictionary in the new state");
   }
+
+  //<%assigned%>: account_expected_defer_all_messages_
+
+  //<%replace_usage%>: removed_dispatch_queue_messages_ -> removed_dispatch_queue_messages_st1_
+  //<%assigned%>: removed_dispatch_queue_messages_st1_
+
+  //<%replace_usage%>: new_dispatch_queue_messages_ -> new_dispatch_queue_messages_st1_
+  //<%assigned%>: new_dispatch_queue_messages_st1_
+
+  // Some part extracted to _unpack_dispatch_queue_update_after()
+  // in hope it could be auto-DAGged to be executed in parallel
 }
+
+void ContestValidateQuery::unpack_dispatch_queue_update_after() {
+  if (have_out_msg_queue_size_in_state_ &&
+      old_out_msg_queue_size_ <= compute_phase_cfg_.size_limits.defer_out_queue_size_limit) {
+    // Check that at least one message was taken from each AccountDispatchQueue
+    try {
+      have_unprocessed_account_dispatch_queue_ = false;
+      td::uint64 total_account_dispatch_queues = 0;
+      ps_.dispatch_queue_->check_for_each([&](Ref<vm::CellSlice>, td::ConstBitPtr, int n) -> bool {
+        ++total_account_dispatch_queues;
+        if (total_account_dispatch_queues > processed_account_dispatch_queues_) {
+          return false;
+        }
+        return true;
+      });
+      have_unprocessed_account_dispatch_queue_ =
+          (total_account_dispatch_queues != processed_account_dispatch_queues_);
+    } catch (vm::VmVirtError&) {
+      // VmVirtError can happen if we have only a proof of ShardState
+      have_unprocessed_account_dispatch_queue_ = true;
+    }
+  }
+
+  //<%assigned%>: have_unprocessed_account_dispatch_queue_
+}
+
 
 /**
  * Updates the maximum processed logical time and hash value.
