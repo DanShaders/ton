@@ -81,35 +81,135 @@ function languageVariant(targetProperty: string, functionNames: string[], propsT
 }
 
 
-
-async function loadedFiles(): Promise<[boolean, MyFile[]]> {
-  const loadedPartialFiles = await dbGet('files');
-  if (!loadedPartialFiles) {
-    return [true, []];
-  }
-
-  const newFiles = [];
-  for (const { handle } of loadedPartialFiles) {
-    if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
-      return [false, []];
+async function createFileGroup(dbKey: string) {
+  async function loadedFiles(): Promise<[boolean, MyFile[]]> {
+    const loadedPartialFiles = await dbGet(dbKey);
+    if (!loadedPartialFiles) {
+      return [true, []];
     }
-    const fileObj = await handle.getFile();
-    console.log('file:', fileObj);
+  
+    const newFiles = [];
+    for (const { handle } of loadedPartialFiles) {
+      if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
+        return [false, []];
+      }
+      const fileObj = await handle.getFile();
+      console.log('file:', fileObj);
+  
+      const code = await fileObj.text();
+      const lines = code.split('\n');
+      
+      newFiles.push({
+        name: fileObj.name,
+        handle,
+        code,
+        lines,
+      });
+    }
+  
+    return [true, newFiles];
+  }
+  const __initialState = await loadedFiles();
 
-    const code = await fileObj.text();
-    const lines = code.split('\n');
-    
-    newFiles.push({
-      name: fileObj.name,
-      handle,
-      code,
-      lines,
-    });
+  const [errorAutoLoading, setErrorAutoLoading] = createSignal(!__initialState[0]);
+  const [files, setFilesPrivate] = createSignal<MyFile[]>(__initialState[1]);
+
+  function setFiles(newFiles: MyFile[]) {
+    setErrorAutoLoading(false);
+    setFilesPrivate(newFiles);
+    dbSet(dbKey, newFiles.map(f => {
+      const { handle } = f;
+      return { handle };
+    }));
   }
 
-  return [true, newFiles];
+  async function openFiles() {
+    const handles = await untypedWindow.showOpenFilePicker!({ multiple: true });
+  
+    const newFiles = [];
+    for (const handle of handles) {
+      const fileObj = await handle.getFile();
+      console.log('file:', fileObj);
+  
+      const code = await fileObj.text();
+      const lines = code.split('\n');
+      
+      newFiles.push({
+        name: fileObj.name,
+        handle,
+        code,
+        lines,
+      });
+    }
+  
+    patchingInfo = {};
+    setFiles([...files(), ...newFiles]);
+  };  
+
+  async function loadFiles() {
+    const loadedPartialFiles = await dbGet(dbKey);
+    if (!loadedPartialFiles) {
+      alert('Nothing to load');
+      return;
+    }
+  
+    const newFiles = [];
+    for (const { handle } of loadedPartialFiles) {
+      await handle.requestPermission({ mode: 'readwrite' });
+      const fileObj = await handle.getFile();
+      console.log('file:', fileObj);
+  
+      const code = await fileObj.text();
+      const lines = code.split('\n');
+      
+      newFiles.push({
+        name: fileObj.name,
+        handle,
+        code,
+        lines,
+      });
+    }
+  
+    setFilesPrivate(newFiles);
+  }
+  
+  
+  async function reloadFiles() {
+    const nextFiles = [];
+  
+    for (const file of files()) {
+      const fileObj = await file.handle.getFile();
+      const code = await fileObj.text();
+      const lines = code.split('\n');
+  
+      nextFiles.push(code === file.code ? file : {
+        ...file,
+        code,
+        lines,
+      });
+    }
+  
+    patchingInfo = {};
+    setFiles(nextFiles);
+  };
+  
+  
+  return {
+    files, setFiles, openFiles,
+    loadFiles, reloadFiles,
+    errorAutoLoading,
+  };
 }
-const __initialState = await loadedFiles();
+type FileGroup = Awaited<ReturnType<typeof createFileGroup>>;
+
+
+async function writeToFile(handle: FileSystemFileHandle, text: string) {
+  const writable = await handle.createWritable();
+  await writable.write(text);
+  await writable.close();
+}
+
+
 
 const propertiesToHighlightStringKey = 'propertiesToHighlightString';
 async function setPropertiesToHighlightString(value: string) {
@@ -127,32 +227,30 @@ async function setFunctionsToDAGString(value: string) {
 const __initialFunctionsToDAG = await dbGet(functionsToDAGKey) ?? '';
 
 
-let [errorAutoLoading, setErrorAutoLoading] = createSignal(!__initialState[0]);
-let [files, setFilesPrivate] = createSignal<MyFile[]>(__initialState[1]);
-let [allFunctions, setAllFunctions] = createSignal<FunctionInfo[]>([]);
-let [property, setProperty] = createSignal('');
-let [selectedFunction, setSelectedFunction] = createSignal<null | FunctionInfo>(null);
-let [modifiedFunctions, setModifiedFunctions] = createSignal<FunctionInfo[]>([]);
-let [propertiesToHighlightString, setPropertiesToHighlightStringPrivate] = createSignal<string>(__initialPropertiesToHighlightString);
-let [functionsToDAGString, setFunctionsToDAGStringPrivate] = createSignal<string>(__initialFunctionsToDAG);
+const mFs = await createFileGroup('files');
+const spFs = await createFileGroup('special_files');
 
-let propertyType = () => property().split(' ').slice(0, -1).join(' ').trim();
-let propertyName = () => property().split(' ').at(-1);
-let propertyValid = () => (propertyType() && propertyName() && true);
+const [allFunctions, setAllFunctions] = createSignal<FunctionInfo[]>([]);
+const [property, setProperty] = createSignal('');
+const [selectedFunction, setSelectedFunction] = createSignal<null | FunctionInfo>(null);
+const [modifiedFunctions, setModifiedFunctions] = createSignal<FunctionInfo[]>([]);
+const [propertiesToHighlightString, setPropertiesToHighlightStringPrivate] = createSignal<string>(__initialPropertiesToHighlightString);
+const [functionsToDAGString, setFunctionsToDAGStringPrivate] = createSignal<string>(__initialFunctionsToDAG);
+
+
+// const atomicZeroChecks = createSpecialFileStuff('generated_atomic_zero_checks')
+// const atomicVars = createSpecialFileStuff('generated_atomic_vars')
+// const dagRoot = createSpecialFileStuff('generated_dag_root')
+
+const propertyType = () => property().split(' ').slice(0, -1).join(' ').trim();
+const propertyName = () => property().split(' ').at(-1);
+const propertyValid = () => (propertyType() && propertyName() && true);
 
 const propertiesToHighlight = createMemo(() => propertiesToHighlightString().split('\n').map(s => s.trim()).filter(s => s));
 function containsPropertyToHighlight(func: FunctionInfo) {
   return propertiesToHighlight().some(prop => regexForName(prop).test(func.code));
 }
 
-function setFiles(newFiles: MyFile[]) {
-  setErrorAutoLoading(false);
-  setFilesPrivate(newFiles);
-  dbSet('files', newFiles.map(f => {
-    const { handle } = f;
-    return { handle };
-  }));
-}
 /* {
   name: '',
   handle: null,
@@ -177,87 +275,19 @@ let untypedWindow = window as any;
 
 
 
-async function openFiles() {
-  const handles = await untypedWindow.showOpenFilePicker!({ multiple: true });
-
-  const newFiles = [];
-  for (const handle of handles) {
-    const fileObj = await handle.getFile();
-    console.log('file:', fileObj);
-
-    const code = await fileObj.text();
-    const lines = code.split('\n');
-    
-    newFiles.push({
-      name: fileObj.name,
-      handle,
-      code,
-      lines,
-    });
-  }
-
-  patchingInfo = {};
-  setFiles([...files(), ...newFiles]);
-};
 
 
 
 
 
 
-async function loadFiles() {
-  const loadedPartialFiles = await dbGet('files');
-  if (!loadedPartialFiles) {
-    alert('Nothing to load');
-    return;
-  }
-
-  const newFiles = [];
-  for (const { handle } of loadedPartialFiles) {
-    await handle.requestPermission({ mode: 'readwrite' });
-    const fileObj = await handle.getFile();
-    console.log('file:', fileObj);
-
-    const code = await fileObj.text();
-    const lines = code.split('\n');
-    
-    newFiles.push({
-      name: fileObj.name,
-      handle,
-      code,
-      lines,
-    });
-  }
-
-  setFilesPrivate(newFiles);
-}
-
-
-async function reloadFiles() {
-  const nextFiles = [];
-
-  for (const file of files()) {
-    const fileObj = await file.handle.getFile();
-    const code = await fileObj.text();
-    const lines = code.split('\n');
-
-    nextFiles.push(code === file.code ? file : {
-      ...file,
-      code,
-      lines,
-    });
-  }
-
-  patchingInfo = {};
-  setFiles(nextFiles);
-};
 
 async function patch() {
   let patchedSomething = false;
 
   const nextFiles = [];
 
-  for (const file of files()) {
+  for (const file of mFs.files()) {
     const info = patchingInfo[file.name];
     if (!info) {
       nextFiles.push(file);
@@ -278,9 +308,7 @@ async function patch() {
     patchedCode += rest;
     
     if (patchedCode !== file.code) {
-      const writable = await file.handle.createWritable();
-      await writable.write(patchedCode);
-      await writable.close();
+      await writeToFile(file.handle, patchedCode);
 
       // console.log(patchedCode);
       // window.patchedCode = patchedCode;
@@ -305,14 +333,14 @@ async function patch() {
   }
   console.log('patchedSomething:', patchedSomething);
 
-  setFiles(nextFiles);
+  mFs.setFiles(nextFiles);
 };
 
 async function patchEdited() {
   let patchedSomething = false;
   const nextFiles = [];
 
-  for (const file of files()) {
+  for (const file of mFs.files()) {
     let patchedCode = '';
 
     const fileFuncs = allFunctions().filter(f => f.file === file); // Assume they are sorted
@@ -328,9 +356,7 @@ async function patchEdited() {
     patchedCode += rest;
     
     if (patchedCode !== file.code) {
-      const writable = await file.handle.createWritable();
-      await writable.write(patchedCode);
-      await writable.close();
+      await writeToFile(file.handle, patchedCode);
 
       // console.log(patchedCode);
       // window.patchedCode = patchedCode;
@@ -350,13 +376,69 @@ async function patchEdited() {
     });
   }
 
+  const insertions = {
+    'generated_dag_root': generatedDagRootString,
+    'generated_atomic_vars': generatedAtomicVarsString,
+    'generated_atomic_zero_checks': generatedAtomicZeroChecksString,
+  };
+  // <{generated_dag_root
+  //     generated content
+	// generated_dag_root}/>
+  const insertionsCompleted: ObjDict<boolean> = {};
+
+  const nextSpecialFiles = [];
+  for (const file of spFs.files()) {
+    let patchedCode = file.code;
+
+    for (const [key, value] of Object.entries(insertions)) {
+      if (value === null)
+        continue;
+
+      patchedCode = patchedCode.replaceAll(
+        new RegExp(`(?<openLine>[ \\t]*//[ \\t]*<\\{${key}[ \\t]*\\n).*?(?<closeLine>[ \\t]*//[ \\t]*${key}\\}/>)`, 'gs'),
+        (...args) => {
+          if (insertionsCompleted[key]) {
+            const errorMessage = `Already completed a generated substitution for "${key}". Is there a duplicate?`;
+            alert(errorMessage);
+            throw errorMessage;
+          }
+          insertionsCompleted[key] = true;
+
+          const groups = args.at(-1);
+          const { openLine, closeLine } = groups;
+  
+          return openLine + value + closeLine;
+        }
+      );
+    }
+
+    if (patchedCode !== file.code) {
+      await writeToFile(file.handle, patchedCode);
+      patchedSomething = true;
+    }
+
+    nextSpecialFiles.push(patchedCode === file.code ? file : {
+      ...file,
+      code: patchedCode,
+      lines: patchedCode.split('\n'),
+    });
+  }
+
+  for (const [key, value] of Object.entries(insertions))
+    if (value !== null && !insertionsCompleted[key]) {
+      const errorMessage = `Expected to make a substitution for "${key}", but no appropriate marks found in special files.`
+      alert(errorMessage);
+      throw errorMessage;
+    }
+
   if (!patchedSomething) {
     alert('Nothing patched');
     return;
   }
-  console.log('patchedSomething:', patchedSomething);
+  console.log('patchedSomething');
 
-  setFiles(nextFiles);
+  mFs.setFiles(nextFiles);
+  spFs.setFiles(nextSpecialFiles);
 }
 
 
@@ -614,21 +696,24 @@ function dagFunctions() {
     }
   
     console.log('topLevelFunctions:', topLevelFunctions);
-    const topLevelString = topLevelFunctions.map(f => functionCallString[f.name] + '\n').join('');
-    console.log('topLevelString:\n\n' + topLevelString);
+    generatedDagRootString = topLevelFunctions.map(f => '  ' + functionCallString[f.name] + '\n').join('');
+    console.log('topLevelString:\n\n' + generatedDagRootString);
 
     console.log('pendingVariables:', pendingVariables);
-    const pendingVariablesString = Object.entries(pendingVariables)
-      .map(([varName, varCount]) => `std::atomic<int> ${varName}{${varCount}};\n`).join('');
-    console.log('pendingVariablesString:\n\n' + pendingVariablesString);
+    generatedAtomicVarsString = Object.entries(pendingVariables)
+      .map(([varName, varCount]) => `  std::atomic<int> ${varName}{${varCount}};\n`).join('');
+    console.log('pendingVariablesString:\n\n' + generatedAtomicVarsString);
 
-    const pendingVariableCheckString = Object.keys(pendingVariables)
-      .map(varName => `if (${varName} != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable ${varName} ended up as: " << ${varName};\n`).join('');
-    console.log('pendingVariableCheckString:\n\n' + pendingVariableCheckString);
+    generatedAtomicZeroChecksString = Object.keys(pendingVariables)
+      .map(varName => `  if (${varName} != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable ${varName} ended up as: " << ${varName};\n`).join('');
+    console.log('pendingVariableCheckString:\n\n' + generatedAtomicZeroChecksString);
   } catch (error) {
     console.error(error);
   }
 }
+let generatedDagRootString: string | null = null;
+let generatedAtomicVarsString: string | null = null;
+let generatedAtomicZeroChecksString: string | null = null;
 
 
 createEffect(function extractFunctionsFromFiles() {
@@ -640,7 +725,7 @@ createEffect(function extractFunctionsFromFiles() {
     // 	endLine,
   // };
 
-  for (const file of files()) {
+  for (const file of mFs.files()) {
     let lastFunction: FunctionInfo | null = null;
     let lineI = 0;
     for (let line of file.lines) {
@@ -880,7 +965,7 @@ const graphOf = (func: FunctionInfo) => {
 };
 
 createEffect(() => {
-  console.log('files:', files());
+  console.log('files:', mFs.files());
   console.log('roots:', roots());
   console.log('calls:', calls());
   console.log('circularDependencies:', circularDependencies());
@@ -918,7 +1003,7 @@ const CallTree = () => {
   }
 
   return <div>
-    <h3>Call Graph ${files().length}</h3>
+    <h3>Call Graph ${mFs.files().length}</h3>
       <For each={roots()}>{root => dfs(root)}</For>
     </div>;
 };
@@ -981,6 +1066,25 @@ const CallGraph = () => {
   </div>;
 };
 
+
+
+const FileGroupView = (props: { group: FileGroup, title: string }) => {
+  return <div>
+    <b>{props.title} files: </b>
+    <span>
+      <For each={props.group.files()}>{file =>
+        <span class="fileLabel">
+          {file.name}
+          <button onClick={() => props.group.setFiles(props.group.files().filter(f => f !== file))}>-</button>
+        </span>
+      }</For>
+    </span>
+    {props.group.errorAutoLoading() && <span style={{ color: 'red' }}>Auto loading previous files failed, click:</span>}
+    <button onClick={props.group.loadFiles}>Load previous files</button>
+    <button onClick={props.group.openFiles}>Open File(s)</button>
+    <button onClick={props.group.reloadFiles}>Reload Files</button>
+  </div>;
+}
 
 
 
@@ -1048,18 +1152,9 @@ export default function App() {
 
 
   return <div>
-    <span>
-      <For each={files()}>{file =>
-        <span class="fileLabel">
-          {file.name}
-          <button onClick={() => setFiles(files().filter(f => f !== file))}>-</button>
-        </span>
-      }</For>
-    </span>
-    {errorAutoLoading() && <span style={{ color: 'red' }}>Auto loading previous files failed, click:</span>}
-    <button onClick={loadFiles}>Load previous files</button>
-    <button onClick={openFiles}>Open File(s)</button>
-    <button onClick={reloadFiles}>Reload Files</button>
+    <FileGroupView group={mFs} title="Main" />
+    <FileGroupView group={spFs} title="Special" />
+
     Property: <input ref={$property} /> <button onClick={() => setProperty($property!.value.trim())}>Analize</button>
     <button onClick={patchEdited}>Patch edited</button>
     <div>
