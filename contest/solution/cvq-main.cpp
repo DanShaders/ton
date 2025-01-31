@@ -142,10 +142,10 @@ void ContestValidateQuery::start_up() {
     precheck_account_transactions(); // reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
     build_new_message_queue(); // reject_query("cannot build a new message queue"); return;
     precheck_message_queue_update(); // reject_query("invalid OutMsgQueue update"); return;
-    unpack_dispatch_queue_update(); // reject_query("invalid DispatchQueue update"); return;
     
     
     
+    // unpack_dispatch_queue_update(); // reject_query("invalid DispatchQueue update"); return;
     // _unpack_dispatch_queue_update_after();
     // _check_in_msg_descr(); // reject_query("invalid InMsgDescr"); return;
     // _check_out_msg_descr(); // reject_query("invalid OutMsgDescr"); return;

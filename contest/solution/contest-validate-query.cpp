@@ -2619,13 +2619,25 @@ void ContestValidateQuery::unpack_dispatch_queue_update() {
   }
 
   //<%assigned%>: account_expected_defer_all_messages_
+							//<%generated%>
+							if (--__pending_check_transactions == 0) check_transactions();
+							//<%/generated%>
   //<%assigned%>: processed_account_dispatch_queues_
+							//<%generated%>
+							if (--__pending_unpack_dispatch_queue_update_after == 0) unpack_dispatch_queue_update_after();
+							//<%/generated%>
 
   //<%replace_usage%>: removed_dispatch_queue_messages_ -> removed_dispatch_queue_messages_st1_
   //<%assigned%>: removed_dispatch_queue_messages_st1_
+							//<%generated%>
+							if (--__pending_check_in_msg_descr == 0) check_in_msg_descr();
+							//<%/generated%>
 
   //<%replace_usage%>: new_dispatch_queue_messages_ -> new_dispatch_queue_messages_st1_
   //<%assigned%>: new_dispatch_queue_messages_st1_
+							//<%generated%>
+							if (--__pending_check_out_msg_descr == 0) check_out_msg_descr();
+							//<%/generated%>
 
   // Some part extracted to _unpack_dispatch_queue_update_after()
   // in hope it could be auto-DAGged to be executed in parallel
