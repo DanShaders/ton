@@ -184,11 +184,13 @@ bool ContestValidateQuery::fatal_error(std::string err_msg, int err_code) {
  * Finishes the query and sends the result to the promise.
  */
 void ContestValidateQuery::finish_query() {
+if (__pending_check_processed_upto != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_processed_upto ended up as: " << __pending_check_processed_upto;
+if (__pending_check_message_processing_order != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_message_processing_order ended up as: " << __pending_check_message_processing_order;
+if (__pending_check_dispatch_queue_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_dispatch_queue_update ended up as: " << __pending_check_dispatch_queue_update;
 if (__pending_check_in_queue != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_in_queue ended up as: " << __pending_check_in_queue;
 if (__pending_postcheck_account_updates != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_postcheck_account_updates ended up as: " << __pending_postcheck_account_updates;
 if (__pending_postcheck_value_flow != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_postcheck_value_flow ended up as: " << __pending_postcheck_value_flow;
 if (__pending_build_state_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_build_state_update ended up as: " << __pending_build_state_update;
-if (__pending_check_message_processing_order != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_message_processing_order ended up as: " << __pending_check_message_processing_order;
 
   if (main_promise) {
     LOG(WARNING) << "validate query done";

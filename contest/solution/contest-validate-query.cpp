@@ -3966,11 +3966,23 @@ void ContestValidateQuery::check_out_msg_descr() {
   // }
 
   //<%assigned%>: min_enq_lt_
+							//<%generated%>
+							if (--__pending_check_processed_upto == 0) check_processed_upto();
+							//<%/generated%>
   //<%assigned%>: min_enq_hash_
+							//<%generated%>
+							if (--__pending_check_processed_upto == 0) check_processed_upto();
+							//<%/generated%>
   //<%assigned%>: out_msg_emitted_lt_
+							//<%generated%>
+							if (--__pending_check_message_processing_order == 0) check_message_processing_order();
+							//<%/generated%>
 
   //<%replace_usage%>: new_dispatch_queue_messages_ -> new_dispatch_queue_messages_st1_
   //<%assigned%>: new_dispatch_queue_messages_
+							//<%generated%>
+							if (--__pending_check_dispatch_queue_update == 0) check_dispatch_queue_update();
+							//<%/generated%>
 }
 
 /**

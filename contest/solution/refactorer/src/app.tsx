@@ -425,61 +425,84 @@ function dagFunctions() {
     const propMentionedIn_root: ObjDict<Set<string>> = {};
     const funcAssigns: ObjDict<Set<string>> = {};
     const assignedIn: ObjDict<FunctionInfo> = {};
-    const assignedInRoot: ObjDict<FunctionInfo> = {};
+    const assignedIn_root: ObjDict<FunctionInfo> = {};
   
-    const dependentOn = (prop: string) => [...propMentionedIn_root[prop]].filter(f => f !== assignedInRoot[prop].name);
-    const dependenciesOf = (func: FunctionInfo) => [...funcPropMentions[func.name]].filter(prop => assignedInRoot[prop] !== func)
+    const dependentOn = (prop: string) => [...propMentionedIn_root[prop]].filter(f => f !== assignedIn_root[prop].name);
+    const dependenciesOf = (func: FunctionInfo) => [...funcPropMentions[func.name]].filter(prop => assignedIn_root[prop] !== func)
   
     const generatedStartMark = `//<%generated%>`;
     const generatedEndMark = `//<%/generated%>`;
   
-    // const assignRE = 
+    const assignREall = new RegExp(`//\\s*<%assigned%>\\s*:\\s*(?<prop>[\\w\\.]+).*`, 'g'); // .* at the end to match any comments
+    // This one ^ can be made to match dots, because it's ok to match until the end
     const generatedRE = new RegExp(`[ \\t]*${generatedStartMark}.*?${generatedEndMark}[ \\t]*\\n`, 'gs');
+    const replaceUsageRE = new RegExp(`//\\s*<%replace_usage%>\\s*:\\s*(?<from>[\\w\\.]+)\\s*->\\s*(?<to>[\\w\\.]+)`, 'g');
+
   
-    function dfs(root: FunctionInfo, node: FunctionInfo) {
+    function dfs(root: FunctionInfo, node: FunctionInfo, propertyReplacements: Map<string, string>) {
       relevantFuncs.add(node);
 
-      if (node.code.includes('<%replace_usage%>')) {
-        alert(`Still gotta code <%replace_usage%> part`);
-        throw `<%replace_usage%> not implemented`;
+      // if (node.code.includes('<%replace_usage%>')) {
+      //   alert(`Still gotta code <%replace_usage%> part`);
+      //   throw `<%replace_usage%> not implemented`;
+      // }
+
+      // ----- Account for <%replace_usage%> -----
+      const replacementMatches = [...node.code.matchAll(replaceUsageRE)];
+      if (node !== root && replacementMatches.length > 0) {
+        const errorMessage = `Replacement declarations are only allowed at DAG root functions,\nbut some declaration(s) found in ${node.name}:\n${replacementMatches.map(m => m[0]).join('\n')}`;
+        alert(errorMessage);
+        throw replacementMatches.map(m => m[0]);
+      }
+
+      for (const m of replacementMatches) {
+        const { from, to } = m.groups!;
+        propertyReplacements.set(from, to);
       }
   
-      for (const classProp of classProperties) {
+      // ----- Find all classProperties mentions -----
+      for (let classProp of classProperties) {
         const re = regexForName(classProp);
         if (!re.test(node.code))
           continue;
+
+        if (propertyReplacements.has(classProp)) {
+          classProp = propertyReplacements.get(classProp)!;
+        }
   
         allProps.add(classProp);
         funcPropMentions[root.name] = (funcPropMentions[root.name] ?? new Set()).add(classProp);
         propMentionedIn_root[classProp] = (propMentionedIn_root[classProp] ?? new Set()).add(root.name);
   
   
-        const reAssign = regexForAssignedName(classProp);
-        if (!reAssign.test(node.code))
-          continue;
-        const prop = classProp;
-  
-        // const assignedMatches = node.code.matchAll(assignRE);
-        // for (const match of assignedMatches) {
-        //   const prop = match.groups!.prop;
-  
-          // The following check was for when a RegExp was matching everything (but that was removed due to necessity to match ns_.something_)
-          if (!classProperties.includes(prop)) {
-            const errorMessage = `Unknown property found in <%assigned%> annotation: ${prop}`;
-            alert(errorMessage);
-            throw errorMessage;
-          }
-  
-          if (assignedIn[prop] && assignedIn[prop] !== node) {
-            const errorMessage = `Property ${prop} has been marked "assigned" previously in ${assignedIn[prop].name}\nand now also marked "assigned" in ${node.name}`;
-            alert(errorMessage);
-            throw errorMessage;
-          }
-  
-          assignedIn[prop] = node;
-          assignedInRoot[prop] = root;
-          funcAssigns[root.name] = (funcAssigns[root.name] ?? new Set()).add(prop);
+        // const reAssign = regexForAssignedName(classProp);
+        // if (!reAssign.test(node.code))
+        //   continue;
+        // const prop = classProp;
+      }
+
+      // ----- Account for <%assigned%> -----
+      const assignedMatches = node.code.matchAll(assignREall);
+      for (const match of assignedMatches) {
+        const prop = match.groups!.prop;
+
+        // The following check was for when a RegExp was matching everything (but that was removed due to necessity to match ns_.something_)
+        // Edit to ^: I reverted it back, but it's still commented out, because with replace_usage everything can be theoretically assigned
+        // if (!classProperties.includes(prop)) {
+        //   const errorMessage = `Unknown property found in <%assigned%> annotation: ${prop}`;
+        //   alert(errorMessage);
+        //   throw errorMessage;
         // }
+
+        if (assignedIn[prop] && assignedIn[prop] !== node) {
+          const errorMessage = `Property ${prop} has been marked "assigned" previously in ${assignedIn[prop].name}\nand now also marked "assigned" in ${node.name}`;
+          alert(errorMessage);
+          throw errorMessage;
+        }
+
+        assignedIn[prop] = node;
+        assignedIn_root[prop] = root;
+        funcAssigns[root.name] = (funcAssigns[root.name] ?? new Set()).add(prop);
       }
   
   
@@ -490,12 +513,12 @@ function dagFunctions() {
         // The reason one might end up a "child" of another is because the code-generated parts
         // are also taken into account when initially looking for "children"
 
-        dfs(root, child);
+        dfs(root, child, propertyReplacements);
       }
     }
   
     for (const func of _functionsToDAG) {
-      dfs(func, func);
+      dfs(func, func, new Map());
     }
   
     const unAnnotatedProperties = [...allProps.values().filter(dep => !annotatedProperties.includes(dep))];
@@ -506,10 +529,7 @@ function dagFunctions() {
       return;
     }
   
-    
-    const assignREall = new RegExp(`//\\s*<%assigned%>\\s*:\\s*(?<prop>[\\w\\.]+).*`, 'g'); // .* at the end to match any comments
-    // This one ^ can be made to match dots, because it's ok to match until the end
-  
+      
     let modifiedSomething = false;
     const nextModifiedFunctions = [...modifiedFunctions()];
     for (const func of relevantFuncs) {
@@ -519,14 +539,14 @@ function dagFunctions() {
         // ...args, because the replacement function behaves stupidly inconsistently with parameter count:
         // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/replace
         const groups = args.at(-1);
-        const prop = groups.prop;
+        const metaProp = groups.prop; // Might not be a classProp, might be one of the "replaced" ones
   
         const indent = `\t\t\t\t\t\t\t`;
   
         return (
           `${matchedString}\n`
           + `${indent}${generatedStartMark}\n`
-          + dependentOn(prop).map(fname => `${indent}if (--${pendingVariableOf_inc(fname)} == 0) ${functionCallString[fname]}\n`).join('')
+          + dependentOn(metaProp).map(fname => `${indent}if (--${pendingVariableOf_inc(fname)} == 0) ${functionCallString[fname]}\n`).join('')
           + `${indent}${generatedEndMark}`
         );
       });
@@ -577,7 +597,7 @@ function dagFunctions() {
     for (const func of _functionsToDAG) {
       let topLevel = true; // Might have dependencies, but no dependencies from functions we are DAGing
       for (const prop of dependenciesOf(func)) {
-        if (assignedInRoot[prop]) {
+        if (assignedIn_root[prop]) {
           topLevel = false;
           break;
         }

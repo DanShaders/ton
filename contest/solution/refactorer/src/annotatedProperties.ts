@@ -122,6 +122,10 @@ const annotatedProperties: string[] = [
 	// Added for: check_dispatch_queue_update()
 	'removed_dispatch_queue_messages_',
 	'new_dispatch_queue_messages_',
+
+
+	// Added for: check_out_msg_descr()
+	'new_dispatch_queue_messages_st1_',
 ];
 
 export default annotatedProperties;
