@@ -139,10 +139,10 @@ void ContestValidateQuery::start_up() {
     unpack_block_data();
     // reject_query("cannot unpack block data: " + error);
 
-    precheck_account_transactions(); // reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
     
     
     
+    // _precheck_account_transactions(); // reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
     // _build_new_message_queue(); // reject_query("cannot build a new message queue"); return;
     // _precheck_message_queue_update(); // reject_query("invalid OutMsgQueue update"); return;
     // _unpack_dispatch_queue_update(); // reject_query("invalid DispatchQueue update"); return;
