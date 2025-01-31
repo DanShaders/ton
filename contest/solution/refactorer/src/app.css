@@ -137,3 +137,11 @@ pre, code {
 	left: 0px;
 	opacity: 50%;
 }
+
+.DAGRootMark {
+	position: absolute;
+	top: 0px;
+	right: 0px;
+	opacity: 50%;
+
+}

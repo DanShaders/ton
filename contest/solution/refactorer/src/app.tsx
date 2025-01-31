@@ -118,6 +118,15 @@ async function setPropertiesToHighlightString(value: string) {
 }
 const __initialPropertiesToHighlightString = await dbGet(propertiesToHighlightStringKey) ?? '';
 
+
+const functionsToDAGKey = 'functionsToDAG';
+async function setFunctionsToDAGString(value: string) {
+  await dbSet(functionsToDAGKey, value);
+  setFunctionsToDAGStringPrivate(value);
+}
+const __initialFunctionsToDAG = await dbGet(functionsToDAGKey) ?? '';
+
+
 let [errorAutoLoading, setErrorAutoLoading] = createSignal(!__initialState[0]);
 let [files, setFilesPrivate] = createSignal<MyFile[]>(__initialState[1]);
 let [allFunctions, setAllFunctions] = createSignal<FunctionInfo[]>([]);
@@ -125,6 +134,7 @@ let [property, setProperty] = createSignal('');
 let [selectedFunction, setSelectedFunction] = createSignal<null | FunctionInfo>(null);
 let [modifiedFunctions, setModifiedFunctions] = createSignal<FunctionInfo[]>([]);
 let [propertiesToHighlightString, setPropertiesToHighlightStringPrivate] = createSignal<string>(__initialPropertiesToHighlightString);
+let [functionsToDAGString, setFunctionsToDAGStringPrivate] = createSignal<string>(__initialFunctionsToDAG);
 
 let propertyType = () => property().split(' ').slice(0, -1).join(' ').trim();
 let propertyName = () => property().split(' ').at(-1);
@@ -165,11 +175,6 @@ let patchingInfo: ObjDict<PatchingInfo[]> = {};
 let untypedWindow = window as any;
 
 
-const functionsToDAGKey = 'functionsToDAG';
-async function functionsToDAGchanged() {
-  await dbSet(functionsToDAGKey, $functionsToDAG!.value);
-}
-const __initialFunctionsToDAG = await dbGet(functionsToDAGKey) ?? '';
 
 
 async function openFiles() {
@@ -355,21 +360,51 @@ async function patchEdited() {
 }
 
 
+
+const functionsToDAGWithInfo = createMemo(() => {
+  const functionCallsToDAG = functionsToDAGString().split('\n').map(s => s.trim()).filter(s => s);
+  let functionNamesToDAG = [];
+  let functionCallString: ObjDict<string> = {};
+  for (let functionLine of functionCallsToDAG) {
+    let openBracketIndex = functionLine.indexOf('(');
+    let functionName = openBracketIndex < 0 ? functionLine : functionLine.slice(0, openBracketIndex).trim();
+    functionNamesToDAG.push(functionName);
+
+    if (!functionLine.includes('('))
+      functionLine += '()';
+    if (!functionLine.endsWith(';'))
+      functionLine += ';';
+    functionCallString[functionName] = functionLine;
+  }
+
+  const notFoundFunctions: string[] = [];
+  const functions: FunctionInfo[] = [];
+  
+  for (const name of functionNamesToDAG) {
+    const func = allFunctions().find(f => f.name === name);
+    if (func)
+      functions.push(func);
+    else
+      notFoundFunctions.push(name);
+  }
+
+  return { notFoundFunctions, functions, functionCallString };
+});
+
+const functionsToDAG = createMemo(() => functionsToDAGWithInfo().functions);
+
 function dagFunctions() {
   try {
-    const functionCallsToDAG = ($functionsToDAG!.value as string).split('\n').map(s => s.trim()).filter(s => s);
-    let functionNamesToDAG = [];
-    let functionCallString: ObjDict<string> = {};
-    for (let functionLine of functionCallsToDAG) {
-      let openBracketIndex = functionLine.indexOf('(');
-      let functionName = openBracketIndex < 0 ? functionLine : functionLine.slice(0, openBracketIndex).trim();
-      functionNamesToDAG.push(functionName);
-  
-      if (!functionLine.includes('('))
-        functionLine += '()';
-      if (!functionLine.endsWith(';'))
-        functionLine += ';';
-      functionCallString[functionName] = functionLine;
+    const {
+      notFoundFunctions,
+      functions: _functionsToDAG,
+      functionCallString,
+    } = functionsToDAGWithInfo();
+
+    if (notFoundFunctions.length > 0) {
+      alert(`Couldn't find a function with name ${name}`);
+      console.log('notFoundFunctions:', notFoundFunctions);
+      return;
     }
   
     const pendingVariables: ObjDict<number> = {};
@@ -379,15 +414,7 @@ function dagFunctions() {
       return varName;
     }
   
-    const functionsToDAG = functionNamesToDAG.map(name => {
-      const func = allFunctions().find(f => f.name === name);
-      if (!func) {
-        alert(`Couldn't find a function with name ${name}`);
-        throw { name, functions: allFunctions() };
-      }
-      return func;
-    });
-    console.log(functionsToDAG);
+    console.log(_functionsToDAG);
   
     const { calling } = calls();
   
@@ -457,7 +484,7 @@ function dagFunctions() {
   
   
       for (const child of calling[node.name] ?? []) {
-        if (functionsToDAG.includes(child))
+        if (_functionsToDAG.includes(child))
           continue;
         // All functionsToDAG are considered top level and independent from each other
         // The reason one might end up a "child" of another is because the code-generated parts
@@ -467,7 +494,7 @@ function dagFunctions() {
       }
     }
   
-    for (const func of functionsToDAG) {
+    for (const func of _functionsToDAG) {
       dfs(func, func);
     }
   
@@ -480,7 +507,7 @@ function dagFunctions() {
     }
   
     
-    const assignREall = new RegExp(`//\\s*<%assigned%>\\s*:\\s*(?<prop>[\\w\\.]+)`, 'g');
+    const assignREall = new RegExp(`//\\s*<%assigned%>\\s*:\\s*(?<prop>[\\w\\.]+).*`, 'g'); // .* at the end to match any comments
     // This one ^ can be made to match dots, because it's ok to match until the end
   
     let modifiedSomething = false;
@@ -547,7 +574,7 @@ function dagFunctions() {
   
     const topLevelFunctions: FunctionInfo[] = [];
   
-    for (const func of functionsToDAG) {
+    for (const func of _functionsToDAG) {
       let topLevel = true; // Might have dependencies, but no dependencies from functions we are DAGing
       for (const prop of dependenciesOf(func)) {
         if (assignedInRoot[prop]) {
@@ -841,13 +868,21 @@ createEffect(() => {
 
 
 
-const markSide = 30;
+const modifiedMarkSide = 30;
 const ModifiedMark = () =>
   <div class="modifiedMark">
-    <svg width={markSide} height={markSide}>
-      <polygon points={`0, 0, 0, ${markSide}, ${markSide}, 0`} fill="blue" />
+    <svg width={modifiedMarkSide} height={modifiedMarkSide}>
+      <polygon points={`0, 0, 0, ${modifiedMarkSide}, ${modifiedMarkSide}, 0`} fill="blue" />
     </svg>
   </div>;
+
+const DAGMarkSide = 40;
+const DAGRootMark = () =>
+  <div class="DAGRootMark">
+    <svg width={DAGMarkSide} height={DAGMarkSide}>
+      <polygon points={`0, 0, ${DAGMarkSide}, 0, ${DAGMarkSide}, ${DAGMarkSide}`} fill="green" />
+    </svg>
+  </div>
 
 const CallTree = () => {
   function dfs(func: FunctionInfo) {
@@ -914,6 +949,7 @@ const CallGraph = () => {
                   height: blockHeight + 'px',
                 }}>
                 {modifiedFunctions().includes(f) && <ModifiedMark />}
+                {functionsToDAG().includes(f) && <DAGRootMark />}
                 <span class="callGraphNodeTitle">{f.name}</span>
               </div>;
             }}</For>
@@ -927,7 +963,6 @@ const CallGraph = () => {
 
 
 
-let $functionsToDAG;
 
 console.warn('propertiesToHighlight:', propertiesToHighlight());
 
@@ -1010,14 +1045,15 @@ export default function App() {
     <div>
       <textarea rows={10} cols={100}
         autocomplete="off" autocapitalize="off" spellcheck={"false" as unknown as boolean}
-        ref={$functionsToDAG}
-        onInput={functionsToDAGchanged}
-        value={__initialFunctionsToDAG}></textarea>
+        value={functionsToDAGString()}
+        onInput={e => setFunctionsToDAGString(e.target.value)}
+      ></textarea>
       <button onClick={dagFunctions}>DAG functions</button>
       <textarea rows={10} cols={100}
         autocomplete="off" autocapitalize="off" spellcheck={"false" as unknown as boolean}
+        value={propertiesToHighlightString()}
         onInput={e => setPropertiesToHighlightString(e.target.value)}
-        value={propertiesToHighlightString()}></textarea>
+      ></textarea>
     </div>
     <div><pre>
       Type: {propertyType()} <br />

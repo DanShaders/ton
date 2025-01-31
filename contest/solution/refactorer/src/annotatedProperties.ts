@@ -105,12 +105,18 @@ const annotatedProperties: string[] = [
 	'mint_msg_', // Never assigned
 
 
-
 	// Added for: check_in_queue()
-
 	'neighbors_',
 	'claimed_proc_lt_',
 	'claimed_proc_hash_',
+
+
+	// Added for: check_processed_upto()
+	'processed_upto_updated_',
+	'proc_lt_',
+	'proc_hash_',
+	'min_enq_lt_',
+	'min_enq_hash_',
 ];
 
 export default annotatedProperties;

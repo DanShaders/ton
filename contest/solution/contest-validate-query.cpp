@@ -3306,6 +3306,8 @@ void ContestValidateQuery::check_in_msg_descr() {
   //   reject_throw("invalid InMsgDescr dictionary: "s + err.get_msg());
   // }
 
+  //<%assigned%>: proc_lt_
+  //<%assigned%>: proc_hash_
   //<%assigned%>: in_msg_emitted_lt_
 }
 
@@ -3952,6 +3954,8 @@ void ContestValidateQuery::check_out_msg_descr() {
   //   reject_throw("invalid OutMsgDescr dictionary: "s + err.get_msg());
   // }
 
+  //<%assigned%>: min_enq_lt_
+  //<%assigned%>: min_enq_hash_
   //<%assigned%>: out_msg_emitted_lt_
 }
 
@@ -3974,6 +3978,10 @@ void ContestValidateQuery::check_processed_upto() {
     reject_throw("new ProcessedInfo is not obtained from old ProcessedInfo by adding at most one new entry");
   }
   processed_upto_updated_ = upd;
+  //<%assigned%>: processed_upto_updated_ (unused)
+							//<%generated%>
+							//<%/generated%>
+
   if (upd) {
     if (upd->shard != shard_.shard) {
       reject_throw("newly-added ProcessedInfo entry refers to shard "s +
@@ -4000,7 +4008,13 @@ void ContestValidateQuery::check_processed_upto() {
     claimed_proc_hash_.set_zero();
   }
   //<%assigned%>: claimed_proc_lt_
+							//<%generated%>
+							if (--__pending_check_in_queue == 0) check_in_queue();
+							//<%/generated%>
   //<%assigned%>: claimed_proc_hash_
+							//<%generated%>
+							if (--__pending_check_in_queue == 0) check_in_queue();
+							//<%/generated%>
 
 
   LOG(INFO) << "ProcessedInfo claims to have processed all inbound messages up to (" << claimed_proc_lt_ << ","
