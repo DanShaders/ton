@@ -103,6 +103,14 @@ const annotatedProperties: string[] = [
 	'store_out_msg_queue_size_', // Was not mentioned, but was assigned next to the previous two
 	'recover_create_msg_', // Never assigned
 	'mint_msg_', // Never assigned
+
+
+
+	// Added for: check_in_queue()
+
+	'neighbors_',
+	'claimed_proc_lt_',
+	'claimed_proc_hash_',
 ];
 
 export default annotatedProperties;

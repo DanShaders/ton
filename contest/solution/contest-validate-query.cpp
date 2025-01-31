@@ -973,6 +973,10 @@ void ContestValidateQuery::request_neighbor_queues() {
       ++i;
     }
   }
+
+  //<%replace_usage%>: neighbors_ -> neighbors_st1_
+  //<%assigned%>: neighbors_st1_
+
 }
 
 /**
@@ -1301,6 +1305,9 @@ void ContestValidateQuery::fix_all_processed_upto() {
     fix_processed_upto(*descr.processed_upto);
       //return fatal_error("Cannot adjust ProcessedUpto of neighbor "s + descr.blk_.to_str());
   }
+  //<%replace_usage%>: neighbors_ -> neighbors_st1_
+  //<%assigned%>: neighbors_st2_
+
 }
 
 /**
@@ -1340,6 +1347,7 @@ void ContestValidateQuery::add_trivial_neighbor_after_merge() {
       }
     }
   }
+  // !!TODO: Parallelize
   CHECK(found == 2);
 }
 
@@ -1482,6 +1490,9 @@ void ContestValidateQuery::add_trivial_neighbor(Ref<vm::Cell> prev_state_root_) 
   }
   CHECK(found && cs);
   CHECK(found == (1 + (cs == 4)));
+
+  //<%replace_usage%>: neighbors_ -> neighbors_st2_
+  //<%assigned%>: neighbors_
 }
 
 /**
@@ -3988,6 +3999,10 @@ void ContestValidateQuery::check_processed_upto() {
     claimed_proc_lt_ = 0;
     claimed_proc_hash_.set_zero();
   }
+  //<%assigned%>: claimed_proc_lt_
+  //<%assigned%>: claimed_proc_hash_
+
+
   LOG(INFO) << "ProcessedInfo claims to have processed all inbound messages up to (" << claimed_proc_lt_ << ","
             << claimed_proc_hash_.to_hex() << ")";
   if (claimed_proc_lt_ < proc_lt_ || (claimed_proc_lt_ == proc_lt_ && proc_lt_ && claimed_proc_hash_ < proc_hash_)) {
@@ -4035,10 +4050,7 @@ void ContestValidateQuery::check_dispatch_queue_update() {
  *
  * @returns True if the message is valid, false otherwise.
  */
-void ContestValidateQuery::check_neighbor_outbound_message(Ref<vm::CellSlice> enq_msg, ton::LogicalTime lt,
-                                                           td::ConstBitPtr key, const block::McShardDescr& nb,
-                                                           bool& unprocessed, bool& processed_here,
-                                                           td::Bits256& msg_hash) {
+void ContestValidateQuery::check_neighbor_outbound_message(Ref<vm::CellSlice> enq_msg, ton::LogicalTime lt, td::ConstBitPtr key, const block::McShardDescr& nb, bool& unprocessed, bool& processed_here, td::Bits256& msg_hash) {
   unprocessed = false;
   block::EnqueuedMsgDescr enq;
   if (!enq.unpack(enq_msg.write())) {  // unpack EnqueuedMsg

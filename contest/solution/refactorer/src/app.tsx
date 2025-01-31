@@ -411,6 +411,11 @@ function dagFunctions() {
   
     function dfs(root: FunctionInfo, node: FunctionInfo) {
       relevantFuncs.add(node);
+
+      if (node.code.includes('<%replace_usage%>')) {
+        alert(`Still gotta code <%replace_usage%> part`);
+        throw `<%replace_usage%> not implemented`;
+      }
   
       for (const classProp of classProperties) {
         const re = regexForName(classProp);
@@ -925,9 +930,16 @@ const CallGraph = () => {
 let $functionsToDAG;
 
 console.warn('propertiesToHighlight:', propertiesToHighlight());
-const mdLanguage = languageVariant(propertyName() ?? '', allFunctions().map(fs => fs.name), propertiesToHighlight());
+
+const currentLanguage = createMemo(() => languageVariant(propertyName() ?? '', allFunctions().map(fs => fs.name), propertiesToHighlight()));
+const mdLanguage = currentLanguage();
 let mdOriginalModel= editor.createModel('', mdLanguage.name);
 let mdModifiedModel = editor.createModel('', mdLanguage.name);
+
+createEffect(() => {
+  editor.setModelLanguage(mdOriginalModel, currentLanguage().name);
+  editor.setModelLanguage(mdModifiedModel, currentLanguage().name);
+});
 
 export default function App() {
   let $property;
