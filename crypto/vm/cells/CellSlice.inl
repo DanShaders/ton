@@ -1041,17 +1041,14 @@ inline std::ostream& operator<<(std::ostream& os, Ref<CellSlice> cs_ref) {
 // If can_be_special is not null, then it is allowed to load special cell
 // Flag whether loaded cell is actually special will be stored into can_be_special
 inline VirtualCell::LoadedCell load_cell_slice_impl(Ref<Cell> cell, bool* can_be_special) {
+  VirtualCell::LoadedCell loaded_cell;
   auto* vm_state_interface = VmStateInterface::get();
   bool library_loaded = false;
   while (true) {
     if (vm_state_interface && !library_loaded) {
       vm_state_interface->register_cell_load(cell->get_hash());
     }
-    auto r_loaded_cell = cell->load_cell();
-    if (r_loaded_cell.is_error()) {
-      throw VmError{Excno::cell_und, "failed to load cell"};
-    }
-    auto loaded_cell = r_loaded_cell.move_as_ok();
+    cell->load_cell(loaded_cell);
     if (loaded_cell.data_cell->special_type() == DataCell::SpecialType::PrunnedBranch) {
       auto virtualization = loaded_cell.virt.get_virtualization();
       if (virtualization != 0) {

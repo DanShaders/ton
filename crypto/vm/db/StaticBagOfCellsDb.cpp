@@ -43,6 +43,12 @@ class RootCell : public Cell {
   td::Result<LoadedCell> load_cell() const override {
     return cell_->load_cell();
   }
+  void load_cell(LoadedCell& ls) const override {
+    cell_->load_cell(ls);
+  }
+  bool load_cell_nothrow(LoadedCell& ls) const override {
+    return cell_->load_cell_nothrow(ls);
+  }
   Ref<Cell> virtualize(VirtualizationParameters virt) const override {
     return cell_->virtualize(virt);
   }

@@ -154,5 +154,11 @@ class PrunnedCell : public Cell {
   td::Result<LoadedCell> load_cell() const override {
     return td::Status::Error("Can't load prunned branch");
   }
+  void load_cell(LoadedCell& ls) const override {
+    throw std::runtime_error("Can't load prunned branch");
+  }
+  bool load_cell_nothrow(LoadedCell& ls) const override {
+    return false;
+  }
 };
 }  // namespace vm

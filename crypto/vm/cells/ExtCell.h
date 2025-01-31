@@ -19,6 +19,7 @@
 #pragma once
 #include "vm/cells/Cell.h"
 #include "vm/cells/PrunnedCell.h"
+#include "vm/excno.hpp"
 #include "common/AtomicRef.h"
 
 #include <mutex>
@@ -55,6 +56,21 @@ class ExtCell : public Cell {
   td::Result<LoadedCell> load_cell() const override {
     TRY_RESULT(data_cell, load_data_cell());
     return LoadedCell{std::move(data_cell), {}, {}};
+  }
+  void load_cell(LoadedCell& ls) const override {
+    auto r_data_cell = load_data_cell();
+    if (r_data_cell.is_error()) {
+      throw VmError{Excno::cell_und, "failed to load cell"};
+    }
+    ls.data_cell = std::move(r_data_cell.move_as_ok());
+  }
+  bool load_cell_nothrow(LoadedCell& ls) const override {
+    auto r_data_cell = load_data_cell();
+    if (r_data_cell.is_error()) {
+      return false;
+    }
+    ls.data_cell = std::move(r_data_cell.move_as_ok());
+    return true;
   }
   td::uint32 get_virtualization() const override {
     return 0;

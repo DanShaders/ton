@@ -45,6 +45,21 @@ class UsageCell : public Cell {
     }
     return std::move(loaded_cell);
   }
+  void load_cell(LoadedCell& ls) const override {
+    cell_->load_cell(ls);
+    if (tree_node_.on_load(ls.data_cell)) {
+      CHECK(ls.tree_node.empty());
+      ls.tree_node = tree_node_;
+    }
+  }
+  bool load_cell_nothrow(LoadedCell& ls) const override {
+    cell_->load_cell(ls);
+    if (tree_node_.on_load(ls.data_cell)) {
+      CHECK(ls.tree_node.empty());
+      ls.tree_node = tree_node_;
+    }
+    return true;
+  }
   Ref<Cell> virtualize(VirtualizationParameters virt) const override {
     auto virtualized_cell = cell_->virtualize(virt);
     if (tree_node_.empty()) {

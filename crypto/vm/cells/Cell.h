@@ -56,6 +56,9 @@ class Cell : public CellTraits {
 
   // load interface
   virtual td::Result<LoadedCell> load_cell() const = 0;
+  virtual void load_cell(LoadedCell& ls) const = 0;
+  virtual bool load_cell_nothrow(LoadedCell& ls) const = 0;
+
   virtual Ref<Cell> virtualize(VirtualizationParameters virt) const;
   virtual td::uint32 get_virtualization() const = 0;
   virtual CellUsageTree::NodePtr get_tree_node() const = 0;

@@ -140,6 +140,13 @@ class DataCell : public Cell {
   td::Result<LoadedCell> load_cell() const override {
     return LoadedCell{Ref<DataCell>{this}, {}, {}};
   }
+  void load_cell(LoadedCell& ls) const override {
+    ls.data_cell.assign(this);
+  }
+  bool load_cell_nothrow(LoadedCell& ls) const override {
+    ls.data_cell.assign(this);
+    return true;
+  }
   unsigned get_refs_cnt() const {
     return info_.refs_count_;
   }

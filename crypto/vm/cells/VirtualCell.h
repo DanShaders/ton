@@ -42,7 +42,15 @@ class VirtualCell : public Cell {
     loaded_cell.virt = loaded_cell.virt.apply(virt_);
     return std::move(loaded_cell);
   }
-
+  void load_cell(LoadedCell& ls) const override {
+    cell_->load_cell(ls);
+    ls.virt = ls.virt.apply(virt_);
+  }
+  bool load_cell_nothrow(LoadedCell& ls) const override {
+    cell_->load_cell(ls);
+    ls.virt = ls.virt.apply(virt_);
+    return true;
+  }
   Ref<Cell> virtualize(VirtualizationParameters virt) const override {
     auto new_virt = virt_.apply(virt);
     if (new_virt == virt_) {
