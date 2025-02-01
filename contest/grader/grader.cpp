@@ -149,6 +149,9 @@ class ContestGrader : public td::actor::Actor {
         printf("%*lu  %-*s %8.5f %8.5f  ERROR  expected %s, found %s\n", (int)test_idx_column_width_, test_idx_ + 1,
                (int)test_name_column_width_, test_files_[test_idx_].c_str(), elapsed, cpu_time,
                (valid ? "VALID" : "INVALID"), (got_valid ? "VALID" : "INVALID"));
+        if (valid && !got_valid) {
+          printf("%s\n", res.error().to_string().c_str());
+        }
         fflush(stdout);
         ++cnt_fail_;
         ++test_idx_;
