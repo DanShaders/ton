@@ -108,26 +108,12 @@ void ContestValidateQuery::start_up() {
     }
 
 
-    // 4. load state(s) corresponding to previous block(s)
-    prev_states.resize(prev_blocks.size());
-    for (int i = 0; (unsigned)i < prev_blocks.size(); i++) {
-      // 4.1. load state
-      LOG(DEBUG) << "sending wait_block_state() query #" << i << " for " << prev_blocks[i].to_str() << " to Manager";
-      after_get_shard_state(i, fetch_block_state(prev_blocks[i]));
-    }
-    //<%assigned%>: prev_states
-
-    // 5. request masterchain state referred to in the block
-    after_get_mc_state(fetch_block_state(mc_blkid_));
-
+    fill_prev_state(); // New function, added to DAGify the code
 
     // MAIN VALIDATOR SEQUENCE (invokes other methods in a suitable order).
     // (previously: try_validate())
 
     LOG(INFO) << "try_validate stage 0";
-
-
-
     // _compute_prev_state(); // fatal_error(-666, "cannot compute previous state"); return;
     // _request_neighbor_queues(); // fatal_error("cannot request neighbor output queues"); return;
     // _unpack_prev_state(); // fatal_error("cannot unpack previous state"); return;

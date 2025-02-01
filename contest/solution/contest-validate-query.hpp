@@ -397,6 +397,7 @@ public:
   void unpack_block_candidate();
   void extract_collated_data_from(Ref<vm::Cell> croot, int idx);
   void extract_collated_data();
+  void fill_prev_state(); // Added
   void compute_prev_state();
   void unpack_merge_prev_state();
   void unpack_prev_state();

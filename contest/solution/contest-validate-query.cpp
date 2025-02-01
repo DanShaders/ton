@@ -320,9 +320,8 @@ void ContestValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
   LOG(INFO) << "in ContestValidateQuery::after_get_mc_state() for " << mc_blkid_.to_str();
   // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   if (res.is_error()) {
-    // _fatal_error(res.move_as_error());
+    // _fatal_error(res.move_as_error()); return;
     throw res.move_as_error().to_string();
-    return;
   }
   process_mc_state(Ref<MasterchainState>(res.move_as_ok()));
     // _fatal_error("cannot process masterchain state for "s + mc_blkid_.to_str());
@@ -774,6 +773,23 @@ void ContestValidateQuery::check_this_shard_mc_info() {
  *  METHODS CALLED FROM try_validate() stage 0
  *
  */
+
+
+
+void ContestValidateQuery::fill_prev_state() {
+  // 4. load state(s) corresponding to previous block(s)
+  prev_states.resize(prev_blocks.size());
+  for (int i = 0; (unsigned)i < prev_blocks.size(); i++) {
+    // 4.1. load state
+    LOG(DEBUG) << "sending wait_block_state() query #" << i << " for " << prev_blocks[i].to_str() << " to Manager";
+    after_get_shard_state(i, fetch_block_state(prev_blocks[i]));
+  }
+  //<%assigned%>: prev_states
+
+  // 5. request masterchain state referred to in the block
+  after_get_mc_state(fetch_block_state(mc_blkid_));
+}
+
 
 /**
  * Computes the previous shard state.
