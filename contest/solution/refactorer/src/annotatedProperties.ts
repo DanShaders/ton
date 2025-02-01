@@ -143,6 +143,13 @@ const annotatedProperties: string[] = [
 	// Added for: unpack_block_data
 	'block_root_',
 	'basechain_create_fee_',
+
+
+	// Added for: add_trivial_neighbor
+	'prev_blocks',
+	'neighbors_st2_',
+	'sibling_out_msg_queue_st1_',
+	'sibling_processed_upto_st2_',
 ];
 
 export default annotatedProperties;

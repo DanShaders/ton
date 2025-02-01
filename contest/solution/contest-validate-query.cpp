@@ -151,6 +151,7 @@ void ContestValidateQuery::init_parse() {
   after_merge_ = prev_blocks.size() == 2;
   after_split_ = !after_merge_ && prev_blocks[0].shard_full() != shard_;
   //<%assigned%>: mc_seqno_
+  //<%assigned%>: prev_blocks
   //<%assigned%>: after_merge_
   //<%assigned%>: after_split_
 
@@ -854,6 +855,12 @@ void ContestValidateQuery::unpack_prev_state(Ref<vm::Cell> prev_state_root_) {
 
   //<%assigned%>: aux_mc_states_
 
+  //<%replace_usage%>: sibling_out_msg_queue_ -> sibling_out_msg_queue_st1_
+  //<%assigned%>: sibling_out_msg_queue_st1_
+
+  //<%replace_usage%>: sibling_processed_upto_ -> sibling_processed_upto_st1_
+  //<%assigned%>: sibling_processed_upto_st1_
+
   ORIGINAL_CHECK(ps_.processed_upto_);
   fix_processed_upto(*ps_.processed_upto_);
   //<%assigned%>: ps_
@@ -1291,6 +1298,9 @@ void ContestValidateQuery::fix_all_processed_upto() {
   if (sibling_processed_upto_)
     fix_processed_upto(*sibling_processed_upto_);
     //return _fatal_error("Cannot adjust old ProcessedUpto of the shard state of our virtual sibling");
+  //<%replace_usage%>: sibling_processed_upto_ -> sibling_processed_upto_st1_
+  //<%assigned%>: sibling_processed_upto_st2_
+
 
   fix_processed_upto(*ns_.processed_upto_, true);
     //return _fatal_error("Cannot adjust new ProcessedUpto of our shard state");
@@ -1355,7 +1365,7 @@ void ContestValidateQuery::add_trivial_neighbor_after_merge() {
  *
  * @returns True if the operation is successful, false otherwise.
  */
-void ContestValidateQuery::add_trivial_neighbor(Ref<vm::Cell> prev_state_root_) {
+void ContestValidateQuery::add_trivial_neighbor() {
   LOG(DEBUG) << "in add_trivial_neighbor()";
   if (after_merge_) {
     add_trivial_neighbor_after_merge();
@@ -1490,6 +1500,18 @@ void ContestValidateQuery::add_trivial_neighbor(Ref<vm::Cell> prev_state_root_) 
 
   //<%replace_usage%>: neighbors_ -> neighbors_st2_
   //<%assigned%>: neighbors_
+							//<%generated%>
+							if (--__pending_check_in_msg_descr == 0) my_threader.launch([this] { check_in_msg_descr(); });
+							if (--__pending_check_out_msg_descr == 0) my_threader.launch([this] { check_out_msg_descr(); });
+							if (--__pending_check_in_queue == 0) my_threader.launch([this] { check_in_queue(); });
+							//<%/generated%>
+
+  //<%replace_usage%>: sibling_out_msg_queue_ -> sibling_out_msg_queue_st1_
+  //<%assigned%>: sibling_out_msg_queue_st2_ ! (not used afterwards)
+							//<%generated%>
+							//<%/generated%>
+
+  //<%replace_usage%>: sibling_processed_upto_ -> sibling_processed_upto_st2_
 }
 
 /**

@@ -418,7 +418,7 @@ public:
   void fix_processed_upto(block::MsgProcessedUptoCollection& upto, bool allow_cur = false);
   void fix_all_processed_upto();
   void add_trivial_neighbor_after_merge();
-  void add_trivial_neighbor(Ref<vm::Cell> prev_state_root_);
+  void add_trivial_neighbor();
   void unpack_block_data();
   void unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
   void compute_minted_amount(block::CurrencyCollection& to_mint);
@@ -493,10 +493,10 @@ public:
 
 
   //<{generated_atomic_vars
+  std::atomic<int> __pending_check_in_msg_descr{6};
+  std::atomic<int> __pending_check_out_msg_descr{6};
+  std::atomic<int> __pending_check_in_queue{5};
   std::atomic<int> __pending_build_new_message_queue{2};
-  std::atomic<int> __pending_check_in_msg_descr{5};
-  std::atomic<int> __pending_check_out_msg_descr{5};
-  std::atomic<int> __pending_check_in_queue{4};
   std::atomic<int> __pending_check_transactions{4};
   std::atomic<int> __pending_precheck_message_queue_update{3};
   std::atomic<int> __pending_unpack_dispatch_queue_update{2};

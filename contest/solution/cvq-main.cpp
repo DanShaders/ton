@@ -134,10 +134,10 @@ void ContestValidateQuery::start_up() {
     }
 
     fix_all_processed_upto(); // fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks"); return;
-    add_trivial_neighbor(prev_state_root_); // fatal_error("cannot add previous block as a trivial neighbor"); return;
     
     
     
+    // _add_trivial_neighbor(); // fatal_error("cannot add previous block as a trivial neighbor"); return;
     // _unpack_block_data(); // reject_query("cannot unpack block data: " + error);
     // _precheck_account_transactions(); // reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
     // _build_new_message_queue(); // reject_query("cannot build a new message queue"); return;

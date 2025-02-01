@@ -521,7 +521,7 @@ function dagFunctions() {
     const generatedStartMark = `//<%generated%>`;
     const generatedEndMark = `//<%/generated%>`;
   
-    const assignREall = new RegExp(`//\\s*<%assigned%>\\s*:\\s*(?<prop>[\\w\\.]+).*`, 'g'); // .* at the end to match any comments
+    const assignREall = new RegExp(`//\\s*<%assigned%>\\s*:\\s*(?<prop>[\\w\\.]+)[ \\t]*(?<final>\\!?).*`, 'g'); // .* at the end to match any comments
     // This one ^ can be made to match dots, because it's ok to match until the end
     const generatedRE = new RegExp(`[ \\t]*${generatedStartMark}.*?${generatedEndMark}[ \\t]*\\n`, 'gs');
     const replaceUsageRE = new RegExp(`//\\s*<%replace_usage%>\\s*:\\s*(?<from>[\\w\\.]+)\\s*->\\s*(?<to>[\\w\\.]+)`, 'g');
@@ -628,13 +628,24 @@ function dagFunctions() {
         // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String/replace
         const groups = args.at(-1);
         const metaProp = groups.prop; // Might not be a classProp, might be one of the "replaced" ones
+        const final = groups.final.length > 0;
+
+        if (final) {
+          if (propMentionedIn_root[metaProp] !== undefined) {
+            const errorMessage = `Property ${metaProp} is marked as "!"final, but is mentioned in ${propMentionedIn_root[metaProp].size} functions:\n`;
+            const mentions = [...propMentionedIn_root[metaProp]];
+            alert(errorMessage + mentions.join('\n'));
+            console.error(errorMessage, mentions);
+            throw errorMessage;
+          }
+        }
   
         const indent = `\t\t\t\t\t\t\t`;
   
         return (
           `${matchedString}\n`
           + `${indent}${generatedStartMark}\n`
-          + dependentOn(metaProp).map(fname => `${indent}if (--${pendingVariableOf_inc(fname)} == 0) ${launchStringOf(fname)};\n`).join('')
+          + (final ? '' : dependentOn(metaProp).map(fname => `${indent}if (--${pendingVariableOf_inc(fname)} == 0) ${launchStringOf(fname)};\n`).join(''))
           + `${indent}${generatedEndMark}`
         );
       });

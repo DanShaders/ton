@@ -185,10 +185,10 @@ bool ContestValidateQuery::top_level_fatal_error(std::string err_msg, int err_co
  */
 void ContestValidateQuery::finish_query() {
   // <{generated_atomic_zero_checks
-  if (__pending_build_new_message_queue != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_build_new_message_queue ended up as: " << __pending_build_new_message_queue;
   if (__pending_check_in_msg_descr != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_in_msg_descr ended up as: " << __pending_check_in_msg_descr;
   if (__pending_check_out_msg_descr != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_out_msg_descr ended up as: " << __pending_check_out_msg_descr;
   if (__pending_check_in_queue != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_in_queue ended up as: " << __pending_check_in_queue;
+  if (__pending_build_new_message_queue != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_build_new_message_queue ended up as: " << __pending_build_new_message_queue;
   if (__pending_check_transactions != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_transactions ended up as: " << __pending_check_transactions;
   if (__pending_precheck_message_queue_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_precheck_message_queue_update ended up as: " << __pending_precheck_message_queue_update;
   if (__pending_unpack_dispatch_queue_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_unpack_dispatch_queue_update ended up as: " << __pending_unpack_dispatch_queue_update;
