@@ -10,7 +10,11 @@
 
 namespace vm {
 
-DataCell::~DataCell() = default;
+DataCell::~DataCell() {
+  for (int i = 0; i < m_refs_cnt; ++i) {
+    Ref{reinterpret_cast<Cell*>(m_refs[i] & pointer_mask), Ref<Cell>::acquire_t{}};
+  }
+}
 
 namespace {
 
@@ -380,7 +384,8 @@ td::Result<Ref<DataCell>> DataCell::create(td::Slice data, int bit_length, td::S
   }
 
   for (int i = 0; i < cell.m_refs_cnt; ++i) {
-    cell.m_refs[i] = refs[i];
+    auto ref = reinterpret_cast<uintptr_t>(Ref{refs[i]}.release());
+    cell.m_refs[i] = ref | (refs[i]->is_data_cell() ? pointer_tag : 0);
   }
 
   return result;

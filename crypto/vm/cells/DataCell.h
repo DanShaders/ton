@@ -45,6 +45,10 @@ class DataCell : public Cell {
     return m_level_mask;
   }
 
+  virtual bool is_data_cell() const override {
+    return true;
+  }
+
   // ===== Old interface begins =====
   static thread_local bool use_arena;
 
@@ -77,7 +81,7 @@ class DataCell : public Cell {
   }
 
   Ref<Cell> get_ref(unsigned idx) const {
-    return m_refs[std::min<td::uint32>(max_refs, idx)];
+    return Ref<Cell>{reinterpret_cast<Cell*>(m_refs[std::min<td::uint32>(max_refs, idx)] & pointer_mask)};
   }
 
   Cell* get_ref_raw_ptr(unsigned idx) const {
@@ -123,6 +127,16 @@ class DataCell : public Cell {
   }
   // ===== Old interface ends =====
 
+  // idx must be >= and < get_refs_cnt().
+  std::variant<Cell const*, DataCell const*> ref_fast_path(int idx) const {
+    auto reference = reinterpret_cast<Cell const*>(m_refs[idx] & pointer_mask);
+    if (m_refs[idx] & pointer_tag) {
+      return static_cast<DataCell const*>(reference);
+    } else {
+      return reference;
+    }
+  }
+
  protected:
   DataCell(int bit_length, int refs_cnt, Cell::SpecialType type, LevelMask level_mask, td::uint8 virtualization,
            td::Span<char> data, td::Span<LevelInfo> level_info)
@@ -137,6 +151,9 @@ class DataCell : public Cell {
   }
 
  private:
+  static constexpr uintptr_t pointer_mask = ~static_cast<uintptr_t>(1);
+  static constexpr uintptr_t pointer_tag = 1;
+
   virtual td::uint16 do_get_depth(td::uint32 level) const override final {
     return m_level_info[std::min<td::uint32>(m_level, level)].depth;
   }
@@ -164,7 +181,7 @@ class DataCell : public Cell {
 
   char const* m_data;
   LevelInfo const* m_level_info;
-  std::array<Ref<Cell>, max_refs> m_refs = {};
+  std::array<uintptr_t, max_refs> m_refs = {};
 };
 
 inline std::ostream& operator<<(std::ostream& os, const DataCell& c) {

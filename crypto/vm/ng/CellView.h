@@ -11,6 +11,23 @@
 
 namespace vm {
 
+namespace detail {
+
+template <typename... Ts>
+struct OverloadSet : Ts... {
+  using Ts::operator()...;
+};
+
+template <typename... Ts>
+OverloadSet(Ts...) -> OverloadSet<Ts...>;
+
+template <typename Variant, typename... Visitors>
+decltype(auto) visit(Variant&& variant, Visitors&&... visitors) {
+  return std::visit(detail::OverloadSet{std::forward<Visitors>(visitors)...}, std::forward<Variant>(variant));
+}
+
+}  // namespace detail
+
 class NonnullCellView {
   using VirtualizationParams = detail::VirtualizationParameters;
 
@@ -49,17 +66,28 @@ class NonnullCellView {
 
   NonnullCellView ref(int idx) const {
     CHECK(idx >= 0 && idx < refs_cnt());
-    auto loaded_cell = m_cell->get_ref(idx)->load_cell().move_as_ok();
-    if (!loaded_cell.tree_node.empty()) {
-      CHECK(m_node.empty());
-    } else if (!m_node.empty()) {
-      loaded_cell.tree_node = m_node.create_child(idx);
-    }
-    return NonnullCellView{
-        *loaded_cell.data_cell,
-        loaded_cell.virt.apply(m_child_virtualization),
-        std::move(loaded_cell.tree_node),
-    };
+    return detail::visit(
+        m_cell->ref_fast_path(idx),
+        [&](DataCell const* cell) {
+          return NonnullCellView{
+              *cell,
+              m_child_virtualization,
+              m_node.empty() ? CellUsageTree::NodePtr{} : m_node.create_child(idx),
+          };
+        },
+        [&](Cell const* cell) {
+          auto loaded_cell = cell->load_cell().move_as_ok();
+          if (!loaded_cell.tree_node.empty()) {
+            CHECK(m_node.empty());
+          } else if (!m_node.empty()) {
+            loaded_cell.tree_node = m_node.create_child(idx);
+          }
+          return NonnullCellView{
+              *loaded_cell.data_cell,
+              loaded_cell.virt.apply(m_child_virtualization),
+              std::move(loaded_cell.tree_node),
+          };
+        });
   }
 
  private:
