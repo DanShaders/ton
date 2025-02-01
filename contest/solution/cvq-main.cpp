@@ -124,10 +124,10 @@ void ContestValidateQuery::start_up() {
     PropDest2(state_usage_tree_, prev_state_root_, compute_prev_state()); // fatal_error(-666, "cannot compute previous state"); return;
     request_neighbor_queues(); // fatal_error("cannot request neighbor output queues"); return;
     unpack_prev_state(prev_state_root_); // fatal_error("cannot unpack previous state"); return;
-    init_next_state(); // fatal_error("cannot unpack previous state"); return;
 
 
 
+    // _init_next_state(); // fatal_error("cannot unpack previous state"); return;
     // _check_utime_lt(); // reject_query("creation utime/lt of the new block is invalid"); return;
     // _prepare_out_msg_queue_size(); // reject_query("cannot request out msg queue size"); return;
 

@@ -936,18 +936,33 @@ void ContestValidateQuery::init_next_state() {
   ns_.before_split_ = before_split_;
 
   // Moved forward to "_fix_all_processed_upto"
-  // ns_.processed_upto_ = block::MsgProcessedUptoCollection::unpack(id_.shard_full(), extra_collated_data_.proc_info);
-  // if (!ns_.processed_upto_) {
+  // _ns_.processed_upto_ = block::MsgProcessedUptoCollection::unpack(_id_.shard_full(), _extra_collated_data_.proc_info);
+  // if (!_ns_.processed_upto_) {
   //   reject_throw("failed top unpack processed upto");
   // }
 
   //<%assigned%>: ns_.id_
+							//<%generated%>
+							//<%/generated%>
   //<%assigned%>: ns_.global_id_
+							//<%generated%>
+							//<%/generated%>
   //<%assigned%>: ns_.utime_
+							//<%generated%>
+							//<%/generated%>
   //<%assigned%>: ns_.lt_
+							//<%generated%>
+							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							//<%/generated%>
   //<%assigned%>: ns_.mc_blk_ref_
+							//<%generated%>
+							//<%/generated%>
   //<%assigned%>: ns_.vert_seqno_
+							//<%generated%>
+							//<%/generated%>
   //<%assigned%>: ns_.before_split_
+							//<%generated%>
+							//<%/generated%>
 
 }
 
