@@ -59,7 +59,7 @@ void ContestValidateQuery::start_up() {
   main_thread_id = std::this_thread::get_id();
   doesItCreateNewInstancePerTest++;
   // LOG(ERROR) << "start_up: doesItCreateNewInstancePerTest = " << doesItCreateNewInstancePerTest;
-  CHECK(doesItCreateNewInstancePerTest == 1);
+  ORIGINAL_CHECK(doesItCreateNewInstancePerTest == 1);
 
 
 
@@ -90,7 +90,7 @@ void ContestValidateQuery::start_up() {
       // soft_reject_query("merging shards is not implemented yet");
       // return;
     } else {
-      CHECK(prev_blocks.size() == 1);
+      ORIGINAL_CHECK(prev_blocks.size() == 1);
       // creating next block
       SoftRejectIfWithComment(!ShardIdFull(prev_blocks[0]).is_valid_ext(), "previous block does not have a valid id");
       if (ShardIdFull(prev_blocks[0]) != shard_) {

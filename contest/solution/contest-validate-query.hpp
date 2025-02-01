@@ -103,6 +103,15 @@ auto t(Args&&... args) -> decltype(f(std::forward<Args>(args)...)) {
   }
 
 
+// So ... some original checks are reduntant
+// but they break the validation when they don't pass
+// and they assume that execution is sequential.
+// So, I'll have to carefully get rid of them
+#define ORIGINAL_CHECK CHECK // !IMPORTANT : replace with PassIf later
+#define ORIGINAL_CHECK_PassIf PassIf
+// ORIGINAL_CHECK_PassIf - manually confirmed to be redundant
+
+
 /*
 #define Dest2(a, b, v) \
   auto temp##__LINE__ = v; \
