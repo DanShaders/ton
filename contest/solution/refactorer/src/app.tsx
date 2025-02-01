@@ -8,6 +8,7 @@ import { myCppRules } from "./myCpp_rules";
 
 import classProperties from "./classProperties";
 import annotatedProperties from "./annotatedProperties";
+import { stringHash } from "./various";
 
 
 type ObjDict<T> = { [key: string]: T };
@@ -1034,7 +1035,7 @@ const CallGraph = () => {
         return <div style="padding: 10px; background-color: yellow; border: solid 1px black">${root.name}</div>;
       }
 
-      const containerWidth = Math.max(...Object.values(gr).map(pr => pr.x)) + blockWidth;
+      const containerWidth = Math.max(...Object.values(gr).map(pr => pr.x)) + blockWidth + horizontalSpacing;
       const containerHeight = Math.max(...Object.values(gr).map(pr => pr.y)) + blockHeight;
 
       return <>
@@ -1052,7 +1053,19 @@ const CallGraph = () => {
                   const y1 = parentPr.y + blockHeight / 2;
                   const x2 = childPr.x + blockWidth / 2;
                   const y2 = childPr.y + blockHeight / 2;
-                  return <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#222" stroke-width={2} />;
+                  // return <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#222" stroke-width={2} />;
+
+                  const pathKey = pr.f.name + '->' + child.name;
+                  const pathHash = stringHash(pathKey);
+                  const pathL = 25 + (pathHash % 20);
+                  const pathColor = `hsl(${pathHash % 360}, 100%, ${pathL}%)`;
+
+                  return <path d={`
+                    M ${x1} ${y1}
+                    C ${x1} ${y1 + (y2 - y1) / 2},
+                      ${x2} ${y1 + (y2 - y1) / 2},
+                      ${x2} ${y2}
+                  `} stroke={pathColor} stroke-width={2} fill="none" />;
                 }}</For>
               }</For>
             </svg>
