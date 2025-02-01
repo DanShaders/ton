@@ -164,6 +164,14 @@ const annotatedProperties: string[] = [
 	// Added for: unpack_prev_state
 	'prev_states',
 	'virt_roots_',
+
+
+	// Added for: request_neighbor_queues
+	'debug_checks_', // Initied with false, never changed
+
+
+	// Added for: request_neighbor_queues
+	'aux_mc_states_st1_',
 ];
 
 export default annotatedProperties;

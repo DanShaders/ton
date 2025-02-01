@@ -30,6 +30,8 @@ ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice 
   testIndex = ++globalTestIndex;
   // msg_proc_lt_.reserve(100000); // !TEMP_BAD_THREAD
 
+  //<%assigned%>: debug_checks_
+
   //<%assigned%>: shard_
   //<%assigned%>: workchain (available as computable from shard_)
   //<%assigned%>: id_
@@ -124,10 +126,10 @@ void ContestValidateQuery::start_up() {
 
     LOG(INFO) << "try_validate stage 0";
     PropDest2(state_usage_tree_, prev_state_root_, compute_prev_state()); // fatal_error(-666, "cannot compute previous state"); return;
-    request_neighbor_queues(); // fatal_error("cannot request neighbor output queues"); return;
 
 
 
+    // _request_neighbor_queues(); // fatal_error("cannot request neighbor output queues"); return;
     // _unpack_prev_state(); // fatal_error("cannot unpack previous state"); return;
     // _init_next_state(); // fatal_error("cannot unpack previous state"); return;
     // _check_utime_lt(); // reject_query("creation utime/lt of the new block is invalid"); return;

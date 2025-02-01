@@ -859,6 +859,7 @@ void ContestValidateQuery::unpack_prev_state() {
     // return _unpack_one_prev_state(ps_, prev_blocks.at(0), prev_state_root_) && (!after_split_ || split_prev_state(ps_));
   }
 
+  //<%replace_usage%>: aux_mc_states_ -> aux_mc_states_st1_
   //<%assigned%>: aux_mc_states_
 							//<%generated%>
 							if (--__pending_fix_all_processed_upto == 0) my_threader.launch([this] { fix_all_processed_upto(); });
@@ -1034,7 +1035,15 @@ void ContestValidateQuery::request_neighbor_queues() {
 
   //<%replace_usage%>: neighbors_ -> neighbors_st1_
   //<%assigned%>: neighbors_st1_
+							//<%generated%>
+							if (--__pending_fix_all_processed_upto == 0) my_threader.launch([this] { fix_all_processed_upto(); });
+							//<%/generated%>
 
+  //<%replace_usage%>: aux_mc_states_ -> aux_mc_states_st1_
+  //<%assigned%>: aux_mc_states_st1_
+							//<%generated%>
+							if (--__pending_unpack_prev_state == 0) my_threader.launch([this] { unpack_prev_state(); });
+							//<%/generated%>
 }
 
 /**

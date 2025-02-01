@@ -493,7 +493,8 @@ public:
 
 
   //<{generated_atomic_vars
-  std::atomic<int> __pending_fix_all_processed_upto{2};
+  std::atomic<int> __pending_fix_all_processed_upto{3};
+  std::atomic<int> __pending_unpack_prev_state{1};
   std::atomic<int> __pending_add_trivial_neighbor{4};
   std::atomic<int> __pending_check_utime_lt{1};
   std::atomic<int> __pending_prepare_out_msg_queue_size{1};

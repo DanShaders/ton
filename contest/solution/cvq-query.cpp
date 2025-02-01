@@ -186,6 +186,7 @@ bool ContestValidateQuery::top_level_fatal_error(std::string err_msg, int err_co
 void ContestValidateQuery::finish_query() {
   // <{generated_atomic_zero_checks
   if (__pending_fix_all_processed_upto != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_fix_all_processed_upto ended up as: " << __pending_fix_all_processed_upto;
+  if (__pending_unpack_prev_state != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_unpack_prev_state ended up as: " << __pending_unpack_prev_state;
   if (__pending_add_trivial_neighbor != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_add_trivial_neighbor ended up as: " << __pending_add_trivial_neighbor;
   if (__pending_check_utime_lt != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_utime_lt ended up as: " << __pending_check_utime_lt;
   if (__pending_prepare_out_msg_queue_size != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_prepare_out_msg_queue_size ended up as: " << __pending_prepare_out_msg_queue_size;
