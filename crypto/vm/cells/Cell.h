@@ -81,6 +81,10 @@ class Cell : public CellTraits {
 
   td::Status check_equals_unloaded(const Ref<Cell>& other) const;
 
+  virtual bool is_data_cell() const {
+    return false;
+  }
+
  private:
   virtual td::uint16 do_get_depth(td::uint32 level) const = 0;
   virtual const Hash do_get_hash(td::uint32 level) const = 0;
