@@ -138,6 +138,11 @@ const annotatedProperties: string[] = [
 	'out_msg_queue_size_known_', // was closed, although it's never used
 	'have_out_msg_queue_size_in_state_',
 	'processed_account_dispatch_queues_',
+
+
+	// Added for: unpack_block_data
+	'block_root_',
+	'basechain_create_fee_',
 ];
 
 export default annotatedProperties;

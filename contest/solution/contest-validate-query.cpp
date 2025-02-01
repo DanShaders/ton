@@ -98,7 +98,9 @@ void ContestValidateQuery::unpack_block_candidate() {
     reject_throw("block BoC must contain exactly one root");
   }
   block_root_ = boc1.get_root_cell();
+  //<%assigned%>: block_root_
   ORIGINAL_CHECK(block_root_.not_null());
+
   // 3. initial block parse
   {
     auto guard = error_ctx_add_guard("parsing block header");
@@ -575,6 +577,7 @@ void ContestValidateQuery::fetch_config_params() {
         fatal_throw("cannot unpack BlockCreateFees from configuration parameter #14");
       }
     }
+    //<%assigned%>: basechain_create_fee_
   }
 }
 
@@ -1520,8 +1523,31 @@ void ContestValidateQuery::unpack_block_data() {
       vm::load_cell_slice_ref(std::move(extra.account_blocks)), 256, block::tlb::aug_ShardAccountBlocks);
 
   //<%assigned%>: in_msg_dict_
+							//<%generated%>
+							if (--__pending_build_new_message_queue == 0) my_threader.launch([this] { build_new_message_queue(); });
+							if (--__pending_check_in_msg_descr == 0) my_threader.launch([this] { check_in_msg_descr(); });
+							if (--__pending_check_out_msg_descr == 0) my_threader.launch([this] { check_out_msg_descr(); });
+							if (--__pending_check_in_queue == 0) my_threader.launch([this] { check_in_queue(); });
+							if (--__pending_check_transactions == 0) my_threader.launch([this] { check_transactions(); });
+							//<%/generated%>
   //<%assigned%>: out_msg_dict_
+							//<%generated%>
+							if (--__pending_build_new_message_queue == 0) my_threader.launch([this] { build_new_message_queue(); });
+							if (--__pending_precheck_message_queue_update == 0) my_threader.launch([this] { precheck_message_queue_update(); });
+							if (--__pending_unpack_dispatch_queue_update == 0) my_threader.launch([this] { unpack_dispatch_queue_update(); });
+							if (--__pending_check_in_msg_descr == 0) my_threader.launch([this] { check_in_msg_descr(); });
+							if (--__pending_check_out_msg_descr == 0) my_threader.launch([this] { check_out_msg_descr(); });
+							if (--__pending_check_in_queue == 0) my_threader.launch([this] { check_in_queue(); });
+							if (--__pending_check_transactions == 0) my_threader.launch([this] { check_transactions(); });
+							//<%/generated%>
   //<%assigned%>: account_blocks_dict_
+							//<%generated%>
+							if (--__pending_precheck_account_transactions == 0) my_threader.launch([this] { precheck_account_transactions(); });
+							if (--__pending_check_in_msg_descr == 0) my_threader.launch([this] { check_in_msg_descr(); });
+							if (--__pending_check_out_msg_descr == 0) my_threader.launch([this] { check_out_msg_descr(); });
+							if (--__pending_check_transactions == 0) my_threader.launch([this] { check_transactions(); });
+							if (--__pending_postcheck_account_updates == 0) my_threader.launch([this] { postcheck_account_updates(); });
+							//<%/generated%>
 
   LOG(DEBUG) << "validating InMsgDescr";
   if (!in_msg_dict_->validate_all()) {
@@ -1552,6 +1578,10 @@ void ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_r
     reject_throw("cannot unpack ValueFlow of the new block "s + id_.to_str());
   }
   //<%assigned%>: value_flow_
+							//<%generated%>
+							if (--__pending_check_new_state == 0) my_threader.launch([this] { check_new_state(); });
+							if (--__pending_postcheck_value_flow == 0) my_threader.launch([this] { postcheck_value_flow(); });
+							//<%/generated%>
 
   std::ostringstream os;
   value_flow_.show(os);
@@ -1630,6 +1660,9 @@ void ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_r
     reject_throw("cannot unpack ImportFees from the augmentation of the InMsgDescr dictionary");
   }
   //<%assigned%>: import_fees_
+							//<%generated%>
+							if (--__pending_postcheck_value_flow == 0) my_threader.launch([this] { postcheck_value_flow(); });
+							//<%/generated%>
 
   if (cc != value_flow_.imported) {
     reject_throw("ValueFlow for "s + id_.to_str() + " declares imported=" + value_flow_.imported.to_str() +
@@ -1648,6 +1681,9 @@ void ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_r
         "dictionary");
   }
   //<%assigned%>: transaction_fees_
+							//<%generated%>
+							if (--__pending_postcheck_value_flow == 0) my_threader.launch([this] { postcheck_value_flow(); });
+							//<%/generated%>
 }
 
 /**
