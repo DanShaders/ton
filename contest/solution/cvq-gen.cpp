@@ -17,6 +17,8 @@ void ContestValidateQuery::generated_root() {
   my_threader.launch([this] { build_new_message_queue(); });
   my_threader.launch([this] { check_new_state(); });
   // generated_dag_root}/>
+
+  my_threader.waitForAll();
 }
 
 
