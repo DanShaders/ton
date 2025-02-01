@@ -43,9 +43,9 @@ void ContestValidateQuery::reject_throw(std::string err_msg, td::Status error, t
  *
  * @param error The error encountered.
  */
-void ContestValidateQuery::abort_query(td::Status error) {
-  (void)fatal_error(std::move(error));
-}
+// void ContestValidateQuery::abort_query(td::Status error) {
+//   (void)fatal_error(std::move(error));
+// }
 
 /**
  * Rejects the validation and logs an error message.
@@ -55,7 +55,7 @@ void ContestValidateQuery::abort_query(td::Status error) {
  *
  * @returns False indicating that the validation failed.
  */
-bool ContestValidateQuery::reject_query(std::string error, td::BufferSlice reason) {
+bool ContestValidateQuery::top_level_reject_query(std::string error, td::BufferSlice reason) {
   error = error_ctx() + error;
   if (!in_main_thread()) { // in_multithreading
     // LOG(ERROR) << "Test index #" << testIndex << " will throw from thread: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
@@ -81,9 +81,9 @@ bool ContestValidateQuery::reject_query(std::string error, td::BufferSlice reaso
  *
  * @returns False indicating that the validation failed.
  */
-bool ContestValidateQuery::reject_query(std::string err_msg, td::Status error, td::BufferSlice reason) {
+bool ContestValidateQuery::top_level_reject_query(std::string err_msg, td::Status error, td::BufferSlice reason) {
   error.ensure_error();
-  return reject_query(err_msg + " : " + error.to_string(), std::move(reason));
+  return top_level_reject_query(err_msg + " : " + error.to_string(), std::move(reason));
 }
 
 /**
@@ -94,7 +94,7 @@ bool ContestValidateQuery::reject_query(std::string err_msg, td::Status error, t
  *
  * @returns False indicating that the validation failed.
  */
-bool ContestValidateQuery::soft_reject_query(std::string error, td::BufferSlice reason) {
+bool ContestValidateQuery::top_level_soft_reject_query(std::string error, td::BufferSlice reason) {
   error = error_ctx() + error;
   LOG(WARNING) << "SOFT REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
   if (main_promise) {
@@ -126,7 +126,7 @@ void ContestValidateQuery::fatal_throw(int err_code, std::string err_msg) {
  *
  * @returns False indicating that the validation failed.
  */
-bool ContestValidateQuery::fatal_error(td::Status error) {
+bool ContestValidateQuery::top_level_fatal_error(td::Status error) {
   // LOG(ERROR) << "fatal error: " << error.to_string(); // !TEMP_DEBUG
   error.ensure_error();
   LOG(WARNING) << "aborting validation of block candidate for " << shard_.to_str() << " : " << error.to_string();
@@ -150,8 +150,8 @@ bool ContestValidateQuery::fatal_error(td::Status error) {
  *
  * @returns False indicating that the validation failed.
  */
-bool ContestValidateQuery::fatal_error(int err_code, std::string err_msg) {
-  return fatal_error(td::Status::Error(err_code, error_ctx() + err_msg));
+bool ContestValidateQuery::top_level_fatal_error(int err_code, std::string err_msg) {
+  return top_level_fatal_error(td::Status::Error(err_code, error_ctx() + err_msg));
 }
 
 /**
@@ -163,9 +163,9 @@ bool ContestValidateQuery::fatal_error(int err_code, std::string err_msg) {
  *
  * @returns False indicating that the validation failed.
  */
-bool ContestValidateQuery::fatal_error(int err_code, std::string err_msg, td::Status error) {
+bool ContestValidateQuery::top_level_fatal_error(int err_code, std::string err_msg, td::Status error) {
   error.ensure_error();
-  return fatal_error(err_code, err_msg + " : " + error.to_string());
+  return top_level_fatal_error(err_code, err_msg + " : " + error.to_string());
 }
 
 /**
@@ -176,8 +176,8 @@ bool ContestValidateQuery::fatal_error(int err_code, std::string err_msg, td::St
  *
  * @returns False indicating that the validation failed.
  */
-bool ContestValidateQuery::fatal_error(std::string err_msg, int err_code) {
-  return fatal_error(td::Status::Error(err_code, error_ctx() + err_msg));
+bool ContestValidateQuery::top_level_fatal_error(std::string err_msg, int err_code) {
+  return top_level_fatal_error(td::Status::Error(err_code, error_ctx() + err_msg));
 }
 
 /**

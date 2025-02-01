@@ -345,20 +345,20 @@ public:
   void reject_throw(std::string err_msg, td::Status error, td::BufferSlice reason = {});
 
   void finish_query();
-  void abort_query(td::Status error);
-  bool reject_query(std::string error, td::BufferSlice reason = {});
-  bool reject_query(std::string err_msg, td::Status error, td::BufferSlice reason = {});
-  bool soft_reject_query(std::string error, td::BufferSlice reason = {});
+  // void abort_query(td::Status error);
+  bool top_level_reject_query(std::string error, td::BufferSlice reason = {});
+  bool top_level_reject_query(std::string err_msg, td::Status error, td::BufferSlice reason = {});
+  bool top_level_soft_reject_query(std::string error, td::BufferSlice reason = {});
   void start_up() override;
 
   void fatal_throw(td::Status error);
   void fatal_throw(std::string err_msg, int err_code = -666);
   void fatal_throw(int err_code, std::string err_msg);
 
-  bool fatal_error(td::Status error);
-  bool fatal_error(int err_code, std::string err_msg);
-  bool fatal_error(int err_code, std::string err_msg, td::Status error);
-  bool fatal_error(std::string err_msg, int err_code = -666);
+  bool top_level_fatal_error(td::Status error);
+  bool top_level_fatal_error(int err_code, std::string err_msg);
+  bool top_level_fatal_error(int err_code, std::string err_msg, td::Status error);
+  bool top_level_fatal_error(std::string err_msg, int err_code = -666);
 
   std::string error_ctx() const {
     return error_ctx_.as_string();

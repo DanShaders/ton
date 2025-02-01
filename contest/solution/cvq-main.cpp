@@ -131,7 +131,7 @@ void ContestValidateQuery::start_up() {
     LOG(INFO) << "try_validate stage 1";
     LOG(INFO) << "running automated validity checks for block candidate " << id_.to_str();
     if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
-      reject_query("block "s + id_.to_str() + " failed to pass automated validity checks"); return;
+      reject_throw("block "s + id_.to_str() + " failed to pass automated validity checks"); return;
     }
 
     fix_all_processed_upto(); // fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks"); return;
@@ -164,11 +164,11 @@ void ContestValidateQuery::start_up() {
 
     finish_query();
   } catch (std::string error) {
-    reject_query(error); return;
+    top_level_reject_query(error); return;
   } catch (vm::VmError& err) {
-    fatal_error(-666, err.get_msg()); return;
+    top_level_fatal_error(-666, err.get_msg()); return;
   } catch (vm::VmVirtError& err) {
-    reject_query(err.get_msg()); return;
+    top_level_reject_query(err.get_msg()); return;
   }
 }
 

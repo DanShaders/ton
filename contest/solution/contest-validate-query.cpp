@@ -105,12 +105,12 @@ void ContestValidateQuery::unpack_block_candidate() {
     init_parse();
     // try {
     //   if (!init_parse()) {
-    //     return reject_query("invalid block header");
+    //     return _reject_query("invalid block header");
     //   }
     // } catch (vm::VmError& err) {
-    //   return reject_query(err.get_msg());
+    //   return _reject_query(err.get_msg());
     // } catch (vm::VmVirtError& err) {
-    //   return reject_query(err.get_msg());
+    //   return _reject_query(err.get_msg());
     // }
   }
   // ...
@@ -289,12 +289,12 @@ void ContestValidateQuery::extract_collated_data() {
     extract_collated_data_from(croot, i);
     // try {
     //   if (!extract_collated_data_from(croot, i)) {
-    //     return reject_query("cannot unpack collated datum");
+    //     return _reject_query("cannot unpack collated datum");
     //   }
     // } catch (vm::VmError& err) {
-    //   return reject_query(PSTRING() << "vm error " << err.get_msg());
+    //   return _reject_query(PSTRING() << "vm error " << err.get_msg());
     // } catch (vm::VmVirtError& err) {
-    //   return reject_query(PSTRING() << "virtualization error " << err.get_msg());
+    //   return _reject_query(PSTRING() << "virtualization error " << err.get_msg());
     // }
   }
   if (!have_extra_collated_data_) {
@@ -311,12 +311,12 @@ void ContestValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
   LOG(INFO) << "in ContestValidateQuery::after_get_mc_state() for " << mc_blkid_.to_str();
   // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   if (res.is_error()) {
-    // fatal_error(res.move_as_error());
+    // _fatal_error(res.move_as_error());
     throw res.move_as_error().to_string();
     return;
   }
   process_mc_state(Ref<MasterchainState>(res.move_as_ok()));
-    // fatal_error("cannot process masterchain state for "s + mc_blkid_.to_str());
+    // _fatal_error("cannot process masterchain state for "s + mc_blkid_.to_str());
 }
 
 /**
@@ -329,7 +329,7 @@ void ContestValidateQuery::after_get_shard_state(int idx, td::Result<Ref<ShardSt
   LOG(INFO) << "in ContestValidateQuery::after_get_shard_state(" << idx << ")";
   // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   if (res.is_error()) {
-    // fatal_error(res.move_as_error());
+    // _fatal_error(res.move_as_error());
     throw res.move_as_error().to_string();
     return;
   }
@@ -460,9 +460,9 @@ void ContestValidateQuery::try_unpack_mc_state() {
     //<%assigned%>: deferring_messages_enabled_
 
   // } catch (vm::VmError& err) {
-  //   return fatal_error(-666, err.get_msg());
+  //   return _fatal_error(-666, err.get_msg());
   // } catch (vm::VmVirtError& err) {
-  //   return fatal_error(-666, err.get_msg());
+  //   return _fatal_error(-666, err.get_msg());
   // }
 }
 
@@ -626,7 +626,7 @@ void ContestValidateQuery::check_prev_block_exact(const BlockIdExt& listed, cons
 
 /**
  * Checks the validity of the shard configuration of the current shard.
- * Almost the same as in Collator (main change: fatal_error -> reject_query).
+ * Almost the same as in Collator (main change: _fatal_error -> _reject_query).
  *
  * @returns True if the shard's configuration is valid, False otherwise.
  */
@@ -808,20 +808,20 @@ void ContestValidateQuery::unpack_merge_prev_state() {
   // 3. unpack previous states
   // 3.1. unpack left ancestor
   unpack_one_prev_state(ps_, prev_blocks.at(0), std::move(root0));
-    //return fatal_error("cannot unpack the state of left ancestor "s + prev_blocks.at(0).to_str());
+    //return _fatal_error("cannot unpack the state of left ancestor "s + prev_blocks.at(0).to_str());
   
   // 3.2. unpack right ancestor
   block::ShardState ss1;
   unpack_one_prev_state(ss1, prev_blocks.at(1), std::move(root1));
-    //return fatal_error("cannot unpack the state of right ancestor "s + prev_blocks.at(1).to_str());
+    //return _fatal_error("cannot unpack the state of right ancestor "s + prev_blocks.at(1).to_str());
   
   // 4. merge the two ancestors of the current state
   LOG(INFO) << "merging the two previous states";
   auto res = ps_.merge_with(ss1);
   if (res.is_error()) {
-    // return fatal_error(std::move(res)) || fatal_error("cannot merge the two previous states");
+    // return _fatal_error(std::move(res)) || _fatal_error("cannot merge the two previous states");
     // What is this error OR-ing even supposed to mean?
-    fatal_throw(std::move(res)); // || fatal_error("cannot merge the two previous states");
+    fatal_throw(std::move(res)); // || _fatal_error("cannot merge the two previous states");
   }
 }
 
@@ -837,7 +837,7 @@ void ContestValidateQuery::unpack_prev_state(Ref<vm::Cell> prev_state_root_) {
   CHECK(prev_state_root_.not_null());
   if (after_merge_) {
     unpack_merge_prev_state();
-      // return fatal_error("unable to unpack/merge previous states immediately after a merge");
+      // return _fatal_error("unable to unpack/merge previous states immediately after a merge");
   } else {
     CHECK(prev_states.size() == 1);
     // unpack previous state
@@ -989,26 +989,22 @@ void ContestValidateQuery::request_neighbor_queues() {
 void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQueue>> res) {
   // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   if (res.is_error()) {
-    fatal_error(res.move_as_error());
-    return;
+    fatal_throw(res.move_as_error());
   }
   Ref<MessageQueue> outq_descr = res.move_as_ok();
   block::McShardDescr& descr = neighbors_.at(i);
   LOG(INFO) << "obtained outbound queue for neighbor #" << i << " : " << descr.shard().to_str();
   if (outq_descr->get_block_id() != descr.blk_) {
     LOG(DEBUG) << "outq_descr->id = " << outq_descr->get_block_id().to_str() << " ; descr.id = " << descr.blk_.to_str();
-    fatal_error(
+    fatal_throw(
         -667, "invalid outbound queue information returned for "s + descr.shard().to_str() + " : id or hash mismatch");
-    return;
   }
   if (outq_descr->root_cell().is_null()) {
-    fatal_error("no OutMsgQueueInfo in queue info in a neighbor state");
-    return;
+    fatal_throw("no OutMsgQueueInfo in queue info in a neighbor state");
   }
   block::gen::OutMsgQueueInfo::Record qinfo;
   if (!tlb::unpack_cell(outq_descr->root_cell(), qinfo)) {
-    fatal_error("cannot unpack neighbor output queue info");
-    return;
+    fatal_throw("cannot unpack neighbor output queue info");
   }
   descr.set_queue_root(qinfo.out_queue->prefetch_ref(0));
   // TODO: comment the next two lines in the future when the output queues become huge
@@ -1029,8 +1025,7 @@ void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQ
   }
   descr.processed_upto = block::MsgProcessedUptoCollection::unpack(descr.shard(), qinfo.proc_info);
   if (!descr.processed_upto) {
-    fatal_error("cannot unpack ProcessedUpto in neighbor output queue info for neighbor "s + descr.blk_.to_str());
-    return;
+    fatal_throw("cannot unpack ProcessedUpto in neighbor output queue info for neighbor "s + descr.blk_.to_str());
   }
   outq_descr.clear();
   do {
@@ -1141,22 +1136,19 @@ void ContestValidateQuery::after_get_aux_shard_state(ton::BlockIdExt blkid, td::
   LOG(DEBUG) << "in ContestValidateQuery::after_get_aux_shard_state(" << blkid.to_str() << ")";
   // LOG(ERROR) << "Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   if (res.is_error()) {
-    fatal_error("cannot load auxiliary masterchain state for "s + blkid.to_str() + " : " +
+    fatal_throw("cannot load auxiliary masterchain state for "s + blkid.to_str() + " : " +
                 res.move_as_error().to_string());
-    return;
   }
   auto state = Ref<MasterchainStateQ>(res.move_as_ok());
   if (state.is_null()) {
-    fatal_error("auxiliary masterchain state for "s + blkid.to_str() + " turned out to be null");
-    return;
+    fatal_throw("auxiliary masterchain state for "s + blkid.to_str() + " turned out to be null");
   }
   if (state->get_block_id() != blkid) {
-    fatal_error("auxiliary masterchain state for "s + blkid.to_str() +
+    fatal_throw("auxiliary masterchain state for "s + blkid.to_str() +
                 " turned out to correspond to a different block " + state->get_block_id().to_str());
-    return;
   }
   register_mc_state(std::move(state));
-    // fatal_error("cannot register auxiliary masterchain state for "s + blkid.to_str());
+    // _fatal_error("cannot register auxiliary masterchain state for "s + blkid.to_str());
 
   // try_validate();
 }
@@ -1290,22 +1282,22 @@ void ContestValidateQuery::fix_all_processed_upto() {
   // The following lines are carefully (hopefully) moved to "_unpack_prev_state" to expose __ps as soon as possible
   // CHECK(_ps_.processed_upto_);
   // _fix_processed_upto(*_ps_.processed_upto_);
-    //return fatal_error("Cannot adjust old ProcessedUpto of our shard state");
+    //return _fatal_error("Cannot adjust old ProcessedUpto of our shard state");
 
   // if (sibling_processed_upto_ && !fix_processed_upto(*sibling_processed_upto_))
   if (sibling_processed_upto_)
     fix_processed_upto(*sibling_processed_upto_);
-    //return fatal_error("Cannot adjust old ProcessedUpto of the shard state of our virtual sibling");
+    //return _fatal_error("Cannot adjust old ProcessedUpto of the shard state of our virtual sibling");
 
   fix_processed_upto(*ns_.processed_upto_, true);
-    //return fatal_error("Cannot adjust new ProcessedUpto of our shard state");
+    //return _fatal_error("Cannot adjust new ProcessedUpto of our shard state");
   //<%assigned%>: ns_.processed_upto_
 
 
   for (auto& descr : neighbors_) {
     CHECK(descr.processed_upto);
     fix_processed_upto(*descr.processed_upto);
-      //return fatal_error("Cannot adjust ProcessedUpto of neighbor "s + descr.blk_.to_str());
+      //return _fatal_error("Cannot adjust ProcessedUpto of neighbor "s + descr.blk_.to_str());
   }
   //<%replace_usage%>: neighbors_ -> neighbors_st1_
   //<%assigned%>: neighbors_st2_
@@ -1878,7 +1870,7 @@ void ContestValidateQuery::precheck_one_account_block(td::ConstBitPtr acc_id, Re
               CHECK(key_len == 64);
               precheck_one_transaction(acc_id, key.get_uint(64), std::move(value), old_state.last_trans_hash,
                                        old_state.last_trans_lt, last_trans_lt_len, acc_state_hash);
-                // reject_query(PSTRING() << "transaction " << key.get_uint(64) << " of account " << acc_id.to_hex(256) << " is invalid");
+                // _reject_query(PSTRING() << "transaction " << key.get_uint(64) << " of account " << acc_id.to_hex(256) << " is invalid");
               return true;
             })) {
       reject_throw("invalid transaction dictionary in AccountBlock of "s + acc_id.to_hex(256));
@@ -1905,7 +1897,7 @@ void ContestValidateQuery::precheck_account_transactions() {
             [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
               CHECK(key_len == 256);
               precheck_one_account_block(key, std::move(value)); // ||
-                // reject_query("invalid AccountBlock for account "s + key.to_hex(256) + " in the new block "s + id_.to_str());
+                // _reject_query("invalid AccountBlock for account "s + key.to_hex(256) + " in the new block "s + id_.to_str());
               return true;
             })) {
       return reject_throw("invalid ShardAccountBlock dictionary in the new block "s + id_.to_str());
@@ -1980,16 +1972,16 @@ void ContestValidateQuery::build_new_message_queue() {
         CHECK(block::gen::csr_unpack(value, rec));
         if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.in_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
-          return fatal_error("cannot unpack msg_import_deferred_fin");
+          fatal_throw("cannot unpack msg_import_deferred_fin");
         }
 
         WorkchainId wc;
         StdSmcAddress addr;
         if (!block::tlb::t_MsgAddressInt.extract_std_address(msg.src, wc, addr)) {
-          return fatal_error("failed to extract src address for msg_import_deferred_fin");
+          fatal_throw("failed to extract src address for msg_import_deferred_fin");
         }
         if (!block::remove_dispatch_queue_entry(*ns_.dispatch_queue_, addr, msg.created_lt)) {
-          return fatal_error("failed to remove dispatch queue entry for msg_import_deferred_fin");
+          fatal_throw("failed to remove dispatch queue entry for msg_import_deferred_fin");
         }
         break;
       }
@@ -2000,16 +1992,16 @@ void ContestValidateQuery::build_new_message_queue() {
         CHECK(block::gen::csr_unpack(value, rec));
         if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.in_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
-          return fatal_error("cannot unpack msg_import_deferred_tr");
+          fatal_throw("cannot unpack msg_import_deferred_tr");
         }
 
         WorkchainId wc;
         StdSmcAddress addr;
         if (!block::tlb::t_MsgAddressInt.extract_std_address(msg.src, wc, addr)) {
-          return fatal_error("failed to extract src address for msg_import_deferred_tr");
+          fatal_throw("failed to extract src address for msg_import_deferred_tr");
         }
         if (!block::remove_dispatch_queue_entry(*ns_.dispatch_queue_, addr, msg.created_lt)) {
-          return fatal_error("failed to remove dispatch queue entry for msg_import_deferred_tr");
+          fatal_throw("failed to remove dispatch queue entry for msg_import_deferred_tr");
         }
         break;
       }
@@ -2050,7 +2042,7 @@ void ContestValidateQuery::build_new_message_queue() {
         CHECK(block::gen::csr_unpack(value, rec));
         if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.out_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
-          return fatal_error("cannot unpack msg_export_new");
+          fatal_throw("cannot unpack msg_export_new");
         }
         LogicalTime enqueued_lt = msg.created_lt;
 
@@ -2068,7 +2060,7 @@ void ContestValidateQuery::build_new_message_queue() {
         vm::CellBuilder cb;
         CHECK(cb.store_long_bool(enqueued_lt) && cb.store_ref_bool(rec.out_msg));
         if (!ns_.out_msg_queue_->set_builder(queue_key, cb, vm::Dictionary::SetMode::Add)) {
-          return fatal_error("failed to store message to out msg queue for msg_export_new");
+          fatal_throw("failed to store message to out msg queue for msg_export_new");
         }
         ++ns_.out_msg_queue_size_.value(); // !IMPORTANT: make attomic?
         break;
@@ -2083,7 +2075,7 @@ void ContestValidateQuery::build_new_message_queue() {
         CHECK(block::gen::csr_unpack(value, rec));
         if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.out_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
-          return fatal_error("cannot unpack msg_export_tr");
+          fatal_throw("cannot unpack msg_export_tr");
         }
         LogicalTime enqueued_lt = start_lt_;
 
@@ -2101,7 +2093,7 @@ void ContestValidateQuery::build_new_message_queue() {
         vm::CellBuilder cb;
         CHECK(cb.store_long_bool(enqueued_lt) && cb.store_ref_bool(rec.out_msg));
         if (!ns_.out_msg_queue_->set_builder(queue_key, cb, vm::Dictionary::SetMode::Add)) {
-          return fatal_error("failed to store message to out msg queue for msg_export_tr");
+          fatal_throw("failed to store message to out msg queue for msg_export_tr");
         }
         ++ns_.out_msg_queue_size_.value();
         break;
@@ -2112,7 +2104,7 @@ void ContestValidateQuery::build_new_message_queue() {
         block::gen::CommonMsgInfo::Record_int_msg_info msg;
         if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.out_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
-          return fatal_error("cannot unpack msg_export_deq_imm");
+          fatal_throw("cannot unpack msg_export_deq_imm");
         }
 
         auto src_prefix = block::tlb::MsgAddressInt::get_prefix(msg.src);
@@ -2127,7 +2119,7 @@ void ContestValidateQuery::build_new_message_queue() {
         ptr.advance(64);
         ptr.copy_from(key, 256);
         if (ns_.out_msg_queue_->lookup_delete(queue_key).is_null()) {
-          return fatal_error("failed to delete message from out msg queue for msg_export_deq_imm");
+          fatal_throw("failed to delete message from out msg queue for msg_export_deq_imm");
         }
         --ns_.out_msg_queue_size_.value();
         break;
@@ -2139,27 +2131,27 @@ void ContestValidateQuery::build_new_message_queue() {
         CHECK(block::gen::csr_unpack(value, rec)); // ??TODO: Duplicate function invocation? (here and in many other places)
         if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.out_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
-          return fatal_error("cannot unpack msg_export_new");
+          fatal_throw("cannot unpack msg_export_new");
         }
         LogicalTime lt = msg.created_lt;
         WorkchainId wc;
         StdSmcAddress addr;
         if (!block::tlb::t_MsgAddressInt.extract_std_address(msg.src, wc, addr)) {
-          return fatal_error("failed to extract src address for msg_export_new_defer");
+          fatal_throw("failed to extract src address for msg_export_new_defer");
         }
 
         vm::Dictionary dispatch_dict{64};
         td::uint64 dispatch_dict_size;
         if (!block::unpack_account_dispatch_queue(ns_.dispatch_queue_->lookup(addr), dispatch_dict,
                                                   dispatch_dict_size)) {
-          return fatal_error(PSTRING() << "cannot unpack AccountDispatchQueue for account " << addr.to_hex());
+          fatal_throw(PSTRING() << "cannot unpack AccountDispatchQueue for account " << addr.to_hex());
         }
         td::BitArray<64> key;
         key.store_ulong(lt);
         vm::CellBuilder cb;
         CHECK(cb.store_long_bool(lt) && cb.store_ref_bool(rec.out_msg));
         if (!dispatch_dict.set_builder(key, cb, vm::Dictionary::SetMode::Add)) {
-          return fatal_error(PSTRING() << "cannot add message to AccountDispatchQueue for account " << addr.to_hex()
+          fatal_throw(PSTRING() << "cannot add message to AccountDispatchQueue for account " << addr.to_hex()
                                        << ", lt=" << lt);
         }
         ++dispatch_dict_size;
@@ -2172,10 +2164,10 @@ void ContestValidateQuery::build_new_message_queue() {
         block::gen::CommonMsgInfo::Record_int_msg_info msg;
         if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.out_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
-          return fatal_error("cannot unpack msg_export_deferred_tr");
+          fatal_throw("cannot unpack msg_export_deferred_tr");
         }
         if (!env.emitted_lt) {
-          return fatal_error("no emitted_lt in msg_export_deferred_tr");
+          fatal_throw("no emitted_lt in msg_export_deferred_tr");
         }
         LogicalTime enqueued_lt = env.emitted_lt.value();
 
@@ -2193,13 +2185,13 @@ void ContestValidateQuery::build_new_message_queue() {
         vm::CellBuilder cb;
         CHECK(cb.store_long_bool(enqueued_lt) && cb.store_ref_bool(rec.out_msg));
         if (!ns_.out_msg_queue_->set_builder(queue_key, cb, vm::Dictionary::SetMode::Add)) {
-          return fatal_error("failed to store message to out msg queue for msg_export_deferred_tr");
+          fatal_throw("failed to store message to out msg queue for msg_export_deferred_tr");
         }
         ++ns_.out_msg_queue_size_.value();
         break;
       }
       case block::gen::OutMsg::msg_export_deq: {
-        return fatal_error("msg_export_deq are deprecated");
+        fatal_throw("msg_export_deq are deprecated");
       }
       case block::gen::OutMsg::msg_export_deq_short: {
         block::gen::OutMsg::Record_msg_export_deq_short rec;
@@ -2212,7 +2204,7 @@ void ContestValidateQuery::build_new_message_queue() {
         ptr.advance(64);
         ptr.copy_from(key, 256);
         if (ns_.out_msg_queue_->lookup_delete(queue_key).is_null()) {
-          return fatal_error("cannot delete from out msg queue");
+          fatal_throw("cannot delete from out msg queue");
         }
         --ns_.out_msg_queue_size_.value();
         break;
@@ -2223,7 +2215,7 @@ void ContestValidateQuery::build_new_message_queue() {
         block::gen::CommonMsgInfo::Record_int_msg_info msg;
         if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.out_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
-          return fatal_error("cannot unpack msg_export_tr_rec");
+          fatal_throw("cannot unpack msg_export_tr_rec");
         }
         LogicalTime enqueued_lt = start_lt_;
 
@@ -2241,7 +2233,7 @@ void ContestValidateQuery::build_new_message_queue() {
         ptr.advance(64);
         ptr.copy_from(key, 256);
         if (ns_.out_msg_queue_->lookup_delete(queue_key).is_null()) {
-          return fatal_error("failed to delete requeued message from out msg queue");
+          fatal_throw("failed to delete requeued message from out msg queue");
         }
 
         ptr.store_int(next_prefix.workchain, 32);
@@ -2252,7 +2244,7 @@ void ContestValidateQuery::build_new_message_queue() {
         vm::CellBuilder cb;
         CHECK(cb.store_long_bool(enqueued_lt) && cb.store_ref_bool(rec.out_msg));
         if (!ns_.out_msg_queue_->set_builder(queue_key, cb, vm::Dictionary::SetMode::Add)) {
-          return fatal_error("failed to store message to out msg queue for msg_export_tr_req");
+          fatal_throw("failed to store message to out msg queue for msg_export_tr_req");
         }
         break;
       }
@@ -3338,7 +3330,7 @@ void ContestValidateQuery::check_in_msg_descr() {
             [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
               CHECK(key_len == 256);
               check_in_msg(key, std::move(value));
-              // reject_query("invalid InMsg with key (message hash) "s + key.to_hex(256) + " in the new block "s + id_.to_str());
+              // _reject_query("invalid InMsg with key (message hash) "s + key.to_hex(256) + " in the new block "s + id_.to_str());
               return true;
             })) {
       reject_throw("invalid InMsgDescr dictionary in the new block "s + id_.to_str());
@@ -4002,7 +3994,7 @@ void ContestValidateQuery::check_out_msg_descr() {
             [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
               CHECK(key_len == 256);
               check_out_msg(key, std::move(value));
-              // reject_query("invalid OutMsg with key "s + key.to_hex(256) + " in the new block "s + id_.to_str());
+              // _reject_query("invalid OutMsg with key "s + key.to_hex(256) + " in the new block "s + id_.to_str());
               return true;
             })) {
       reject_throw("invalid OutMsgDescr dictionary in the new block "s + id_.to_str());
@@ -4401,13 +4393,11 @@ std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBi
   auto new_acc = make_account_from(addr, std::move(dict_entry.first));
   // return {}; // !TEMP_THREAD
   if (!new_acc) {
-    reject_query("cannot load state of account "s + addr.to_hex(256) + " from previous shardchain state");
-    return {};
+    reject_throw("cannot load state of account "s + addr.to_hex(256) + " from previous shardchain state");
   }
   if (!new_acc->belongs_to_shard(shard_)) {
-    reject_query(PSTRING() << "old state of account " << addr.to_hex(256)
+    reject_throw(PSTRING() << "old state of account " << addr.to_hex(256)
                            << " does not really belong to current shard");
-    return {};
   }
   return new_acc;
 }
@@ -5084,7 +5074,7 @@ void ContestValidateQuery::check_transactions() {
 
   // return true;
   // std::thread ttt([this] () {
-  //   reject_query(PSTRING() << "Test reasons");
+  //   _reject_query(PSTRING() << "Test reasons");
   // });
   // // ttt.join();
 
@@ -5157,7 +5147,7 @@ void ContestValidateQuery::check_transactions() {
         //   temp += j;
         // tempKeep += temp;
         // // LOG(ERROR) << "i: " << i << ", Stored main_thread_id: " << render_thread_id(main_thread_id) << ", current thread id: " << render_thread_id(std::this_thread::get_id()) << ", temp: " << temp; // !TEMP_THREAD
-        // return reject_query("No reason");
+        // return _reject_query("No reason");
         
         check_account_transactions((td::ConstBitPtr)keys[i], td::Ref<vm::CellSlice>(&values[i]));
         return true;
@@ -5166,7 +5156,7 @@ void ContestValidateQuery::check_transactions() {
     // try { results.back().get(); }
     // catch (std::string error) {
     //   LOG(ERROR) << "Test index #" << testIndex << ": caught string in thread " << render_thread_id(std::this_thread::get_id());
-    //   return reject_query(error);
+    //   return _reject_query(error);
     // }
   }
   // return true;
@@ -5184,13 +5174,13 @@ void ContestValidateQuery::check_transactions() {
     //   // sleep(2);
     //   // leave_multithreading();
 
-    //   return reject_query(error);
+    //   return _reject_query(error);
     // } catch (...) {
     //   // LOG(ERROR)<< "Test index #" << testIndex << ": caught ...";
     //   // sleep(2);
 
     //   // leave_multithreading();
-    //   return reject_query("Unknown exception caught");
+    //   return _reject_query("Unknown exception caught");
     // }
   }
 
@@ -5217,11 +5207,11 @@ void ContestValidateQuery::check_transactions() {
     } catch (std::string error) {
       LOG(ERROR) << "1";
       leave_multithreading();
-      return reject_query(error);
+      return _reject_query(error);
     } catch (...) {
       LOG(ERROR) << "2";
       leave_multithreading();
-      return reject_query("Unknown exception caught");
+      return _reject_query("Unknown exception caught");
     }
   }
   leave_multithreading();
