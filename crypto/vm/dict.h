@@ -70,6 +70,47 @@ struct LabelParser {
     remainder.clear();
   }
 
+private:
+  bool parse_label(CellSlice& cs, int max_label_len);
+};
+
+struct LabelParserStatic {
+  enum { chk_none = 0, chk_min = 1, chk_size = 2, chk_all = 3 };
+  CellSlice remainder;
+
+  int l_offs;
+  int l_same;
+  int l_bits;
+  unsigned s_bits;
+
+  LabelParserStatic() = default;
+  LabelParserStatic(Ref<Cell>&& cell, int max_label_len, int auto_validate = chk_all);
+
+  void init(Ref<Cell>&& cell, int max_label_len, int auto_validate = chk_all);
+  int is_valid() const {
+    return l_offs;
+  }
+  void validate() const;
+  void validate_simple(int n) const;
+  void validate_ext(int n) const;
+  bool is_prefix_of(td::ConstBitPtr key, int len) const;
+  bool has_prefix(td::ConstBitPtr key, int len) const;
+  int common_prefix_len(td::ConstBitPtr key, int len) const;
+  int extract_label_to(td::BitPtr to);
+  int copy_label_prefix_to(td::BitPtr to, int max_len) const;
+  td::ConstBitPtr bits() const {
+    return remainder.data_bits();
+  }
+  td::ConstBitPtr bits_end() const {
+    return bits() + l_bits;
+  }
+  void skip_label() {
+    remainder.advance(s_bits);
+  }
+  void clear() {
+    remainder.clear();
+  }
+
  private:
   bool parse_label(CellSlice& cs, int max_label_len);
 };
@@ -88,6 +129,7 @@ struct AugmentationData {
     return check_leaf(extra_cs, val_cs);
   }
   Ref<vm::CellSlice> extract_extra(vm::CellSlice& cs) const;
+  vm::CellSlice extract_extra_cs(vm::CellSlice& cs) const;
   Ref<vm::CellSlice> extract_extra(Ref<vm::CellSlice> cs_ref) const;
   bool extract_extra_to(vm::CellSlice& cs, Ref<vm::CellSlice>& extra_csr) const {
     return (extra_csr = extract_extra(cs)).not_null();
@@ -221,6 +263,7 @@ class DictionaryFixed : public DictionaryBase {
   bool int_key_exists(long long key);
   bool uint_key_exists(unsigned long long key);
   Ref<CellSlice> lookup(td::ConstBitPtr key, int key_len);
+  CellSlice lookup_cs(td::ConstBitPtr key, int key_len);
   Ref<CellSlice> lookup_delete(td::ConstBitPtr key, int key_len);
   Ref<CellSlice> get_minmax_key(td::BitPtr key_buffer, int key_len, bool fetch_max = false, bool invert_first = false);
   Ref<CellSlice> extract_minmax_key(td::BitPtr key_buffer, int key_len, bool fetch_max = false,
@@ -291,6 +334,7 @@ class DictionaryFixed : public DictionaryBase {
     return check_leaf(cs_ref.write(), key, key_len);
   }
   bool check_fork_raw(Ref<CellSlice> cs_ref, int n) const;
+  bool check_fork_raw(CellSlice cs, int n) const;
   friend class DictIterator;
 
  private:
@@ -541,6 +585,7 @@ class Dictionary final : public DictionaryFixed {
     return cs.empty_ext();
   }
   static Ref<Cell> extract_value_ref(Ref<CellSlice> cs);
+  static Ref<Cell> extract_value(CellSlice&& cs);
   std::pair<Ref<Cell>, int> dict_filter(Ref<Cell> dict, td::BitPtr key, int n, const filter_func_t& check_leaf) const;
 };
 
@@ -582,9 +627,12 @@ class AugmentedDictionary final : public DictionaryFixed {
   bool append_dict_to_bool(CellBuilder& cb) &&;
   bool append_dict_to_bool(CellBuilder& cb) const &;
   Ref<CellSlice> get_root_extra() const;
+  void get_root_extra(CellSlice &cs) const;
   Ref<CellSlice> lookup(td::ConstBitPtr key, int key_len);
+  CellSlice lookup_cs(td::ConstBitPtr key, int key_len);
   Ref<Cell> lookup_ref(td::ConstBitPtr key, int key_len);
   Ref<CellSlice> lookup_with_extra(td::ConstBitPtr key, int key_len);
+  CellSlice lookup_with_extra_cs(td::ConstBitPtr key, int key_len);
   std::pair<Ref<CellSlice>, Ref<CellSlice>> lookup_extra(td::ConstBitPtr key, int key_len);
   std::pair<Ref<Cell>, Ref<CellSlice>> lookup_ref_extra(td::ConstBitPtr key, int key_len);
   Ref<CellSlice> lookup_delete(td::ConstBitPtr key, int key_len);
@@ -604,6 +652,10 @@ class AugmentedDictionary final : public DictionaryFixed {
   template <typename T>
   Ref<CellSlice> lookup(const T& key) {
     return lookup(key.bits(), key.size());
+  }
+  template <typename T>
+  CellSlice lookup_cs(const T& key) {
+    return lookup_cs(key.bits(), key.size());
   }
   template <typename T>
   Ref<Cell> lookup_ref(const T& key) {
@@ -638,13 +690,17 @@ class AugmentedDictionary final : public DictionaryFixed {
   }
 
   Ref<CellSlice> extract_value(Ref<CellSlice> value_extra) const;
+  Ref<CellSlice> extract_value(CellSlice&& value_extra) const;
+  CellSlice extract_value_cs(CellSlice&& value_extra) const;
   Ref<Cell> extract_value_ref(Ref<CellSlice> value_extra) const;
+  Ref<Cell> extract_value_ref(CellSlice &&value_extra) const;
   std::pair<Ref<CellSlice>, Ref<CellSlice>> decompose_value_extra(Ref<CellSlice> value_extra) const;
-  std::pair<Ref<Cell>, Ref<CellSlice>> decompose_value_ref_extra(Ref<CellSlice> value_extra) const;
+  std::pair<Ref<CellSlice>, Ref<CellSlice>> decompose_value_extra(CellSlice &&value_extra) const;
+  std::pair<Ref<Cell>, Ref<CellSlice>> decompose_value_ref_extra(CellSlice &&value_extra) const;
 
  private:
   bool compute_root() const;
-  Ref<CellSlice> get_node_extra(Ref<Cell> cell_ref, int n) const;
+  CellSlice get_node_extra(Ref<Cell> cell_ref, int n) const;
   Ref<CellSlice> extract_leaf_value(Ref<CellSlice> leaf) const override;
   bool check_leaf(CellSlice& cs, td::ConstBitPtr key, int key_len) const override;
   bool check_fork(CellSlice& cs, Ref<Cell> c1, Ref<Cell> c2, int n) const override;
