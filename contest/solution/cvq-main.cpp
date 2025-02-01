@@ -7,7 +7,6 @@ namespace solution {
 
 using namespace ton;
 using namespace ton::validator;
-
 using namespace std::literals::string_literals;
 
 /**
@@ -142,10 +141,10 @@ void ContestValidateQuery::start_up() {
     
     
     
-    // _precheck_account_transactions(); // reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
-    // _build_new_message_queue(); // reject_query("cannot build a new message queue"); return;
-    // _precheck_message_queue_update(); // reject_query("invalid OutMsgQueue update"); return;
-    // _unpack_dispatch_queue_update(); // reject_query("invalid DispatchQueue update"); return;
+    precheck_account_transactions(); // reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;
+    build_new_message_queue(); // reject_query("cannot build a new message queue"); return;
+    precheck_message_queue_update(); // reject_query("invalid OutMsgQueue update"); return;
+    unpack_dispatch_queue_update(); // reject_query("invalid DispatchQueue update"); return;
     // _unpack_dispatch_queue_update_after();
     // _check_in_msg_descr(); // reject_query("invalid InMsgDescr"); return;
     // _check_out_msg_descr(); // reject_query("invalid OutMsgDescr"); return;
@@ -160,7 +159,30 @@ void ContestValidateQuery::start_up() {
     // _build_state_update(state_usage_tree_, prev_state_root_); // reject_query("cannot build state update"); return;
     // _finish_query();
 
+    // {
+    //   try {
+    //     MyThreader tempThr;
+    //     tempThr.launch([this] { throw "Zhuk"; });
+    //     tempThr.launch([this] { sleep(5); LOG(ERROR) << "Log after long wait and throw"; throw "Luk"; });
+    //     tempThr.waitForAll();
+
+    //     // async([] { sleep(5); throw "Vuun"; }).get();
+    //   } catch (std::string error) {
+    //     LOG(ERROR) << "Caught: " << error;
+    //   } catch (std::string& error) {
+    //     LOG(ERROR) << "Caught: " << error << ", but by reference";
+    //   } catch (char* error) {
+    //     LOG(ERROR) << "Caught: " << error << ", but as a char*";
+    //   } catch (const char* error) {
+    //     LOG(ERROR) << "Caught: " << error << ", but as a CONST char*";
+    //   } catch (...) {
+    //     LOG(ERROR) << "Caught something from tempThr";
+    //   }
+    // }
+
     generated_root();
+
+    // sleep(1);
 
     finish_query();
   } catch (std::string error) {

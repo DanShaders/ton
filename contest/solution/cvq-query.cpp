@@ -57,16 +57,16 @@ void ContestValidateQuery::reject_throw(std::string err_msg, td::Status error, t
  */
 bool ContestValidateQuery::top_level_reject_query(std::string error, td::BufferSlice reason) {
   error = error_ctx() + error;
-  if (!in_main_thread()) { // in_multithreading
-    // LOG(ERROR) << "Test index #" << testIndex << " will throw from thread: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
-    throw error;
-    // LOG(ERROR) << "Not main thread. Main thread (" << std::hash<std::thread::id>{}(main_thread_id)
-    //            << "), current thread (" << std::hash<std::thread::id>{}(std::this_thread::get_id()) << ")";
-  }
+  // if (!in_main_thread()) { // in_multithreading
+  //   LOG(ERROR) << "Test index #" << testIndex << " will TOP LEVEL throw from thread: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
+  //   throw error;
+  //   // LOG(ERROR) << "Not main thread. Main thread (" << std::hash<std::thread::id>{}(main_thread_id)
+  //   //            << "), current thread (" << std::hash<std::thread::id>{}(std::this_thread::get_id()) << ")";
+  // }
+  LOG(WARNING) << "REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
   if (main_promise) {
     main_promise.set_error(td::Status::Error(error));
   }
-  LOG(WARNING) << "REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
   // LOG(ERROR) << "Test index #" << testIndex << " will call stop from thread: " << render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   stop();
   return false;
@@ -185,12 +185,6 @@ bool ContestValidateQuery::top_level_fatal_error(std::string err_msg, int err_co
  */
 void ContestValidateQuery::finish_query() {
   // <{generated_atomic_zero_checks
-  if (__pending_precheck_message_queue_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_precheck_message_queue_update ended up as: " << __pending_precheck_message_queue_update;
-  if (__pending_check_out_msg_descr != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_out_msg_descr ended up as: " << __pending_check_out_msg_descr;
-  if (__pending_build_state_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_build_state_update ended up as: " << __pending_build_state_update;
-  if (__pending_unpack_dispatch_queue_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_unpack_dispatch_queue_update ended up as: " << __pending_unpack_dispatch_queue_update;
-  if (__pending_check_transactions != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_transactions ended up as: " << __pending_check_transactions;
-  if (__pending_unpack_dispatch_queue_update_after != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_unpack_dispatch_queue_update_after ended up as: " << __pending_unpack_dispatch_queue_update_after;
   if (__pending_check_in_msg_descr != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_in_msg_descr ended up as: " << __pending_check_in_msg_descr;
   if (__pending_check_processed_upto != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_processed_upto ended up as: " << __pending_check_processed_upto;
   if (__pending_check_message_processing_order != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_message_processing_order ended up as: " << __pending_check_message_processing_order;
@@ -198,6 +192,7 @@ void ContestValidateQuery::finish_query() {
   if (__pending_check_in_queue != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_in_queue ended up as: " << __pending_check_in_queue;
   if (__pending_postcheck_account_updates != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_postcheck_account_updates ended up as: " << __pending_postcheck_account_updates;
   if (__pending_postcheck_value_flow != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_postcheck_value_flow ended up as: " << __pending_postcheck_value_flow;
+  if (__pending_build_state_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_build_state_update ended up as: " << __pending_build_state_update;
   // generated_atomic_zero_checks}/>
 
   if (main_promise) {

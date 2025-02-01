@@ -2256,21 +2256,8 @@ void ContestValidateQuery::build_new_message_queue() {
   }
 
   //<%assigned%>: ns_.out_msg_queue_
-							//<%generated%>
-							if (--__pending_precheck_message_queue_update == 0) my_threader.launch([this] { precheck_message_queue_update(); });
-							if (--__pending_check_out_msg_descr == 0) my_threader.launch([this] { check_out_msg_descr(); });
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
-							//<%/generated%>
   //<%assigned%>: ns_.dispatch_queue_
-							//<%generated%>
-							if (--__pending_unpack_dispatch_queue_update == 0) my_threader.launch([this] { unpack_dispatch_queue_update(); });
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
-							//<%/generated%>
   //<%assigned%>: ns_.out_msg_queue_size_
-							//<%generated%>
-							if (--__pending_precheck_message_queue_update == 0) my_threader.launch([this] { precheck_message_queue_update(); });
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
-							//<%/generated%>
 }
 
 /**
@@ -2624,25 +2611,13 @@ void ContestValidateQuery::unpack_dispatch_queue_update() {
   }
 
   //<%assigned%>: account_expected_defer_all_messages_
-							//<%generated%>
-							if (--__pending_check_transactions == 0) my_threader.launch([this] { check_transactions(); });
-							//<%/generated%>
   //<%assigned%>: processed_account_dispatch_queues_
-							//<%generated%>
-							if (--__pending_unpack_dispatch_queue_update_after == 0) my_threader.launch([this] { unpack_dispatch_queue_update_after(); });
-							//<%/generated%>
 
   //<%replace_usage%>: removed_dispatch_queue_messages_ -> removed_dispatch_queue_messages_st1_
   //<%assigned%>: removed_dispatch_queue_messages_st1_
-							//<%generated%>
-							if (--__pending_check_in_msg_descr == 0) my_threader.launch([this] { check_in_msg_descr(); });
-							//<%/generated%>
 
   //<%replace_usage%>: new_dispatch_queue_messages_ -> new_dispatch_queue_messages_st1_
   //<%assigned%>: new_dispatch_queue_messages_st1_
-							//<%generated%>
-							if (--__pending_check_out_msg_descr == 0) my_threader.launch([this] { check_out_msg_descr(); });
-							//<%/generated%>
 
   // Some part extracted to _unpack_dispatch_queue_update_after()
   // in hope it could be auto-DAGged to be executed in parallel

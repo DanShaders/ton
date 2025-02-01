@@ -24,11 +24,16 @@ void MyThreader::launch(LaunchFunction callable) {
 }
 
 void MyThreader::waitForAll() {
-  for (int i = 0; i < futuresCount; i++) {
-    futures[i].get();
+  try {
+    for (int i = 0; i < futuresCount; i++) {
+      futures[i].get();
+    }
+    // Even when futures get added, futuresCount will increase accordingly
+    // and the loop will continue until it runs out of all the futures
+  } catch (...) {
+    // throw caught exception
+    throw;
   }
-  // Even when futures get added, futuresCount will increase accordingly
-  // and the loop will continue until it runs out of all the futures
 }
 
 

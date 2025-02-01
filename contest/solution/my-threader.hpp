@@ -5,6 +5,8 @@
 #include <future>
 #include <vector>
 
+#include "various.hpp"
+
 
 namespace solution {
 
@@ -35,6 +37,7 @@ class MyThreader {
  private:
   atomic<int> futuresCount{0};
   vector<future<void> > futures;
+  // DestructureLog logBeforeFuturesDestroyed { "Before futures destroyed" };
 };
 
 
