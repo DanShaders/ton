@@ -38,6 +38,7 @@ ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice 
   //<%assigned%>: main_promise
   //<%assigned%>: shard_pfx_
   //<%assigned%>: shard_pfx_len_
+  //<%assigned%>: max_shard_lt_
 }
 
 
@@ -124,10 +125,10 @@ void ContestValidateQuery::start_up() {
     request_neighbor_queues(); // fatal_error("cannot request neighbor output queues"); return;
     unpack_prev_state(prev_state_root_); // fatal_error("cannot unpack previous state"); return;
     init_next_state(); // fatal_error("cannot unpack previous state"); return;
-    check_utime_lt(); // reject_query("creation utime/lt of the new block is invalid"); return;
 
 
 
+    // _check_utime_lt(); // reject_query("creation utime/lt of the new block is invalid"); return;
     // _prepare_out_msg_queue_size(); // reject_query("cannot request out msg queue size"); return;
 
     // The following check was moved to unpack_block_candidate() just after block_root_ becomes available

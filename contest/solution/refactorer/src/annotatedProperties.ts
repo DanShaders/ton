@@ -155,6 +155,10 @@ const annotatedProperties: string[] = [
 	// Added for: fix_all_processed_upto
 	'neighbors_st1_',
 	'sibling_processed_upto_st1_',
+
+
+	// Added for: check_utime_lt
+	'max_shard_lt_',
 ];
 
 export default annotatedProperties;

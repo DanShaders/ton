@@ -4956,12 +4956,16 @@ void ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   }
   // now compare the re-created transaction with the one we have
   if (trans_root2->get_hash() != trans_root->get_hash()) {
-    if (verbosity >= 3 * 0) {
-      std::cerr << "original transaction " << lt << " of " << addr.to_hex() << ": ";
-      block::gen::t_Transaction.print_ref(std::cerr, trans_root);
-      std::cerr << "re-created transaction " << lt << " of " << addr.to_hex() << ": ";
-      block::gen::t_Transaction.print_ref(std::cerr, trans_root2);
-    }
+    // !CAREFUL_REMOVAL of the following lines
+    // Executing check_utime_lt in parallel seems to mean that
+    // some check_utime_lt verifications don't fail by this point,
+    // which causes this branch to be executed (and output printed).
+    // if (verbosity >= 3 * 0) {
+    //   std::cerr << "original transaction " << lt << " of " << addr.to_hex() << ": ";
+    //   block::gen::t_Transaction.print_ref(std::cerr, trans_root);
+    //   std::cerr << "re-created transaction " << lt << " of " << addr.to_hex() << ": ";
+    //   block::gen::t_Transaction.print_ref(std::cerr, trans_root2);
+    // }
     reject_throw(PSTRING() << "the transaction " << lt << " of " << addr.to_hex() << " has hash "
                                   << trans_root->get_hash().to_hex()
                                   << " different from that of the recreated transaction "
