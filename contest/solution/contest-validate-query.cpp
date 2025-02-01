@@ -811,14 +811,14 @@ void ContestValidateQuery::compute_prev_state() {
   state_usage_tree_ = std::make_shared<vm::CellUsageTree>();
   //<%assigned%>: state_usage_tree_
 							//<%generated%>
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
   prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr()); // !TEMP_THREAD likely breaks Merkle Update
   //<%assigned%>: prev_state_root_
 							//<%generated%>
-							if (--__pending_unpack_prev_state == 0) my_threader.launch([this] { unpack_prev_state(); });
-							if (--__pending_add_trivial_neighbor == 0) my_threader.launch([this] { add_trivial_neighbor(); });
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							if (--__pending_unpack_prev_state == 0) my_threader.launchAndProfile("unpack_prev_state", [this] { unpack_prev_state(); });
+							if (--__pending_add_trivial_neighbor == 0) my_threader.launchAndProfile("add_trivial_neighbor", [this] { add_trivial_neighbor(); });
+							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
 }
 
@@ -884,41 +884,41 @@ void ContestValidateQuery::unpack_prev_state() {
   //<%replace_usage%>: aux_mc_states_ -> aux_mc_states_st1_
   //<%assigned%>: aux_mc_states_
 							//<%generated%>
-							if (--__pending_fix_all_processed_upto == 0) my_threader.launch([this] { fix_all_processed_upto(); });
+							if (--__pending_fix_all_processed_upto == 0) my_threader.launchAndProfile("fix_all_processed_upto", [this] { fix_all_processed_upto(); });
 							//<%/generated%>
 
   //<%replace_usage%>: sibling_out_msg_queue_ -> sibling_out_msg_queue_st1_
   //<%assigned%>: sibling_out_msg_queue_st1_
 							//<%generated%>
-							if (--__pending_add_trivial_neighbor == 0) my_threader.launch([this] { add_trivial_neighbor(); });
+							if (--__pending_add_trivial_neighbor == 0) my_threader.launchAndProfile("add_trivial_neighbor", [this] { add_trivial_neighbor(); });
 							//<%/generated%>
 
   //<%replace_usage%>: sibling_processed_upto_ -> sibling_processed_upto_st1_
   //<%assigned%>: sibling_processed_upto_st1_
 							//<%generated%>
-							if (--__pending_fix_all_processed_upto == 0) my_threader.launch([this] { fix_all_processed_upto(); });
+							if (--__pending_fix_all_processed_upto == 0) my_threader.launchAndProfile("fix_all_processed_upto", [this] { fix_all_processed_upto(); });
 							//<%/generated%>
 
   ORIGINAL_CHECK(ps_.processed_upto_);
   fix_processed_upto(*ps_.processed_upto_);
   //<%assigned%>: ps_
 							//<%generated%>
-							if (--__pending_check_utime_lt == 0) my_threader.launch([this] { check_utime_lt(); });
-							if (--__pending_prepare_out_msg_queue_size == 0) my_threader.launch([this] { prepare_out_msg_queue_size(); });
-							if (--__pending_add_trivial_neighbor == 0) my_threader.launch([this] { add_trivial_neighbor(); });
-							if (--__pending_unpack_block_data == 0) my_threader.launch([this] { unpack_block_data(); });
-							if (--__pending_precheck_account_transactions == 0) my_threader.launch([this] { precheck_account_transactions(); });
-							if (--__pending_build_new_message_queue == 0) my_threader.launch([this] { build_new_message_queue(); });
-							if (--__pending_precheck_message_queue_update == 0) my_threader.launch([this] { precheck_message_queue_update(); });
-							if (--__pending_unpack_dispatch_queue_update == 0) my_threader.launch([this] { unpack_dispatch_queue_update(); });
-							if (--__pending_unpack_dispatch_queue_update_after == 0) my_threader.launch([this] { unpack_dispatch_queue_update_after(); });
-							if (--__pending_check_in_msg_descr == 0) my_threader.launch([this] { check_in_msg_descr(); });
-							if (--__pending_check_out_msg_descr == 0) my_threader.launch([this] { check_out_msg_descr(); });
-							if (--__pending_check_processed_upto == 0) my_threader.launch([this] { check_processed_upto(); });
-							if (--__pending_check_in_queue == 0) my_threader.launch([this] { check_in_queue(); });
-							if (--__pending_check_transactions == 0) my_threader.launch([this] { check_transactions(); });
-							if (--__pending_postcheck_account_updates == 0) my_threader.launch([this] { postcheck_account_updates(); });
-							if (--__pending_check_new_state == 0) my_threader.launch([this] { check_new_state(); });
+							if (--__pending_check_utime_lt == 0) my_threader.launchAndProfile("check_utime_lt", [this] { check_utime_lt(); });
+							if (--__pending_prepare_out_msg_queue_size == 0) my_threader.launchAndProfile("prepare_out_msg_queue_size", [this] { prepare_out_msg_queue_size(); });
+							if (--__pending_add_trivial_neighbor == 0) my_threader.launchAndProfile("add_trivial_neighbor", [this] { add_trivial_neighbor(); });
+							if (--__pending_unpack_block_data == 0) my_threader.launchAndProfile("unpack_block_data", [this] { unpack_block_data(); });
+							if (--__pending_precheck_account_transactions == 0) my_threader.launchAndProfile("precheck_account_transactions", [this] { precheck_account_transactions(); });
+							if (--__pending_build_new_message_queue == 0) my_threader.launchAndProfile("build_new_message_queue", [this] { build_new_message_queue(); });
+							if (--__pending_precheck_message_queue_update == 0) my_threader.launchAndProfile("precheck_message_queue_update", [this] { precheck_message_queue_update(); });
+							if (--__pending_unpack_dispatch_queue_update == 0) my_threader.launchAndProfile("unpack_dispatch_queue_update", [this] { unpack_dispatch_queue_update(); });
+							if (--__pending_unpack_dispatch_queue_update_after == 0) my_threader.launchAndProfile("unpack_dispatch_queue_update_after", [this] { unpack_dispatch_queue_update_after(); });
+							if (--__pending_check_in_msg_descr == 0) my_threader.launchAndProfile("check_in_msg_descr", [this] { check_in_msg_descr(); });
+							if (--__pending_check_out_msg_descr == 0) my_threader.launchAndProfile("check_out_msg_descr", [this] { check_out_msg_descr(); });
+							if (--__pending_check_processed_upto == 0) my_threader.launchAndProfile("check_processed_upto", [this] { check_processed_upto(); });
+							if (--__pending_check_in_queue == 0) my_threader.launchAndProfile("check_in_queue", [this] { check_in_queue(); });
+							if (--__pending_check_transactions == 0) my_threader.launchAndProfile("check_transactions", [this] { check_transactions(); });
+							if (--__pending_postcheck_account_updates == 0) my_threader.launchAndProfile("postcheck_account_updates", [this] { postcheck_account_updates(); });
+							if (--__pending_check_new_state == 0) my_threader.launchAndProfile("check_new_state", [this] { check_new_state(); });
 							//<%/generated%>
 }
 
@@ -1004,7 +1004,7 @@ void ContestValidateQuery::init_next_state() {
 							//<%/generated%>
   //<%assigned%>: ns_.lt_
 							//<%generated%>
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
   //<%assigned%>: ns_.mc_blk_ref_
 							//<%generated%>
@@ -1058,13 +1058,13 @@ void ContestValidateQuery::request_neighbor_queues() {
   //<%replace_usage%>: neighbors_ -> neighbors_st1_
   //<%assigned%>: neighbors_st1_
 							//<%generated%>
-							if (--__pending_fix_all_processed_upto == 0) my_threader.launch([this] { fix_all_processed_upto(); });
+							if (--__pending_fix_all_processed_upto == 0) my_threader.launchAndProfile("fix_all_processed_upto", [this] { fix_all_processed_upto(); });
 							//<%/generated%>
 
   //<%replace_usage%>: aux_mc_states_ -> aux_mc_states_st1_
   //<%assigned%>: aux_mc_states_st1_
 							//<%generated%>
-							if (--__pending_unpack_prev_state == 0) my_threader.launch([this] { unpack_prev_state(); });
+							if (--__pending_unpack_prev_state == 0) my_threader.launchAndProfile("unpack_prev_state", [this] { unpack_prev_state(); });
 							//<%/generated%>
 }
 
@@ -1303,14 +1303,14 @@ void ContestValidateQuery::prepare_out_msg_queue_size() {
 
   //<%assigned%>: old_out_msg_queue_size_
 							//<%generated%>
-							if (--__pending_unpack_dispatch_queue_update_after == 0) my_threader.launch([this] { unpack_dispatch_queue_update_after(); });
+							if (--__pending_unpack_dispatch_queue_update_after == 0) my_threader.launchAndProfile("unpack_dispatch_queue_update_after", [this] { unpack_dispatch_queue_update_after(); });
 							//<%/generated%>
   //<%assigned%>: out_msg_queue_size_known_ (never used)
 							//<%generated%>
 							//<%/generated%>
   //<%assigned%>: have_out_msg_queue_size_in_state_
 							//<%generated%>
-							if (--__pending_unpack_dispatch_queue_update_after == 0) my_threader.launch([this] { unpack_dispatch_queue_update_after(); });
+							if (--__pending_unpack_dispatch_queue_update_after == 0) my_threader.launchAndProfile("unpack_dispatch_queue_update_after", [this] { unpack_dispatch_queue_update_after(); });
 							//<%/generated%>
 }
 
@@ -1388,7 +1388,7 @@ void ContestValidateQuery::fix_all_processed_upto() {
   //<%replace_usage%>: sibling_processed_upto_ -> sibling_processed_upto_st1_
   //<%assigned%>: sibling_processed_upto_st2_
 							//<%generated%>
-							if (--__pending_add_trivial_neighbor == 0) my_threader.launch([this] { add_trivial_neighbor(); });
+							if (--__pending_add_trivial_neighbor == 0) my_threader.launchAndProfile("add_trivial_neighbor", [this] { add_trivial_neighbor(); });
 							//<%/generated%>
 
 
@@ -1396,9 +1396,9 @@ void ContestValidateQuery::fix_all_processed_upto() {
     //return _fatal_error("Cannot adjust new ProcessedUpto of our shard state");
   //<%assigned%>: ns_.processed_upto_
 							//<%generated%>
-							if (--__pending_check_processed_upto == 0) my_threader.launch([this] { check_processed_upto(); });
-							if (--__pending_check_in_queue == 0) my_threader.launch([this] { check_in_queue(); });
-							if (--__pending_check_new_state == 0) my_threader.launch([this] { check_new_state(); });
+							if (--__pending_check_processed_upto == 0) my_threader.launchAndProfile("check_processed_upto", [this] { check_processed_upto(); });
+							if (--__pending_check_in_queue == 0) my_threader.launchAndProfile("check_in_queue", [this] { check_in_queue(); });
+							if (--__pending_check_new_state == 0) my_threader.launchAndProfile("check_new_state", [this] { check_new_state(); });
 							//<%/generated%>
 
 
@@ -1410,7 +1410,7 @@ void ContestValidateQuery::fix_all_processed_upto() {
   //<%replace_usage%>: neighbors_ -> neighbors_st1_
   //<%assigned%>: neighbors_st2_
 							//<%generated%>
-							if (--__pending_add_trivial_neighbor == 0) my_threader.launch([this] { add_trivial_neighbor(); });
+							if (--__pending_add_trivial_neighbor == 0) my_threader.launchAndProfile("add_trivial_neighbor", [this] { add_trivial_neighbor(); });
 							//<%/generated%>
 
 }
@@ -1599,9 +1599,9 @@ void ContestValidateQuery::add_trivial_neighbor() {
   //<%replace_usage%>: neighbors_ -> neighbors_st2_
   //<%assigned%>: neighbors_
 							//<%generated%>
-							if (--__pending_check_in_msg_descr == 0) my_threader.launch([this] { check_in_msg_descr(); });
-							if (--__pending_check_out_msg_descr == 0) my_threader.launch([this] { check_out_msg_descr(); });
-							if (--__pending_check_in_queue == 0) my_threader.launch([this] { check_in_queue(); });
+							if (--__pending_check_in_msg_descr == 0) my_threader.launchAndProfile("check_in_msg_descr", [this] { check_in_msg_descr(); });
+							if (--__pending_check_out_msg_descr == 0) my_threader.launchAndProfile("check_out_msg_descr", [this] { check_out_msg_descr(); });
+							if (--__pending_check_in_queue == 0) my_threader.launchAndProfile("check_in_queue", [this] { check_in_queue(); });
 							//<%/generated%>
 
   //<%replace_usage%>: sibling_out_msg_queue_ -> sibling_out_msg_queue_st1_
@@ -1644,29 +1644,29 @@ void ContestValidateQuery::unpack_block_data() {
 
   //<%assigned%>: in_msg_dict_
 							//<%generated%>
-							if (--__pending_build_new_message_queue == 0) my_threader.launch([this] { build_new_message_queue(); });
-							if (--__pending_check_in_msg_descr == 0) my_threader.launch([this] { check_in_msg_descr(); });
-							if (--__pending_check_out_msg_descr == 0) my_threader.launch([this] { check_out_msg_descr(); });
-							if (--__pending_check_in_queue == 0) my_threader.launch([this] { check_in_queue(); });
-							if (--__pending_check_transactions == 0) my_threader.launch([this] { check_transactions(); });
+							if (--__pending_build_new_message_queue == 0) my_threader.launchAndProfile("build_new_message_queue", [this] { build_new_message_queue(); });
+							if (--__pending_check_in_msg_descr == 0) my_threader.launchAndProfile("check_in_msg_descr", [this] { check_in_msg_descr(); });
+							if (--__pending_check_out_msg_descr == 0) my_threader.launchAndProfile("check_out_msg_descr", [this] { check_out_msg_descr(); });
+							if (--__pending_check_in_queue == 0) my_threader.launchAndProfile("check_in_queue", [this] { check_in_queue(); });
+							if (--__pending_check_transactions == 0) my_threader.launchAndProfile("check_transactions", [this] { check_transactions(); });
 							//<%/generated%>
   //<%assigned%>: out_msg_dict_
 							//<%generated%>
-							if (--__pending_build_new_message_queue == 0) my_threader.launch([this] { build_new_message_queue(); });
-							if (--__pending_precheck_message_queue_update == 0) my_threader.launch([this] { precheck_message_queue_update(); });
-							if (--__pending_unpack_dispatch_queue_update == 0) my_threader.launch([this] { unpack_dispatch_queue_update(); });
-							if (--__pending_check_in_msg_descr == 0) my_threader.launch([this] { check_in_msg_descr(); });
-							if (--__pending_check_out_msg_descr == 0) my_threader.launch([this] { check_out_msg_descr(); });
-							if (--__pending_check_in_queue == 0) my_threader.launch([this] { check_in_queue(); });
-							if (--__pending_check_transactions == 0) my_threader.launch([this] { check_transactions(); });
+							if (--__pending_build_new_message_queue == 0) my_threader.launchAndProfile("build_new_message_queue", [this] { build_new_message_queue(); });
+							if (--__pending_precheck_message_queue_update == 0) my_threader.launchAndProfile("precheck_message_queue_update", [this] { precheck_message_queue_update(); });
+							if (--__pending_unpack_dispatch_queue_update == 0) my_threader.launchAndProfile("unpack_dispatch_queue_update", [this] { unpack_dispatch_queue_update(); });
+							if (--__pending_check_in_msg_descr == 0) my_threader.launchAndProfile("check_in_msg_descr", [this] { check_in_msg_descr(); });
+							if (--__pending_check_out_msg_descr == 0) my_threader.launchAndProfile("check_out_msg_descr", [this] { check_out_msg_descr(); });
+							if (--__pending_check_in_queue == 0) my_threader.launchAndProfile("check_in_queue", [this] { check_in_queue(); });
+							if (--__pending_check_transactions == 0) my_threader.launchAndProfile("check_transactions", [this] { check_transactions(); });
 							//<%/generated%>
   //<%assigned%>: account_blocks_dict_
 							//<%generated%>
-							if (--__pending_precheck_account_transactions == 0) my_threader.launch([this] { precheck_account_transactions(); });
-							if (--__pending_check_in_msg_descr == 0) my_threader.launch([this] { check_in_msg_descr(); });
-							if (--__pending_check_out_msg_descr == 0) my_threader.launch([this] { check_out_msg_descr(); });
-							if (--__pending_check_transactions == 0) my_threader.launch([this] { check_transactions(); });
-							if (--__pending_postcheck_account_updates == 0) my_threader.launch([this] { postcheck_account_updates(); });
+							if (--__pending_precheck_account_transactions == 0) my_threader.launchAndProfile("precheck_account_transactions", [this] { precheck_account_transactions(); });
+							if (--__pending_check_in_msg_descr == 0) my_threader.launchAndProfile("check_in_msg_descr", [this] { check_in_msg_descr(); });
+							if (--__pending_check_out_msg_descr == 0) my_threader.launchAndProfile("check_out_msg_descr", [this] { check_out_msg_descr(); });
+							if (--__pending_check_transactions == 0) my_threader.launchAndProfile("check_transactions", [this] { check_transactions(); });
+							if (--__pending_postcheck_account_updates == 0) my_threader.launchAndProfile("postcheck_account_updates", [this] { postcheck_account_updates(); });
 							//<%/generated%>
 
   LOG(DEBUG) << "validating InMsgDescr";
@@ -1699,8 +1699,8 @@ void ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_r
   }
   //<%assigned%>: value_flow_
 							//<%generated%>
-							if (--__pending_check_new_state == 0) my_threader.launch([this] { check_new_state(); });
-							if (--__pending_postcheck_value_flow == 0) my_threader.launch([this] { postcheck_value_flow(); });
+							if (--__pending_check_new_state == 0) my_threader.launchAndProfile("check_new_state", [this] { check_new_state(); });
+							if (--__pending_postcheck_value_flow == 0) my_threader.launchAndProfile("postcheck_value_flow", [this] { postcheck_value_flow(); });
 							//<%/generated%>
 
   std::ostringstream os;
@@ -1781,7 +1781,7 @@ void ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_r
   }
   //<%assigned%>: import_fees_
 							//<%generated%>
-							if (--__pending_postcheck_value_flow == 0) my_threader.launch([this] { postcheck_value_flow(); });
+							if (--__pending_postcheck_value_flow == 0) my_threader.launchAndProfile("postcheck_value_flow", [this] { postcheck_value_flow(); });
 							//<%/generated%>
 
   if (cc != value_flow_.imported) {
@@ -1802,7 +1802,7 @@ void ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_r
   }
   //<%assigned%>: transaction_fees_
 							//<%generated%>
-							if (--__pending_postcheck_value_flow == 0) my_threader.launch([this] { postcheck_value_flow(); });
+							if (--__pending_postcheck_value_flow == 0) my_threader.launchAndProfile("postcheck_value_flow", [this] { postcheck_value_flow(); });
 							//<%/generated%>
 }
 
@@ -2414,19 +2414,19 @@ void ContestValidateQuery::build_new_message_queue() {
 
   //<%assigned%>: ns_.out_msg_queue_
 							//<%generated%>
-							if (--__pending_precheck_message_queue_update == 0) my_threader.launch([this] { precheck_message_queue_update(); });
-							if (--__pending_check_out_msg_descr == 0) my_threader.launch([this] { check_out_msg_descr(); });
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							if (--__pending_precheck_message_queue_update == 0) my_threader.launchAndProfile("precheck_message_queue_update", [this] { precheck_message_queue_update(); });
+							if (--__pending_check_out_msg_descr == 0) my_threader.launchAndProfile("check_out_msg_descr", [this] { check_out_msg_descr(); });
+							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
   //<%assigned%>: ns_.dispatch_queue_
 							//<%generated%>
-							if (--__pending_unpack_dispatch_queue_update == 0) my_threader.launch([this] { unpack_dispatch_queue_update(); });
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							if (--__pending_unpack_dispatch_queue_update == 0) my_threader.launchAndProfile("unpack_dispatch_queue_update", [this] { unpack_dispatch_queue_update(); });
+							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
   //<%assigned%>: ns_.out_msg_queue_size_
 							//<%generated%>
-							if (--__pending_precheck_message_queue_update == 0) my_threader.launch([this] { precheck_message_queue_update(); });
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							if (--__pending_precheck_message_queue_update == 0) my_threader.launchAndProfile("precheck_message_queue_update", [this] { precheck_message_queue_update(); });
+							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
 }
 
@@ -2782,23 +2782,23 @@ void ContestValidateQuery::unpack_dispatch_queue_update() {
 
   //<%assigned%>: account_expected_defer_all_messages_
 							//<%generated%>
-							if (--__pending_check_transactions == 0) my_threader.launch([this] { check_transactions(); });
+							if (--__pending_check_transactions == 0) my_threader.launchAndProfile("check_transactions", [this] { check_transactions(); });
 							//<%/generated%>
   //<%assigned%>: processed_account_dispatch_queues_
 							//<%generated%>
-							if (--__pending_unpack_dispatch_queue_update_after == 0) my_threader.launch([this] { unpack_dispatch_queue_update_after(); });
+							if (--__pending_unpack_dispatch_queue_update_after == 0) my_threader.launchAndProfile("unpack_dispatch_queue_update_after", [this] { unpack_dispatch_queue_update_after(); });
 							//<%/generated%>
 
   //<%replace_usage%>: removed_dispatch_queue_messages_ -> removed_dispatch_queue_messages_st1_
   //<%assigned%>: removed_dispatch_queue_messages_st1_
 							//<%generated%>
-							if (--__pending_check_in_msg_descr == 0) my_threader.launch([this] { check_in_msg_descr(); });
+							if (--__pending_check_in_msg_descr == 0) my_threader.launchAndProfile("check_in_msg_descr", [this] { check_in_msg_descr(); });
 							//<%/generated%>
 
   //<%replace_usage%>: new_dispatch_queue_messages_ -> new_dispatch_queue_messages_st1_
   //<%assigned%>: new_dispatch_queue_messages_st1_
 							//<%generated%>
-							if (--__pending_check_out_msg_descr == 0) my_threader.launch([this] { check_out_msg_descr(); });
+							if (--__pending_check_out_msg_descr == 0) my_threader.launchAndProfile("check_out_msg_descr", [this] { check_out_msg_descr(); });
 							//<%/generated%>
 
   // Some part extracted to _unpack_dispatch_queue_update_after()
@@ -2829,7 +2829,7 @@ void ContestValidateQuery::unpack_dispatch_queue_update_after() {
 
   //<%assigned%>: have_unprocessed_account_dispatch_queue_
 							//<%generated%>
-							if (--__pending_check_in_msg_descr == 0) my_threader.launch([this] { check_in_msg_descr(); });
+							if (--__pending_check_in_msg_descr == 0) my_threader.launchAndProfile("check_in_msg_descr", [this] { check_in_msg_descr(); });
 							//<%/generated%>
 }
 
@@ -3498,21 +3498,21 @@ void ContestValidateQuery::check_in_msg_descr() {
 
   //<%assigned%>: proc_lt_
 							//<%generated%>
-							if (--__pending_check_processed_upto == 0) my_threader.launch([this] { check_processed_upto(); });
+							if (--__pending_check_processed_upto == 0) my_threader.launchAndProfile("check_processed_upto", [this] { check_processed_upto(); });
 							//<%/generated%>
   //<%assigned%>: proc_hash_
 							//<%generated%>
-							if (--__pending_check_processed_upto == 0) my_threader.launch([this] { check_processed_upto(); });
+							if (--__pending_check_processed_upto == 0) my_threader.launchAndProfile("check_processed_upto", [this] { check_processed_upto(); });
 							//<%/generated%>
   //<%assigned%>: in_msg_emitted_lt_
 							//<%generated%>
-							if (--__pending_check_message_processing_order == 0) my_threader.launch([this] { check_message_processing_order(); });
+							if (--__pending_check_message_processing_order == 0) my_threader.launchAndProfile("check_message_processing_order", [this] { check_message_processing_order(); });
 							//<%/generated%>
 
   //<%replace_usage%>: removed_dispatch_queue_messages_ -> removed_dispatch_queue_messages_st1_
   //<%assigned%>: removed_dispatch_queue_messages_
 							//<%generated%>
-							if (--__pending_check_dispatch_queue_update == 0) my_threader.launch([this] { check_dispatch_queue_update(); });
+							if (--__pending_check_dispatch_queue_update == 0) my_threader.launchAndProfile("check_dispatch_queue_update", [this] { check_dispatch_queue_update(); });
 							//<%/generated%>
 
 }
@@ -4162,21 +4162,21 @@ void ContestValidateQuery::check_out_msg_descr() {
 
   //<%assigned%>: min_enq_lt_
 							//<%generated%>
-							if (--__pending_check_processed_upto == 0) my_threader.launch([this] { check_processed_upto(); });
+							if (--__pending_check_processed_upto == 0) my_threader.launchAndProfile("check_processed_upto", [this] { check_processed_upto(); });
 							//<%/generated%>
   //<%assigned%>: min_enq_hash_
 							//<%generated%>
-							if (--__pending_check_processed_upto == 0) my_threader.launch([this] { check_processed_upto(); });
+							if (--__pending_check_processed_upto == 0) my_threader.launchAndProfile("check_processed_upto", [this] { check_processed_upto(); });
 							//<%/generated%>
   //<%assigned%>: out_msg_emitted_lt_
 							//<%generated%>
-							if (--__pending_check_message_processing_order == 0) my_threader.launch([this] { check_message_processing_order(); });
+							if (--__pending_check_message_processing_order == 0) my_threader.launchAndProfile("check_message_processing_order", [this] { check_message_processing_order(); });
 							//<%/generated%>
 
   //<%replace_usage%>: new_dispatch_queue_messages_ -> new_dispatch_queue_messages_st1_
   //<%assigned%>: new_dispatch_queue_messages_
 							//<%generated%>
-							if (--__pending_check_dispatch_queue_update == 0) my_threader.launch([this] { check_dispatch_queue_update(); });
+							if (--__pending_check_dispatch_queue_update == 0) my_threader.launchAndProfile("check_dispatch_queue_update", [this] { check_dispatch_queue_update(); });
 							//<%/generated%>
 }
 
@@ -4230,11 +4230,11 @@ void ContestValidateQuery::check_processed_upto() {
   }
   //<%assigned%>: claimed_proc_lt_
 							//<%generated%>
-							if (--__pending_check_in_queue == 0) my_threader.launch([this] { check_in_queue(); });
+							if (--__pending_check_in_queue == 0) my_threader.launchAndProfile("check_in_queue", [this] { check_in_queue(); });
 							//<%/generated%>
   //<%assigned%>: claimed_proc_hash_
 							//<%generated%>
-							if (--__pending_check_in_queue == 0) my_threader.launch([this] { check_in_queue(); });
+							if (--__pending_check_in_queue == 0) my_threader.launchAndProfile("check_in_queue", [this] { check_in_queue(); });
 							//<%/generated%>
 
 
@@ -5407,17 +5407,17 @@ void ContestValidateQuery::check_transactions() {
 
   //<%assigned%>: ns_.account_dict_
 							//<%generated%>
-							if (--__pending_postcheck_account_updates == 0) my_threader.launch([this] { postcheck_account_updates(); });
-							if (--__pending_postcheck_value_flow == 0) my_threader.launch([this] { postcheck_value_flow(); });
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							if (--__pending_postcheck_account_updates == 0) my_threader.launchAndProfile("postcheck_account_updates", [this] { postcheck_account_updates(); });
+							if (--__pending_postcheck_value_flow == 0) my_threader.launchAndProfile("postcheck_value_flow", [this] { postcheck_value_flow(); });
+							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
   //<%assigned%>: msg_proc_lt_
 							//<%generated%>
-							if (--__pending_check_message_processing_order == 0) my_threader.launch([this] { check_message_processing_order(); });
+							if (--__pending_check_message_processing_order == 0) my_threader.launchAndProfile("check_message_processing_order", [this] { check_message_processing_order(); });
 							//<%/generated%>
   //<%assigned%>: total_burned_
 							//<%generated%>
-							if (--__pending_postcheck_value_flow == 0) my_threader.launch([this] { postcheck_value_flow(); });
+							if (--__pending_postcheck_value_flow == 0) my_threader.launchAndProfile("postcheck_value_flow", [this] { postcheck_value_flow(); });
 							//<%/generated%>
   //<%assigned%>: total_gas_used_
 							//<%generated%>
@@ -5503,7 +5503,7 @@ void ContestValidateQuery::check_new_state() {
   ns_.min_ref_mc_seqno_ = ref_mc_seqno;
   //<%assigned%>: ns_.min_ref_mc_seqno_
 							//<%generated%>
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
 
   // out_msg_queue_info:^OutMsgQueueInfo
@@ -5516,13 +5516,13 @@ void ContestValidateQuery::check_new_state() {
   ns_.overload_history_ = ((ps_.overload_history_ << 1) | extra_collated_data_.overload);
   //<%assigned%>: ns_.overload_history_
 							//<%generated%>
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
 
   ns_.underload_history_ = ((ps_.underload_history_ << 1) | extra_collated_data_.underload);
   //<%assigned%>: ns_.underload_history_
 							//<%generated%>
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
 
   if (ns_.overload_history_ & ns_.underload_history_ & 1) {
@@ -5553,11 +5553,11 @@ void ContestValidateQuery::check_new_state() {
   ns_.total_balance_ = value_flow_.to_next_blk;
   //<%assigned%>: ns_.total_validator_fees_
 							//<%generated%>
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
   //<%assigned%>: ns_.total_balance_
 							//<%generated%>
-							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
 }
 

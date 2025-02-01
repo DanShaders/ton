@@ -174,6 +174,7 @@ void ContestValidateQuery::start_up() {
     generated_root();
 
     // sleep(1);
+    my_threader.writeProfileToFile("profile.ts", testIndex);
 
     finish_query();
   } catch (std::string error) {

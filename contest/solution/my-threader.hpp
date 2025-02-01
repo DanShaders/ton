@@ -1,9 +1,11 @@
 #pragma once
 
+#include <vector>
 #include <string>
 #include <functional>
 #include <future>
-#include <vector>
+#include <chrono>
+#include <fstream>
 
 #include "various.hpp"
 
@@ -14,7 +16,14 @@ namespace solution {
 using std::async;
 using std::future;
 using std::vector;
+using std::string;
 using std::atomic;
+using std::ofstream;
+// using std::ios;
+using std::endl;
+using std::chrono::high_resolution_clock;
+using std::chrono::microseconds;
+using std::chrono::duration_cast;
 
 
 // Function type that can handle both regular functions and lambdas with no parameters and void return
@@ -27,7 +36,9 @@ class MyThreader {
 
   // template<typename Callable>
   void launch(LaunchFunction callable);
+  void launchAndProfile(string name, LaunchFunction callable);
   void waitForAll();
+  void writeProfileToFile(const string& filename, int testIndex);
 
   // bool hasError();
   // std::string getFirstError();
@@ -37,6 +48,9 @@ class MyThreader {
  private:
   atomic<int> futuresCount{0};
   vector<future<void> > futures;
+  vector<std::chrono::_V2::system_clock::time_point> startTimes;
+  vector<std::chrono::_V2::system_clock::time_point> endTimes;
+  vector<string> names;
   // DestructureLog logBeforeFuturesDestroyed { "Before futures destroyed" };
 };
 

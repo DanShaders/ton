@@ -7,7 +7,12 @@ namespace solution {
 
 MyThreader::MyThreader() {
   futures.resize(MaxFuturesHeld);
+  names.resize(MaxFuturesHeld);
+  startTimes.resize(MaxFuturesHeld);
+  endTimes.resize(MaxFuturesHeld);
 }
+
+
 
 
 // template<typename Callable>
@@ -23,6 +28,21 @@ void MyThreader::launch(LaunchFunction callable) {
   // f.get();
 }
 
+
+void MyThreader::launchAndProfile(string name, LaunchFunction callable) {
+  int fi = futuresCount++;
+  names[fi] = name;
+  futures[fi] = async(
+      std::launch::async,
+      [this, fi, callable] {
+        startTimes[fi] = high_resolution_clock::now();
+        callable();
+        endTimes[fi] = high_resolution_clock::now();
+      }
+  );
+}
+
+
 void MyThreader::waitForAll() {
   try {
     for (int i = 0; i < futuresCount; i++) {
@@ -36,6 +56,23 @@ void MyThreader::waitForAll() {
   }
 }
 
+
+void MyThreader::writeProfileToFile(const string& filename, int testIndex) {
+  ofstream file(filename, std::ios::app);
+
+  // file << "export const timings = {" << endl;
+  file << "'" << testIndex << "' : {" << endl;
+  for (int i = 0; i < futuresCount; i++) {
+    file << "\t"
+      << "'" << names[i] << "': { "
+      << "start: " << duration_cast<microseconds>(startTimes[i].time_since_epoch()).count()
+      << ", end: " << duration_cast<microseconds>(endTimes[i].time_since_epoch()).count()
+      << " }," << endl;
+  }
+  file << "}," << endl;
+  // file << "};" << endl;
+  file.flush();
+}
 
 
 };
