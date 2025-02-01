@@ -83,8 +83,10 @@ set(TON_CRYPTO_CORE_SOURCE
   vm/cells/VirtualCell.h
   vm/cells/VirtualizationParameters.h
 
+  vm/ng/CellView.h
   vm/ng/DataCellStorage.h
   vm/ng/LevelInfo.h
+  vm/ng/Noncopyable.h
 
   vm/cells.h
   vm/cellslice.h

@@ -28,6 +28,7 @@
 #include "td/utils/format.h"
 #include "td/utils/misc.h"
 #include "td/utils/Slice-decl.h"
+#include "vm/ng/CellView.h"
 
 namespace vm {
 using td::Ref;
@@ -1137,15 +1138,51 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlic
   return res;
 }
 
+namespace {
+
+// NOTE: This implements a buggy version of max_merkle_depth computation to not break compatibility.
+int add_cell_subtree(CellStorageStat& statistics, NonnullCellView cell) {
+  if (!statistics.seen.emplace(cell.hash()).second) {
+    return 0;
+  }
+
+  ++statistics.cells;
+  statistics.bits += cell.bit_length();
+
+  int max_merkle_depth = 0;
+  for (int i = 0; i < cell.refs_cnt(); ++i) {
+    max_merkle_depth = std::max(max_merkle_depth, add_cell_subtree(statistics, cell.ref(i)));
+  }
+  if (cell.special_type() == CellTraits::SpecialType::MerkleProof ||
+      cell.special_type() == CellTraits::SpecialType::MerkleUpdate) {
+    ++max_merkle_depth;
+  }
+
+  return max_merkle_depth;
+}
+
+}  // namespace
+
 td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::Cell> cell, bool kill_dup,
                                                                         unsigned skip_count_root) {
   if (cell.is_null()) {
     return td::Status::Error("cell is null");
   }
+  if (skip_count_root == 0 && kill_dup) {
+    int max_merkle_depth = add_cell_subtree(*this, NonnullCellView::create_from(*cell));
+    if (cells > limit_cells) {
+      return td::Status::Error("too many cells");
+    }
+    if (bits > limit_bits) {
+      return td::Status::Error("too many bits");
+    }
+    return CellInfo{static_cast<td::uint32>(max_merkle_depth)};
+  }
+
   if (kill_dup) {
-    auto ins = seen.emplace(cell->get_hash(), CellInfo{});
+    auto ins = seen.emplace(cell->get_hash());
     if (!ins.second) {
-      return ins.first->second;
+      return CellInfo{0};
     }
   }
   vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
