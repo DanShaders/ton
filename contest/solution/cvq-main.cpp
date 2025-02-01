@@ -127,14 +127,15 @@ void ContestValidateQuery::start_up() {
     check_utime_lt(); // reject_query("creation utime/lt of the new block is invalid"); return;
     prepare_out_msg_queue_size(); // reject_query("cannot request out msg queue size"); return;
 
-    LOG(INFO) << "try_validate stage 1";
-    LOG(INFO) << "running automated validity checks for block candidate " << id_.to_str();
-    if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
-      reject_throw("block "s + id_.to_str() + " failed to pass automated validity checks"); return;
-    }
 
-    
-    
+
+    // The following check was moved to unpack_block_candidate() just after block_root_ becomes available
+    // having non-function code here hinders DAGging the entire thing
+    // LOG(INFO) << "try_validate stage 1";
+    // LOG(INFO) << "running automated validity checks for block candidate " << id_.to_str();
+    // if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
+    //   reject_throw("block "s + id_.to_str() + " failed to pass automated validity checks"); return;
+    // }
     
     // _fix_all_processed_upto(); // fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks"); return;
     // _add_trivial_neighbor(); // fatal_error("cannot add previous block as a trivial neighbor"); return;

@@ -100,6 +100,10 @@ void ContestValidateQuery::unpack_block_candidate() {
   block_root_ = boc1.get_root_cell();
   //<%assigned%>: block_root_
   ORIGINAL_CHECK(block_root_.not_null());
+  if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
+    reject_throw("block "s + id_.to_str() + " failed to pass automated validity checks");
+  }
+
 
   // 3. initial block parse
   {
