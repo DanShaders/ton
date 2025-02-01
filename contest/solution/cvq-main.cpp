@@ -125,9 +125,10 @@ void ContestValidateQuery::start_up() {
     unpack_prev_state(prev_state_root_); // fatal_error("cannot unpack previous state"); return;
     init_next_state(); // fatal_error("cannot unpack previous state"); return;
     check_utime_lt(); // reject_query("creation utime/lt of the new block is invalid"); return;
-    prepare_out_msg_queue_size(); // reject_query("cannot request out msg queue size"); return;
 
 
+
+    // _prepare_out_msg_queue_size(); // reject_query("cannot request out msg queue size"); return;
 
     // The following check was moved to unpack_block_candidate() just after block_root_ becomes available
     // having non-function code here hinders DAGging the entire thing

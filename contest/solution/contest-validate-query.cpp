@@ -1227,8 +1227,16 @@ void ContestValidateQuery::prepare_out_msg_queue_size() {
   }
 
   //<%assigned%>: old_out_msg_queue_size_
+							//<%generated%>
+							if (--__pending_unpack_dispatch_queue_update_after == 0) my_threader.launch([this] { unpack_dispatch_queue_update_after(); });
+							//<%/generated%>
   //<%assigned%>: out_msg_queue_size_known_ (never used)
+							//<%generated%>
+							//<%/generated%>
   //<%assigned%>: have_out_msg_queue_size_in_state_
+							//<%generated%>
+							if (--__pending_unpack_dispatch_queue_update_after == 0) my_threader.launch([this] { unpack_dispatch_queue_update_after(); });
+							//<%/generated%>
 }
 
 
@@ -2265,6 +2273,7 @@ void ContestValidateQuery::build_new_message_queue() {
       }
       case block::gen::OutMsg::msg_export_deq: {
         fatal_throw("msg_export_deq are deprecated");
+        break;
       }
       case block::gen::OutMsg::msg_export_deq_short: {
         block::gen::OutMsg::Record_msg_export_deq_short rec;
