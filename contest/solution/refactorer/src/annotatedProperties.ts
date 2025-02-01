@@ -159,6 +159,11 @@ const annotatedProperties: string[] = [
 
 	// Added for: check_utime_lt
 	'max_shard_lt_',
+
+
+	// Added for: unpack_prev_state
+	'prev_states',
+	'virt_roots_',
 ];
 
 export default annotatedProperties;

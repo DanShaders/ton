@@ -113,6 +113,8 @@ void ContestValidateQuery::start_up() {
       LOG(DEBUG) << "sending wait_block_state() query #" << i << " for " << prev_blocks[i].to_str() << " to Manager";
       after_get_shard_state(i, fetch_block_state(prev_blocks[i]));
     }
+    //<%assigned%>: prev_states
+
     // 5. request masterchain state referred to in the block
     after_get_mc_state(fetch_block_state(mc_blkid_));
 
@@ -123,10 +125,10 @@ void ContestValidateQuery::start_up() {
     LOG(INFO) << "try_validate stage 0";
     PropDest2(state_usage_tree_, prev_state_root_, compute_prev_state()); // fatal_error(-666, "cannot compute previous state"); return;
     request_neighbor_queues(); // fatal_error("cannot request neighbor output queues"); return;
-    unpack_prev_state(prev_state_root_); // fatal_error("cannot unpack previous state"); return;
 
 
 
+    // _unpack_prev_state(); // fatal_error("cannot unpack previous state"); return;
     // _init_next_state(); // fatal_error("cannot unpack previous state"); return;
     // _check_utime_lt(); // reject_query("creation utime/lt of the new block is invalid"); return;
     // _prepare_out_msg_queue_size(); // reject_query("cannot request out msg queue size"); return;
