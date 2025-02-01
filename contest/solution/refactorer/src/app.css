@@ -158,3 +158,26 @@ pre, code {
 	text-align: center;
 	vertical-align: middle;
 }
+
+
+.timelineContainer {
+
+}
+
+.timelineRow {
+	position: relative;
+	height: 30px;
+
+	border-bottom: solid rgba(0, 0, 0, 0.2) 1px;
+}
+
+.timelineItem {
+	position: absolute;
+	top: 0%;
+	bottom: 0%;
+
+	border: dashed 1px #222;
+	background-color: aquamarine;
+	opacity: 0.5;
+}
+

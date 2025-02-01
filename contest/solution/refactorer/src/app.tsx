@@ -9,6 +9,7 @@ import { myCppRules } from "./myCpp_rules";
 import classProperties from "./classProperties";
 import annotatedProperties from "./annotatedProperties";
 import { stringHash } from "./various";
+import { timings } from "./profile";
 
 
 type ObjDict<T> = { [key: string]: T };
@@ -341,7 +342,8 @@ async function patch() {
 
 const launcherFunction = 'my_threader.launch';
 // my_threader.launch([this] { precheck_message_queue_update(); })
-const launchStringOf = (fname: string) => `${launcherFunction}([this] { ${functionCallString()[fname] } })`;
+// const launchStringOf = (fname: string) => `${launcherFunction}([this] { ${functionCallString()[fname] } })`;
+const launchStringOf = (fname: string) => `my_threader.launchAndProfile("${fname}", [this] { ${functionCallString()[fname] } })`;
 
 async function patchEdited() {
   let patchedSomething = false;
@@ -1129,6 +1131,95 @@ const FileGroupView = (props: { group: FileGroup, title: string }) => {
 
 
 
+const ProfileView = () => {
+  const [pi, setPi] = createSignal(51);
+
+  const timingsArray = Object.entries(timings);
+  const tts = Object.fromEntries(timingsArray);
+
+
+  const ordering = [
+    'compute_prev_state',
+    'request_neighbor_queues',
+    'unpack_prev_state',
+    'init_next_state',
+    'check_utime_lt',
+    'prepare_out_msg_queue_size',
+    'fix_all_processed_upto',
+    'add_trivial_neighbor',
+    'unpack_block_data',
+    'precheck_account_transactions',
+    'build_new_message_queue',
+    'precheck_message_queue_update',
+    'unpack_dispatch_queue_update',
+    'unpack_dispatch_queue_update_after',
+    'check_in_msg_descr',
+    'check_out_msg_descr',
+    'check_dispatch_queue_update',
+    'check_processed_upto',
+    'check_in_queue',
+    'check_transactions',
+    'postcheck_account_updates',
+    'check_message_processing_order',
+    'check_new_state',
+    'postcheck_value_flow',
+    'build_state_update',
+  ];
+
+  // let minTime = Infinity;
+  // let maxTime = -Infinity;
+  let maxTestDuration = 0;
+  for (const [testIndex, times] of timingsArray) {
+    let testMin = Infinity;
+    let testMax = -Infinity;
+    for (const [fname, time] of Object.entries(times)) {
+      // if (time.start < minTime) minTime = time.start;
+      // if (time.end > maxTime) maxTime = time.end;
+      if (time.start < testMin) testMin = time.start;
+      if (time.end > testMax) testMax = time.end;
+      
+      // const duration = time.end - time.start;
+      // if (duration > maxTestDuration) maxTestDuration = duration;
+    }
+    const testDuration = testMax - testMin;
+    if (testDuration > maxTestDuration) maxTestDuration = testDuration;
+  }
+  console.log('maxTestDuration:', maxTestDuration);
+
+  const currentTiming = () => tts[pi()+''] as ObjDict<{ start: number, end: number }>;
+
+  const minTime = () => !currentTiming() ? 0 : Math.min(...Object.values(currentTiming()).map(ts => ts.start));
+  const maxTime = () => !currentTiming() ? 1 : Math.min(...Object.values(currentTiming()).map(ts => ts.start));
+
+  return <div class="timelineContainer">
+    <button onClick={() => setPi(pi() - 1)}>{'<'}</button>
+    <input value={pi()} onInput={e => {
+      const v = parseInt(e.currentTarget.value);
+      if (isNaN(v)) return;
+      setPi(v);
+    }} />
+    <button onClick={() => setPi(pi() + 1)}>{'>'}</button>
+
+    <For each={ordering}>{fname => {
+      const time = () => currentTiming()?.[fname] ?? { start: 0, end: 0 };
+
+      const relStart = () => time().start - minTime();
+      const relEnd = () => time().end - minTime();
+
+      return <div class="timelineRow">
+        {fname}: {relStart()} - {relEnd()} ({time().end - time().start})
+        <div class="timelineItem" style={{
+            left: `${relStart() / maxTestDuration * 100}%`,
+            width: `${(relEnd()-relStart()) / maxTestDuration * 100}%`,
+          }}>
+        </div>
+      </div>
+    }}</For>
+  </div>
+};
+
+
+
 console.warn('propertiesToHighlight:', propertiesToHighlight());
 
 const currentLanguage = createMemo(() => languageVariant(propertyName() ?? '', allFunctions().map(fs => fs.name), propertiesToHighlight()));
@@ -1216,6 +1307,8 @@ export default function App() {
       Name: <b>{propertyName()}</b> <br />
       {!propertyValid() && 'Property invalid'}
     </pre></div>
+
+    <ProfileView />
     <CallGraph />
 
     {$mainDiffEditorContainer}
