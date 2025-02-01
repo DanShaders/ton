@@ -17,6 +17,7 @@
 #include "tonlib/tonlib/ExtClient.h"
 
 #include "multithreading-guard.hpp"
+#include "my-threader.hpp"
 
 
 // For std::unordered_map
@@ -478,6 +479,7 @@ public:
 
   friend class MultithreadingGuard;
   void generated_root();
+  MyThreader my_threader;
 
 
 

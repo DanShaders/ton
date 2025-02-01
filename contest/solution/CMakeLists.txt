@@ -4,6 +4,7 @@ add_library(contest-solution STATIC
   solution.hpp solution.cpp
   contest-validate-query.hpp contest-validate-query.cpp cvq-main.cpp cvq-query.cpp cvq-gen.cpp
   various.hpp various.cpp
+  my-threader.hpp my-threader.cpp
   multithreading-guard.hpp multithreading-guard.cpp
 )
 target_include_directories(contest-solution PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>)

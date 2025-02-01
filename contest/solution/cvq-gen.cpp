@@ -13,9 +13,9 @@ using namespace std::literals::string_literals;
 
 void ContestValidateQuery::generated_root() {
   // <{generated_dag_root
-  precheck_account_transactions();
-  build_new_message_queue();
-  check_new_state();
+  my_threader.launch([this] { precheck_account_transactions(); });
+  my_threader.launch([this] { build_new_message_queue(); });
+  my_threader.launch([this] { check_new_state(); });
   // generated_dag_root}/>
 }
 

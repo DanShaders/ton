@@ -131,6 +131,13 @@ const annotatedProperties: string[] = [
 	// Added for: check_in_msg_descr()
 	'removed_dispatch_queue_messages_st1_',
 	'have_unprocessed_account_dispatch_queue_',
+
+
+	// Added for: unpack_dispatch_queue_update_after
+	'old_out_msg_queue_size_',
+	'out_msg_queue_size_known_', // was closed, although it's never used
+	'have_out_msg_queue_size_in_state_',
+	'processed_account_dispatch_queues_',
 ];
 
 export default annotatedProperties;

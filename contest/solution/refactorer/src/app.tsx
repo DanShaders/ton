@@ -336,6 +336,12 @@ async function patch() {
   mFs.setFiles(nextFiles);
 };
 
+
+
+const launcherFunction = 'my_threader.launch';
+// my_threader.launch([this] { precheck_message_queue_update(); })
+const launchStringOf = (fname: string) => `${launcherFunction}([this] { ${functionCallString()[fname] } })`;
+
 async function patchEdited() {
   let patchedSomething = false;
   const nextFiles = [];
@@ -474,13 +480,13 @@ const functionsToDAGWithInfo = createMemo(() => {
 });
 
 const functionsToDAG = createMemo(() => functionsToDAGWithInfo().functions);
+const functionCallString = createMemo(() => functionsToDAGWithInfo().functionCallString);
 
 function dagFunctions() {
   try {
     const {
       notFoundFunctions,
       functions: _functionsToDAG,
-      functionCallString,
     } = functionsToDAGWithInfo();
 
     if (notFoundFunctions.length > 0) {
@@ -628,7 +634,7 @@ function dagFunctions() {
         return (
           `${matchedString}\n`
           + `${indent}${generatedStartMark}\n`
-          + dependentOn(metaProp).map(fname => `${indent}if (--${pendingVariableOf_inc(fname)} == 0) ${functionCallString[fname]}\n`).join('')
+          + dependentOn(metaProp).map(fname => `${indent}if (--${pendingVariableOf_inc(fname)} == 0) ${launchStringOf(fname)};\n`).join('')
           + `${indent}${generatedEndMark}`
         );
       });
@@ -696,7 +702,7 @@ function dagFunctions() {
     }
   
     console.log('topLevelFunctions:', topLevelFunctions);
-    generatedDagRootString = topLevelFunctions.map(f => '  ' + functionCallString[f.name] + '\n').join('');
+    generatedDagRootString = topLevelFunctions.map(f => '  ' + launchStringOf(f.name) + ';\n').join('');
     console.log('topLevelString:\n\n' + generatedDagRootString);
 
     console.log('pendingVariables:', pendingVariables);
