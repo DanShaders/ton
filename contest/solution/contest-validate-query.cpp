@@ -1300,11 +1300,19 @@ void ContestValidateQuery::fix_all_processed_upto() {
     //return _fatal_error("Cannot adjust old ProcessedUpto of the shard state of our virtual sibling");
   //<%replace_usage%>: sibling_processed_upto_ -> sibling_processed_upto_st1_
   //<%assigned%>: sibling_processed_upto_st2_
+							//<%generated%>
+							if (--__pending_add_trivial_neighbor == 0) my_threader.launch([this] { add_trivial_neighbor(); });
+							//<%/generated%>
 
 
   fix_processed_upto(*ns_.processed_upto_, true);
     //return _fatal_error("Cannot adjust new ProcessedUpto of our shard state");
   //<%assigned%>: ns_.processed_upto_
+							//<%generated%>
+							if (--__pending_check_processed_upto == 0) my_threader.launch([this] { check_processed_upto(); });
+							if (--__pending_check_in_queue == 0) my_threader.launch([this] { check_in_queue(); });
+							if (--__pending_check_new_state == 0) my_threader.launch([this] { check_new_state(); });
+							//<%/generated%>
 
 
   for (auto& descr : neighbors_) {
@@ -1314,6 +1322,9 @@ void ContestValidateQuery::fix_all_processed_upto() {
   }
   //<%replace_usage%>: neighbors_ -> neighbors_st1_
   //<%assigned%>: neighbors_st2_
+							//<%generated%>
+							if (--__pending_add_trivial_neighbor == 0) my_threader.launch([this] { add_trivial_neighbor(); });
+							//<%/generated%>
 
 }
 

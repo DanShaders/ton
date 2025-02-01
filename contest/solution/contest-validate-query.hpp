@@ -493,20 +493,21 @@ public:
 
 
   //<{generated_atomic_vars
+  std::atomic<int> __pending_add_trivial_neighbor{2};
+  std::atomic<int> __pending_check_processed_upto{5};
+  std::atomic<int> __pending_check_in_queue{6};
+  std::atomic<int> __pending_check_new_state{2};
   std::atomic<int> __pending_check_in_msg_descr{6};
   std::atomic<int> __pending_check_out_msg_descr{6};
-  std::atomic<int> __pending_check_in_queue{5};
   std::atomic<int> __pending_build_new_message_queue{2};
   std::atomic<int> __pending_check_transactions{4};
   std::atomic<int> __pending_precheck_message_queue_update{3};
   std::atomic<int> __pending_unpack_dispatch_queue_update{2};
   std::atomic<int> __pending_precheck_account_transactions{1};
   std::atomic<int> __pending_postcheck_account_updates{2};
-  std::atomic<int> __pending_check_new_state{1};
   std::atomic<int> __pending_postcheck_value_flow{5};
   std::atomic<int> __pending_build_state_update{9};
   std::atomic<int> __pending_unpack_dispatch_queue_update_after{1};
-  std::atomic<int> __pending_check_processed_upto{4};
   std::atomic<int> __pending_check_message_processing_order{3};
   std::atomic<int> __pending_check_dispatch_queue_update{2};
   //generated_atomic_vars}/>

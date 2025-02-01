@@ -133,10 +133,10 @@ void ContestValidateQuery::start_up() {
       reject_throw("block "s + id_.to_str() + " failed to pass automated validity checks"); return;
     }
 
-    fix_all_processed_upto(); // fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks"); return;
     
     
     
+    // _fix_all_processed_upto(); // fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks"); return;
     // _add_trivial_neighbor(); // fatal_error("cannot add previous block as a trivial neighbor"); return;
     // _unpack_block_data(); // reject_query("cannot unpack block data: " + error);
     // _precheck_account_transactions(); // reject_query("invalid collection of account transactions in ShardAccountBlocks"); return;

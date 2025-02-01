@@ -150,6 +150,11 @@ const annotatedProperties: string[] = [
 	'neighbors_st2_',
 	'sibling_out_msg_queue_st1_',
 	'sibling_processed_upto_st2_',
+
+
+	// Added for: fix_all_processed_upto
+	'neighbors_st1_',
+	'sibling_processed_upto_st1_',
 ];
 
 export default annotatedProperties;
