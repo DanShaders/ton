@@ -185,9 +185,10 @@ bool ContestValidateQuery::top_level_fatal_error(std::string err_msg, int err_co
  */
 void ContestValidateQuery::finish_query() {
   // <{generated_atomic_zero_checks
-  if (__pending_fix_all_processed_upto != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_fix_all_processed_upto ended up as: " << __pending_fix_all_processed_upto;
+  if (__pending_build_state_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_build_state_update ended up as: " << __pending_build_state_update;
   if (__pending_unpack_prev_state != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_unpack_prev_state ended up as: " << __pending_unpack_prev_state;
   if (__pending_add_trivial_neighbor != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_add_trivial_neighbor ended up as: " << __pending_add_trivial_neighbor;
+  if (__pending_fix_all_processed_upto != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_fix_all_processed_upto ended up as: " << __pending_fix_all_processed_upto;
   if (__pending_check_utime_lt != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_utime_lt ended up as: " << __pending_check_utime_lt;
   if (__pending_prepare_out_msg_queue_size != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_prepare_out_msg_queue_size ended up as: " << __pending_prepare_out_msg_queue_size;
   if (__pending_unpack_block_data != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_unpack_block_data ended up as: " << __pending_unpack_block_data;
@@ -203,7 +204,6 @@ void ContestValidateQuery::finish_query() {
   if (__pending_check_transactions != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_transactions ended up as: " << __pending_check_transactions;
   if (__pending_postcheck_account_updates != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_postcheck_account_updates ended up as: " << __pending_postcheck_account_updates;
   if (__pending_check_new_state != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_new_state ended up as: " << __pending_check_new_state;
-  if (__pending_build_state_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_build_state_update ended up as: " << __pending_build_state_update;
   if (__pending_postcheck_value_flow != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_postcheck_value_flow ended up as: " << __pending_postcheck_value_flow;
   if (__pending_check_message_processing_order != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_message_processing_order ended up as: " << __pending_check_message_processing_order;
   if (__pending_check_dispatch_queue_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_dispatch_queue_update ended up as: " << __pending_check_dispatch_queue_update;

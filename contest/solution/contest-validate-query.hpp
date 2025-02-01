@@ -397,7 +397,7 @@ public:
   void unpack_block_candidate();
   void extract_collated_data_from(Ref<vm::Cell> croot, int idx);
   void extract_collated_data();
-  tuple<shared_ptr<vm::CellUsageTree>, Ref<vm::Cell>> compute_prev_state();
+  void compute_prev_state();
   void unpack_merge_prev_state();
   void unpack_prev_state();
   void init_next_state();
@@ -493,9 +493,10 @@ public:
 
 
   //<{generated_atomic_vars
+  std::atomic<int> __pending_build_state_update{12};
+  std::atomic<int> __pending_unpack_prev_state{2};
+  std::atomic<int> __pending_add_trivial_neighbor{5};
   std::atomic<int> __pending_fix_all_processed_upto{3};
-  std::atomic<int> __pending_unpack_prev_state{1};
-  std::atomic<int> __pending_add_trivial_neighbor{4};
   std::atomic<int> __pending_check_utime_lt{1};
   std::atomic<int> __pending_prepare_out_msg_queue_size{1};
   std::atomic<int> __pending_unpack_block_data{1};
@@ -511,7 +512,6 @@ public:
   std::atomic<int> __pending_check_transactions{5};
   std::atomic<int> __pending_postcheck_account_updates{3};
   std::atomic<int> __pending_check_new_state{3};
-  std::atomic<int> __pending_build_state_update{10};
   std::atomic<int> __pending_postcheck_value_flow{5};
   std::atomic<int> __pending_check_message_processing_order{3};
   std::atomic<int> __pending_check_dispatch_queue_update{2};

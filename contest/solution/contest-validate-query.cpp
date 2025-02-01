@@ -780,10 +780,10 @@ void ContestValidateQuery::check_this_shard_mc_info() {
  *
  * @returns True if the previous state is computed successfully, false otherwise.
  */
-tuple<shared_ptr<vm::CellUsageTree>, Ref<vm::Cell>> ContestValidateQuery::compute_prev_state() {
+void ContestValidateQuery::compute_prev_state() {
   ORIGINAL_CHECK(prev_states.size() == 1u + after_merge_);
 
-  Ref<vm::Cell> prev_state_root_ = prev_states[0]->root_cell();
+  prev_state_root_ = prev_states[0]->root_cell();
   ORIGINAL_CHECK(prev_state_root_.not_null());
   if (after_merge_) {
     Ref<vm::Cell> aux_root = prev_states[1]->root_cell();
@@ -792,12 +792,18 @@ tuple<shared_ptr<vm::CellUsageTree>, Ref<vm::Cell>> ContestValidateQuery::comput
       fatal_throw(-667, "cannot construct mechanically merged previously state");
     }
   }
-  auto state_usage_tree_ = std::make_shared<vm::CellUsageTree>();
+  state_usage_tree_ = std::make_shared<vm::CellUsageTree>();
   //<%assigned%>: state_usage_tree_
+							//<%generated%>
+							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							//<%/generated%>
   prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr()); // !TEMP_THREAD likely breaks Merkle Update
   //<%assigned%>: prev_state_root_
-
-  return tuple(state_usage_tree_, prev_state_root_);
+							//<%generated%>
+							if (--__pending_unpack_prev_state == 0) my_threader.launch([this] { unpack_prev_state(); });
+							if (--__pending_add_trivial_neighbor == 0) my_threader.launch([this] { add_trivial_neighbor(); });
+							if (--__pending_build_state_update == 0) my_threader.launch([this] { build_state_update(); });
+							//<%/generated%>
 }
 
 /**

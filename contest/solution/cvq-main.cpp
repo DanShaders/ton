@@ -125,10 +125,10 @@ void ContestValidateQuery::start_up() {
     // (previously: try_validate())
 
     LOG(INFO) << "try_validate stage 0";
-    PropDest2(state_usage_tree_, prev_state_root_, compute_prev_state()); // fatal_error(-666, "cannot compute previous state"); return;
 
 
 
+    // _compute_prev_state(); // fatal_error(-666, "cannot compute previous state"); return;
     // _request_neighbor_queues(); // fatal_error("cannot request neighbor output queues"); return;
     // _unpack_prev_state(); // fatal_error("cannot unpack previous state"); return;
     // _init_next_state(); // fatal_error("cannot unpack previous state"); return;
