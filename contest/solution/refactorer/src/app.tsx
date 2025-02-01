@@ -982,6 +982,13 @@ const graphOf = (func: FunctionInfo) => {
   return visualProps;
 };
 
+function codeContainsLoops(code: string) {
+  const forRE = /\bfor\s*\(/;
+  const whileRE = /\bwhile\s*\(/;
+  const doRE = /\bdo\s*\{/;
+  return forRE.test(code) || whileRE.test(code) || doRE.test(code) || code.includes('[&]');
+}
+
 createEffect(() => {
   console.log('files:', mFs.files());
   console.log('roots:', roots());
@@ -1005,7 +1012,10 @@ const DAGRootMark = () =>
     <svg width={DAGMarkSide} height={DAGMarkSide}>
       <polygon points={`0, 0, ${DAGMarkSide}, 0, ${DAGMarkSide}, ${DAGMarkSide}`} fill="green" />
     </svg>
-  </div>
+  </div>;
+
+const LoopMark = () =>
+  <div class="loopMark">[&]</div>;
 
 const CallTree = () => {
   function dfs(func: FunctionInfo) {
@@ -1085,6 +1095,7 @@ const CallGraph = () => {
                 }}>
                 {modifiedFunctions().includes(f) && <ModifiedMark />}
                 {functionsToDAG().includes(f) && <DAGRootMark />}
+                {codeContainsLoops(f.code) && <LoopMark />}
                 <span class="callGraphNodeTitle">{f.name}</span>
               </div>;
             }}</For>
