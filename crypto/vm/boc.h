@@ -30,6 +30,7 @@
 #include "td/utils/Time.h"
 #include "td/utils/Timer.h"
 #include "td/utils/port/FileFd.h"
+#include "vm/ng/Noncopyable.h"
 
 namespace vm {
 using td::Ref;
@@ -120,6 +121,8 @@ struct CellStorageStat {
   td::HashSet<vm::Cell::Hash> seen;
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
+  TON_MAKE_NONCOPYABLE(CellStorageStat);
+  TON_MAKE_DEFAULT_MOVABLE(CellStorageStat);
   explicit CellStorageStat(unsigned long long limit_cells)
       : cells(0), bits(0), public_cells(0), limit_cells(limit_cells) {
   }
