@@ -6,7 +6,10 @@
 
 #pragma once
 
+#include "vm/cells/CellSlice.h"
 #include "vm/cells/DataCell.h"
+#include "vm/excno.hpp"
+#include "vm/ng/BitReader.h"
 #include "vm/ng/Noncopyable.h"
 
 namespace vm {
@@ -28,10 +31,17 @@ decltype(auto) visit(Variant&& variant, Visitors&&... visitors) {
 
 }  // namespace detail
 
+struct CellResolutionResult;
+
 class NonnullCellView {
   using VirtualizationParams = detail::VirtualizationParameters;
 
  public:
+  enum class CanBeSpecial {
+    Yes,
+    No,
+  };
+
   TON_MAKE_DEFAULT_COPYABLE(NonnullCellView);
   TON_MAKE_DEFAULT_MOVABLE(NonnullCellView);
 
@@ -90,6 +100,20 @@ class NonnullCellView {
         });
   }
 
+  BitReader data_bit_reader() const {
+    return BitReader{reinterpret_cast<td::uint32 const*>(data()), bit_length()};
+  }
+
+  Ref<CellSlice> as_ref_slice() const {
+    return td::make_ref<CellSlice>(Cell::LoadedCell{
+        .data_cell = Ref<DataCell>{m_cell},
+        .virt = m_virtualization,
+        .tree_node = m_node,
+    });
+  }
+
+  CellResolutionResult resolve(VmStateInterface* interface, CanBeSpecial);
+
  private:
   NonnullCellView(DataCell const& cell, VirtualizationParams virtualization, CellUsageTree::NodePtr&& tree_node)
       : m_cell(&cell), m_virtualization(virtualization), m_node(std::move(tree_node)) {
@@ -107,6 +131,20 @@ class NonnullCellView {
   VirtualizationParams m_virtualization;
   VirtualizationParams m_child_virtualization;
   CellUsageTree::NodePtr m_node;
+};
+
+struct CellResolutionResult {
+  template <typename T>
+  CellResolutionResult(T&& result) : result(std::forward<T>(result)) {
+  }
+
+  NonnullCellView unwrap_or_throw() {
+    return detail::visit(
+        std::move(result), [](NonnullCellView result) { return result; },
+        [](auto&& other) -> NonnullCellView { throw std::move(other); });
+  }
+
+  std::variant<NonnullCellView, VmError, VmVirtError> result;
 };
 
 }  // namespace vm

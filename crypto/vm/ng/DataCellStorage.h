@@ -20,7 +20,7 @@ class DataCellWithInlineStorage final : public DataCellWithTrailer {
 
  private:
   std::array<LevelInfo, level + 1> m_level_info;
-  std::array<char, inline_data_length> m_inline_data;
+  alignas(td::uint32) std::array<char, inline_data_length> m_inline_data;
 };
 
 template <size_t level, int bit_length_hi>
