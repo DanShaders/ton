@@ -52,7 +52,15 @@ class TLB {
     return validate_exact(&ops, cs, weak);
   }
   bool validate_csr(int* ops, Ref<vm::CellSlice> cs_ref, bool weak = false) const {
-    return cs_ref.not_null() && validate_skip_exact(ops, cs_ref.write(), weak);
+    if (!cs_ref.not_null()) {
+      return false;
+    }
+    if (cs_ref.is_unique()) {
+      return validate_skip_exact(ops, cs_ref.write(), weak);
+    } else {
+      CellSlice cs{*cs_ref};
+      return validate_skip_exact(ops, cs, weak);
+    }
   }
   bool validate_csr(int ops, Ref<vm::CellSlice> cs_ref, bool weak = false) const {
     return validate_csr(&ops, std::move(cs_ref), weak);
@@ -300,8 +308,14 @@ struct TLB_Complex : TLB {
     return res.not_null() && copy.empty_ext() ? std::move(res) : td::RefInt256{};
   }
   td::RefInt256 as_integer(Ref<vm::CellSlice> cs) const override {
-    auto res = as_integer_skip(cs.write());
-    return res.not_null() && cs->empty_ext() ? std::move(res) : td::RefInt256{};
+    if (cs.is_unique()) {
+      auto res = as_integer_skip(cs.write());
+      return res.not_null() && cs->empty_ext() ? std::move(res) : td::RefInt256{};
+    } else {
+      vm::CellSlice copy{*cs};
+      auto res = as_integer_skip(copy);
+      return res.not_null() && copy.empty_ext() ? std::move(res) : td::RefInt256{};
+    }
   }
 };
 
@@ -386,13 +400,30 @@ bool type_unpack_exact(vm::CellSlice& cs, const T& type, R& rec, Args&... args) 
 }
 
 template <typename R, typename... Args>
+bool cs_unpack(vm::CellSlice &cs, R& rec, Args&... args) {
+  return (typename R::type_class{}).unpack(cs, rec, args...) && cs.empty_ext();
+}
+
+template <typename R, typename... Args>
 bool csr_unpack(Ref<vm::CellSlice> csr, R& rec, Args&... args) {
-  return (typename R::type_class{}).unpack(csr.write(), rec, args...) && csr->empty_ext();
+  if (csr.is_unique()) {
+    return (typename R::type_class{}).unpack(csr.write(), rec, args...) && csr->empty_ext();
+  } else {
+    vm::CellSlice cs{*csr};
+    return (typename R::type_class{}).unpack(cs, rec, args...) && cs.empty_ext();
+  }
 }
 
 template <typename R, typename... Args>
 bool csr_unpack_safe(Ref<vm::CellSlice> csr, R& rec, Args&... args) {
-  return csr.not_null() && (typename R::type_class{}).unpack(csr.write(), rec, args...) && csr->empty_ext();
+  if (!csr.not_null()) {
+    return false;
+  } else if (csr.is_unique()) {
+    return (typename R::type_class{}).unpack(csr.write(), rec, args...) && csr->empty_ext();
+  } else {
+    vm::CellSlice cs{*csr};
+    return (typename R::type_class{}).unpack(cs, rec, args...) && cs.empty_ext();
+  }
 }
 
 template <typename R, typename... Args>
@@ -415,27 +446,52 @@ bool type_unpack_cell(Ref<vm::Cell> cell, const T& type, R& rec, Args&... args) 
 
 template <typename T, typename R, typename... Args>
 bool csr_type_unpack(Ref<vm::CellSlice> csr, const T& type, R& rec, Args&... args) {
-  return type.unpack(csr.write(), rec, args...) && csr->empty_ext();
+  if (csr.is_unique()) {
+    return type.unpack(csr.write(), rec, args...) && csr->empty_ext();
+  } else {
+    vm::CellSlice cs{*csr};
+    return type.unpack(cs, rec, args...) && cs.empty_ext();
+  }
 }
 
 template <typename R, typename... Args>
 bool csr_unpack_inexact(Ref<vm::CellSlice> csr, R& rec, Args&... args) {
-  return (typename R::type_class{}).unpack(csr.write(), rec, args...);
+  if (csr.is_unique()) {
+    return (typename R::type_class{}).unpack(csr.write(), rec, args...);
+  } else {
+    vm::CellSlice cs{*csr};
+    return (typename R::type_class{}).unpack(cs, rec, args...);
+  }
 }
 
 template <typename T, typename R, typename... Args>
 bool csr_type_unpack_inexact(Ref<vm::CellSlice> csr, const T& type, R& rec, Args&... args) {
-  return type.unpack(csr.write(), rec, args...);
+  if (csr.is_unique()) {
+    return type.unpack(csr.write(), rec, args...);
+  } else {
+    vm::CellSlice cs{*csr};
+    return type.unpack(cs, rec, args...);
+  }
 }
 
 template <typename R, typename... Args>
 bool csr_unpack_skip(Ref<vm::CellSlice>& csr, R& rec, Args&... args) {
-  return (typename R::type_class{}).unpack(csr.write(), rec, args...);
+  if (csr.is_unique()) {
+    return (typename R::type_class{}).unpack(csr.write(), rec, args...);
+  } else {
+    vm::CellSlice cs{*csr};
+    return (typename R::type_class{}).unpack(cs, rec, args...);
+  }
 }
 
 template <typename T, typename R, typename... Args>
 bool csr_type_unpack_skip(Ref<vm::CellSlice>& csr, const T& type, R& rec, Args&... args) {
-  return type.unpack(csr.write(), rec, args...);
+  if (csr.is_unique()) {
+    return type.unpack(csr.write(), rec, args...);
+  } else {
+    vm::CellSlice cs{*csr};
+    return type.unpack(cs, rec, args...);
+  }
 }
 
 // templatized pack functions

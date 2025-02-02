@@ -628,6 +628,15 @@ std::string MsgProcessedUptoCollection::to_str() const {
   return os.str();
 }
 
+bool EnqueuedMsgDescr::unpack(Ref<vm::CellSlice> csr) {
+  if (csr.is_unique()) {
+    return unpack(csr.write());
+  } else {
+    vm::CellSlice cs{*csr};
+    return unpack(cs);
+  }
+}
+
 // unpacks some fields from EnqueuedMsg
 bool EnqueuedMsgDescr::unpack(vm::CellSlice& cs) {
   block::gen::EnqueuedMsg::Record enq;
@@ -1375,9 +1384,19 @@ bool CurrencyCollection::unpack(Ref<vm::CellSlice> csr) {
   return unpack_CurrencyCollection(std::move(csr), grams, extra) || invalidate();
 }
 
+bool CurrencyCollection::unpack(vm::CellSlice& csr) {
+  return unpack_CurrencyCollection(csr, grams, extra) || invalidate();
+}
+
 bool CurrencyCollection::validate_unpack(Ref<vm::CellSlice> csr, int max_cells) {
   return (csr.not_null() && block::tlb::t_CurrencyCollection.validate_upto(max_cells, *csr) &&
           unpack_CurrencyCollection(std::move(csr), grams, extra)) ||
+         invalidate();
+}
+
+bool CurrencyCollection::validate_unpack(vm::CellSlice& cs, int max_cells) {
+  return (cs.cell.not_null() && block::tlb::t_CurrencyCollection.validate_upto(max_cells, cs) &&
+          unpack_CurrencyCollection(cs, grams, extra)) ||
          invalidate();
 }
 
@@ -1765,6 +1784,13 @@ bool unpack_CurrencyCollection(Ref<vm::CellSlice> csr, td::RefInt256& value, Ref
     vm::CellSlice cs{*csr};
     return block::tlb::t_CurrencyCollection.unpack_special(cs, value, extra);
   }
+}
+
+bool unpack_CurrencyCollection(vm::CellSlice& cs, td::RefInt256& value, Ref<vm::Cell>& extra) {
+  if (cs.cell.is_null()) {
+    return false;
+  }
+  return block::tlb::t_CurrencyCollection.unpack_special(cs, value, extra);
 }
 
 bool check_one_library(Ref<vm::CellSlice> cs_ref, td::ConstBitPtr key, int n) {

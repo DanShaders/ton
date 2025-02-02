@@ -146,6 +146,7 @@ struct EnqueuedMsgDescr {
     return false;
   }
   bool unpack(vm::CellSlice& cs);
+  bool unpack(Ref<vm::CellSlice> csr);
   bool same_workchain() const {
     return cur_prefix_.workchain == next_prefix_.workchain;
   }
@@ -399,7 +400,9 @@ struct CurrencyCollection {
   bool fetch(vm::CellSlice& cs);
   bool fetch_exact(vm::CellSlice& cs);
   bool unpack(Ref<vm::CellSlice> csr);
+  bool unpack(vm::CellSlice &cs);
   bool validate_unpack(Ref<vm::CellSlice> csr, int max_cells = 1024);
+  bool validate_unpack(vm::CellSlice &cs, int max_cells = 1024);
   Ref<vm::CellSlice> pack() const;
   bool pack_to(Ref<vm::CellSlice>& csr) const {
     return (csr = pack()).not_null();
@@ -701,6 +704,7 @@ bool store_Maybe_Grams_nz(vm::CellBuilder& cb, td::RefInt256 value);
 bool store_CurrencyCollection(vm::CellBuilder& cb, td::RefInt256 value, Ref<vm::Cell> extra);
 bool fetch_CurrencyCollection(vm::CellSlice& cs, td::RefInt256& value, Ref<vm::Cell>& extra, bool inexact = false);
 bool unpack_CurrencyCollection(Ref<vm::CellSlice> csr, td::RefInt256& value, Ref<vm::Cell>& extra);
+bool unpack_CurrencyCollection(vm::CellSlice &csr, td::RefInt256& value, Ref<vm::Cell>& extra);
 
 bool valid_library_collection(Ref<vm::Cell> cell, bool catch_errors = true);
 

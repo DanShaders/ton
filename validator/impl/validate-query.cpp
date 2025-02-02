@@ -3627,8 +3627,8 @@ bool ValidateQuery::check_imported_message(Ref<vm::Cell> msg_env) {
   for (const auto& nb : neighbors_) {
     if (!nb.is_disabled() && nb.contains(cur_prefix)) {
       CHECK(nb.out_msg_queue);
-      auto nqv = nb.out_msg_queue->lookup_with_extra(key.bits(), key.size());
-      if (nqv.is_null()) {
+      auto nqv = nb.out_msg_queue->lookup_with_extra_cs(key.bits(), key.size());
+      if (nqv.cell.is_null()) {
         return reject_query("imported internal message with hash "s + env.msg->get_hash().to_hex() +
                             " and previous address " + cur_prefix.to_str() + "..., next hop address " +
                             next_prefix.to_str() + " could not be found in the outbound message queue of neighbor " +
@@ -3636,8 +3636,8 @@ bool ValidateQuery::check_imported_message(Ref<vm::Cell> msg_env) {
       }
       block::EnqueuedMsgDescr enq_msg_descr;
       unsigned long long created_lt;
-      if (!(nqv.write().fetch_ulong_bool(64, created_lt)  // augmentation
-            && enq_msg_descr.unpack(nqv.write())          // unpack EnqueuedMsg
+      if (!(nqv.fetch_ulong_bool(64, created_lt)          // augmentation
+            && enq_msg_descr.unpack(nqv)                  // unpack EnqueuedMsg
             && enq_msg_descr.check_key(key.bits())        // check key
             && enq_msg_descr.lt_ == created_lt)) {
         return reject_query("imported internal message from the outbound message queue of neighbor " +

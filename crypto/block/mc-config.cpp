@@ -515,15 +515,15 @@ td::Result<std::unique_ptr<ValidatorSet>> Config::unpack_validator_set(Ref<vm::C
   auto ptr = std::make_unique<ValidatorSet>(rec.utime_since, rec.utime_until, rec.total, rec.main);
   for (int i = 0; i < rec.total; i++) {
     key_buffer.store_ulong(i);
-    auto descr_cs = dict.lookup(key_buffer.bits(), 16);
-    if (descr_cs.is_null()) {
+    vm::CellSlice descr_cs = dict.lookup_cs(key_buffer.bits(), 16);
+    if (descr_cs.cell.is_null()) {
       return td::Status::Error("indices in a validator set dictionary must be integers 0..total-1");
     }
     gen::ValidatorDescr::Record_validator_addr descr;
-    if (!tlb::csr_unpack(descr_cs, descr)) {
+    if (!tlb::cs_unpack(descr_cs, descr)) {
       descr.adnl_addr.set_zero();
-      if (!(gen::t_ValidatorDescr.unpack_validator(descr_cs.write(), descr.public_key, descr.weight) &&
-            descr_cs->empty_ext())) {
+      if (!(gen::t_ValidatorDescr.unpack_validator(descr_cs, descr.public_key, descr.weight) &&
+            descr_cs.empty_ext())) {
         return td::Status::Error(PSLICE() << "validator #" << i
                                           << " has an invalid ValidatorDescr record in the validator set dictionary");
       }
