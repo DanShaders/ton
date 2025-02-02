@@ -74,6 +74,10 @@ class NonnullCellView {
     return m_cell->get_depth(std::min<int>(m_virtualization.get_level(), level));
   }
 
+  CellUsageTree::NodePtr node() const {
+    return m_node;
+  }
+
   NonnullCellView ref(int idx) const {
     CHECK(idx >= 0 && idx < refs_cnt());
     return detail::visit(
