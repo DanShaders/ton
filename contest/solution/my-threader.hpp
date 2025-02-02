@@ -24,6 +24,7 @@ using std::endl;
 using std::chrono::high_resolution_clock;
 using std::chrono::microseconds;
 using std::chrono::duration_cast;
+using std::chrono::_V2::system_clock;
 
 
 // Function type that can handle both regular functions and lambdas with no parameters and void return

@@ -18,6 +18,7 @@
 
 #include "multithreading-guard.hpp"
 #include "my-threader.hpp"
+#include "my-timer.hpp"
 
 
 // For std::unordered_map
@@ -489,9 +490,11 @@ public:
 
   friend class MultithreadingGuard;
   void generated_root();
+
+  MyTimer account_transactions_timer{"account_transactions_timer", true},
+          one_transaction_timer{"one_transaction_timer", true};
+
   MyThreader my_threader;
-
-
 
   //<{generated_atomic_vars
   std::atomic<int> __pending_build_state_update{12};

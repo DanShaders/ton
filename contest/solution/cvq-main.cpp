@@ -175,6 +175,8 @@ void ContestValidateQuery::start_up() {
 
     // sleep(1);
     my_threader.writeProfileToFile("profile.ts", testIndex);
+    account_transactions_timer.writeToFile("account_transactions_times.ts", testIndex);
+    one_transaction_timer.writeToFile("one_transaction_times.ts", testIndex);
 
     finish_query();
   } catch (std::string error) {

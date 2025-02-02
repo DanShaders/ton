@@ -62,13 +62,17 @@ void MyThreader::writeProfileToFile(const string& filename, int testIndex) {
 
   // file << "export const timings = {" << endl;
   file << "'" << testIndex << "' : {" << endl;
+
+  file << "\t'times': {" << endl;
   for (int i = 0; i < futuresCount; i++) {
-    file << "\t"
+    file << "\t\t"
       << "'" << names[i] << "': { "
       << "start: " << duration_cast<microseconds>(startTimes[i].time_since_epoch()).count()
       << ", end: " << duration_cast<microseconds>(endTimes[i].time_since_epoch()).count()
       << " }," << endl;
   }
+  file << "\t}," << endl;
+
   file << "}," << endl;
   // file << "};" << endl;
   file.flush();

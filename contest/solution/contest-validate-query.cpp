@@ -4572,6 +4572,8 @@ std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBi
  * @returns True if the transaction is valid, false otherwise.
  */
 void ContestValidateQuery::check_one_transaction(block::Account& account, ton::LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first, bool is_last) {
+  TimerGrab _time_it(one_transaction_timer);
+
   // return true; // !TEMP_THREAD_TEST
   // LOG(ERROR) << "Test index #" << testIndex << ": _check_one_transaction, current thread id: "<< render_thread_id(std::this_thread::get_id()); // !TEMP_THREAD
   LOG(DEBUG) << "checking transaction " << lt << " of account " << account.addr.to_hex();
@@ -5107,6 +5109,8 @@ void ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
  * @returns True if the account transactions are valid, false otherwise.
  */
 void ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root) {
+  TimerGrab _time_it(account_transactions_timer);
+  
   // LOG(ERROR) << "Test index #" << testIndex << " entered _check_account_transactionS"; // !DEBUG_BAD_THREAD_SEARCH
 
   block::gen::AccountBlock::Record acc_blk;
@@ -5297,7 +5301,7 @@ void ContestValidateQuery::check_transactions() {
 
   bool check_account_transactions_result = true;
 
-  std::vector<std::future<bool> > results;
+  std::vector<std::future<bool> > results; // !TODO: preallocate
 
   for (size_t i = 0; i < keys.size(); i++) {
     results.push_back(std::async(

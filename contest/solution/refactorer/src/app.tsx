@@ -9,7 +9,9 @@ import { myCppRules } from "./myCpp_rules";
 import classProperties from "./classProperties";
 import annotatedProperties from "./annotatedProperties";
 import { stringHash } from "./various";
-import { timings } from "./profile";
+import { functionTimings } from "./profile";
+import { account_transactions_times } from "./account_transactions_times";
+import { one_transaction_times } from "./one_transaction_times";
 
 
 type ObjDict<T> = { [key: string]: T };
@@ -1131,86 +1133,40 @@ const FileGroupView = (props: { group: FileGroup, title: string }) => {
 
 
 
-const ProfileView = () => {
-  const [pi, setPi] = createSignal(51);
 
-  const timingsArray = Object.entries(timings);
-  const tts = Object.fromEntries(timingsArray);
+type StartEnd = { start: number, end: number };
+type TestTiming = ObjDict<StartEnd>;
+type TestData = {
+  count?: number,
+  total?: number,
+  times: TestTiming,
+};
+type Timings = ObjDict<TestData>;
 
+const ProfileView = (props: {
+  testIndex: number,
+  leftTime: number,
+  rightTime: number,
+  timings: Timings,
+  ordering?: string[],
+}) => {
+  // const timingsArray = Object.entries(timings);
+  const currentTestData = () => props.timings[props.testIndex] as TestData|undefined;
 
-  const ordering = [
-    'compute_prev_state',
-    'request_neighbor_queues',
-    'unpack_prev_state',
-    'init_next_state',
-    'check_utime_lt',
-    'prepare_out_msg_queue_size',
-    'fix_all_processed_upto',
-    'add_trivial_neighbor',
-    'unpack_block_data',
-    'precheck_account_transactions',
-    'build_new_message_queue',
-    'precheck_message_queue_update',
-    'unpack_dispatch_queue_update',
-    'unpack_dispatch_queue_update_after',
-    'check_in_msg_descr',
-    'check_out_msg_descr',
-    'check_dispatch_queue_update',
-    'check_processed_upto',
-    'check_in_queue',
-    'check_transactions',
-    'postcheck_account_updates',
-    'check_message_processing_order',
-    'check_new_state',
-    'postcheck_value_flow',
-    'build_state_update',
-  ];
-
-  // let minTime = Infinity;
-  // let maxTime = -Infinity;
-  let maxTestDuration = 0;
-  for (const [testIndex, times] of timingsArray) {
-    let testMin = Infinity;
-    let testMax = -Infinity;
-    for (const [fname, time] of Object.entries(times)) {
-      // if (time.start < minTime) minTime = time.start;
-      // if (time.end > maxTime) maxTime = time.end;
-      if (time.start < testMin) testMin = time.start;
-      if (time.end > testMax) testMax = time.end;
-      
-      // const duration = time.end - time.start;
-      // if (duration > maxTestDuration) maxTestDuration = duration;
-    }
-    const testDuration = testMax - testMin;
-    if (testDuration > maxTestDuration) maxTestDuration = testDuration;
-  }
-  console.log('maxTestDuration:', maxTestDuration);
-
-  const currentTiming = () => tts[pi()+''] as ObjDict<{ start: number, end: number }>;
-
-  const minTime = () => !currentTiming() ? 0 : Math.min(...Object.values(currentTiming()).map(ts => ts.start));
-  const maxTime = () => !currentTiming() ? 1 : Math.min(...Object.values(currentTiming()).map(ts => ts.start));
+  const visibleTime = () => props.rightTime - props.leftTime;
 
   return <div class="timelineContainer">
-    <button onClick={() => setPi(pi() - 1)}>{'<'}</button>
-    <input value={pi()} onInput={e => {
-      const v = parseInt(e.currentTarget.value);
-      if (isNaN(v)) return;
-      setPi(v);
-    }} />
-    <button onClick={() => setPi(pi() + 1)}>{'>'}</button>
+    <For each={props.ordering ?? Object.keys(currentTestData()?.times ?? {})}>{fname => {
+      const time = () => currentTestData()?.times?.[fname] ?? { start: 0, end: 0 };
 
-    <For each={ordering}>{fname => {
-      const time = () => currentTiming()?.[fname] ?? { start: 0, end: 0 };
-
-      const relStart = () => time().start - minTime();
-      const relEnd = () => time().end - minTime();
+      const relStart = () => time().start - props.leftTime;
+      const relEnd = () => time().end - props.leftTime;
 
       return <div class="timelineRow">
         {fname}: {relStart()} - {relEnd()} ({time().end - time().start})
         <div class="timelineItem" style={{
-            left: `${relStart() / maxTestDuration * 100}%`,
-            width: `${(relEnd()-relStart()) / maxTestDuration * 100}%`,
+            left: `${relStart() / visibleTime() * 100}%`,
+            width: `${(relEnd()-relStart()) / visibleTime() * 100}%`,
           }}>
         </div>
       </div>
@@ -1282,6 +1238,51 @@ export default function App() {
   });
 
 
+  const allTimings = [functionTimings, account_transactions_times, one_transaction_times] as Timings[];
+  const [testIndex, setTestIndex] = createSignal(51);
+  const [timelineScale, setTimelineScale] = createSignal(100);
+
+// let minTime = Infinity;
+  // let maxTime = -Infinity;
+  let maxTestDuration = 0;
+  for (let testIndex = 51; testIndex <= 300; testIndex++) {
+    let testMin = Infinity;
+    let testMax = -Infinity;
+    for (const timings of allTimings) {
+      const testData = timings[testIndex];
+      for (const [fname, time] of Object.entries(testData.times)) {
+        // if (time.start < minTime) minTime = time.start;
+        // if (time.end > maxTime) maxTime = time.end;
+        if (time.start < testMin) testMin = time.start;
+        if (time.end > testMax) testMax = time.end;
+        
+        // const duration = time.end - time.start;
+        // if (duration > maxTestDuration) maxTestDuration = duration;
+      }
+    }
+    const testDuration = testMax - testMin;
+    if (testDuration > maxTestDuration) maxTestDuration = testDuration;
+  }
+  console.log('maxTestDuration:', maxTestDuration);
+
+  const minTime = () => {
+    if (testIndex() < 51 || testIndex() > 300) return 0;
+
+    let testMin = Infinity;
+    for (const timings of allTimings) {
+      const testData = timings[testIndex()];
+      for (const [fname, time] of Object.entries(testData.times)) {
+        if (time.start < testMin) testMin = time.start;
+      }
+    }
+    return testMin;
+  }
+  // const minTime = () => !currentTestData() ? 0 : Math.min(...Object.values(currentTestData()!.times).map(ts => ts.start));
+  // const maxTime = () => !currentTestData() ? 1 : Math.min(...Object.values(currentTestData()!.times).map(ts => ts.start));
+
+  const leftTime = minTime;
+  const rightTime = () => leftTime() + (maxTestDuration * timelineScale() / 100);
+
 
   return <div>
     <FileGroupView group={mFs} title="Main" />
@@ -1308,7 +1309,53 @@ export default function App() {
       {!propertyValid() && 'Property invalid'}
     </pre></div>
 
-    <ProfileView />
+
+    <div style={{ display: 'flex' }}>
+      <button onClick={() => setTestIndex(testIndex() - 1)}>{'<'}</button>
+      <input value={testIndex()} onInput={e => {
+        const v = parseInt(e.currentTarget.value);
+        if (isNaN(v)) return;
+        setTestIndex(v);
+      }} />
+      <button onClick={() => setTestIndex(testIndex() + 1)}>{'>'}</button>
+      Scale:
+      <input type="range" style={{ "flex-grow": 1 }} min={2} max={100} step={0.1} value={timelineScale()}
+        onInput={e => setTimelineScale(parseFloat(e.target.value)) } />
+      <span style={{ width: '80px', "text-align": 'center' }}>${timelineScale()}%</span>
+    </div>
+    <h3>Functions</h3>
+    <ProfileView testIndex={testIndex()} leftTime={leftTime()} rightTime={rightTime()} timings={functionTimings}
+      ordering = {[
+        'compute_prev_state',
+        'request_neighbor_queues',
+        'unpack_prev_state',
+        'init_next_state',
+        'check_utime_lt',
+        'prepare_out_msg_queue_size',
+        'fix_all_processed_upto',
+        'add_trivial_neighbor',
+        'unpack_block_data',
+        'precheck_account_transactions',
+        'build_new_message_queue',
+        'precheck_message_queue_update',
+        'unpack_dispatch_queue_update',
+        'unpack_dispatch_queue_update_after',
+        'check_in_msg_descr',
+        'check_out_msg_descr',
+        'check_dispatch_queue_update',
+        'check_processed_upto',
+        'check_in_queue',
+        'check_transactions',
+        'postcheck_account_updates',
+        'check_message_processing_order',
+        'check_new_state',
+        'postcheck_value_flow',
+        'build_state_update',
+      ]} />
+    <h3>account_transactions_times</h3>
+    <ProfileView testIndex={testIndex()} leftTime={leftTime()} rightTime={rightTime()} timings={account_transactions_times} />
+    <h3>one_transaction_times</h3>
+    <ProfileView testIndex={testIndex()} leftTime={leftTime()} rightTime={rightTime()} timings={one_transaction_times} />
     <CallGraph />
 
     {$mainDiffEditorContainer}
