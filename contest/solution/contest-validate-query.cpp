@@ -5301,11 +5301,21 @@ void ContestValidateQuery::check_transactions() {
 
   bool check_account_transactions_result = true;
 
-  std::vector<std::future<bool> > results; // !TODO: preallocate
+  BS::multi_future<void> loop_future = my_threader.pool.submit_loop(0, keys.size(), 
+    [this, keys, values, &check_account_transactions_result] (const std::size_t i) {
+      check_account_transactions((td::ConstBitPtr)keys[i], td::Ref<vm::CellSlice>(&values[i]));
+    }, keys.size()
+  );
+  loop_future.wait();
 
+  /* // Working parallel code in this section
+
+  std::vector<std::future<bool> > results(keys.size()); // !TODO: preallocate
   for (size_t i = 0; i < keys.size(); i++) {
-    results.push_back(std::async(
-      std::launch::async,
+    // results.push_back(std::async(
+    // results[i] = (std::async(
+    //   std::launch::async,
+    results[i] = (my_threader.pool.submit_task(
       [this, i, keys, values, &check_account_transactions_result] {
         // int temp = 0;
         // for (long long j = rand() % 10000; j <= 4000000000ll; j++)
@@ -5348,6 +5358,7 @@ void ContestValidateQuery::check_transactions() {
     //   return _reject_query("Unknown exception caught");
     // }
   }
+  //*/
 
   // return true;
   //*/

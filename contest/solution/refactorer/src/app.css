@@ -170,6 +170,9 @@ pre, code {
 
 	border-bottom: solid rgba(0, 0, 0, 0.2) 1px;
 }
+.timelineRow:hover {
+	background-color: rgba(0, 0, 0, 0.1);
+}
 
 .timelineItem {
 	position: absolute;

@@ -6,6 +6,7 @@
 #include <future>
 #include <chrono>
 #include <fstream>
+#include "BS_thread_pool.hpp"
 
 #include "various.hpp"
 
@@ -46,7 +47,9 @@ class MyThreader {
 
   const int MaxFuturesHeld = 200;
 
+  BS::thread_pool<> pool{8};
  private:
+
   atomic<int> futuresCount{0};
   vector<future<void> > futures;
   vector<std::chrono::_V2::system_clock::time_point> startTimes;

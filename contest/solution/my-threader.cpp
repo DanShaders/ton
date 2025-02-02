@@ -20,10 +20,9 @@ void MyThreader::launch(LaunchFunction callable) {
   // callable();
 
   int fi = futuresCount++;
-  futures[fi] = async(
-      std::launch::async,
-      callable
-  );
+
+  futures[fi] = pool.submit_task(callable);
+  // futures[fi] = async(std::launch::async, callable);
 
   // f.get();
 }
@@ -32,8 +31,9 @@ void MyThreader::launch(LaunchFunction callable) {
 void MyThreader::launchAndProfile(string name, LaunchFunction callable) {
   int fi = futuresCount++;
   names[fi] = name;
-  futures[fi] = async(
-      std::launch::async,
+  futures[fi] = pool.submit_task(
+  // futures[fi] = async(
+  //     std::launch::async,
       [this, fi, callable] {
         startTimes[fi] = high_resolution_clock::now();
         callable();
