@@ -20,6 +20,7 @@
 #include "vm/cells/CellBuilder.h"
 #include "vm/cells/CellSlice.h"
 #include "vm/boc.h"
+#include "vm/ng/CellView.h"
 
 #include "td/utils/HashMap.h"
 #include "td/utils/HashSet.h"
@@ -34,9 +35,12 @@ class MerkleProofImpl {
   }
 
   Ref<Cell> create_from(Ref<Cell> cell) {
+    auto view = NonnullCellView::create_from(*cell);
+
     if (!is_prunned_) {
       CHECK(usage_tree_);
-      dfs_usage_tree(cell, usage_tree_->root_id());
+      CHECK(usage_tree_ == view.node().tree().get());
+      dfs_usage_tree(view);
       is_prunned_ = [this](const Ref<Cell> &cell) { return visited_cells_.count(cell->get_hash()) == 0; };
     }
     try {
@@ -55,14 +59,13 @@ class MerkleProofImpl {
   CellUsageTree *usage_tree_{nullptr};
   MerkleProof::IsPrunnedFunction is_prunned_;
 
-  void dfs_usage_tree(Ref<Cell> cell, CellUsageTree::NodeId node_id) {
-    if (!usage_tree_->is_loaded(node_id)) {
-      return;
-    }
-    visited_cells_.insert(cell->get_hash());
-    CellSlice cs(NoVm(), cell);
-    for (unsigned i = 0; i < cs.size_refs(); i++) {
-      dfs_usage_tree(cs.prefetch_ref(i), usage_tree_->get_child(node_id, i));
+  void dfs_usage_tree(NonnullCellView view) {
+    visited_cells_.insert(view.hash());
+    for (int i = 0; i < view.refs_cnt(); ++i) {
+      auto child = usage_tree_->get_child(view.node().id(), i);
+      if (usage_tree_->is_loaded(child)) {
+        dfs_usage_tree(view.ref(i));
+      }
     }
   }
 

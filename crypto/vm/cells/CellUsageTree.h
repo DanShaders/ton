@@ -47,6 +47,14 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
     bool mark_path(CellUsageTree* master_tree) const;
     bool is_from_tree(const CellUsageTree* master_tree) const;
 
+    NodeId id() const {
+      return node_id_;
+    }
+
+    std::shared_ptr<CellUsageTree> tree() const {
+      return tree_weak_.lock();
+    }
+
    private:
     std::weak_ptr<CellUsageTree> tree_weak_;
     NodeId node_id_{0};
