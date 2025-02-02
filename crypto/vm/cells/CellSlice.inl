@@ -40,26 +40,36 @@ inline CellSlice::CellSlice(VirtualCell::LoadedCell loaded_cell)
   init_bits_refs();
 }
 
+inline CellSlice::CellSlice(Ref<DataCell> _data_cell, detail::VirtualizationParameters _virt, CellUsageTree::NodePtr _tree_node)
+    : virt(_virt)
+    , cell(std::move(_data_cell))
+    , tree_node(std::move(_tree_node))
+    , bits_st(0)
+    , refs_st(0)
+    , ptr(0)
+    , zd(0) {
+  init_bits_refs();
+}
+
 inline CellSlice::CellSlice() : bits_st(0), refs_st(0), bits_en(0), refs_en(0), ptr(0), zd(0) {
 }
 
 inline Cell::LoadedCell load_cell_nothrow(const Ref<Cell>& ref) {
-  auto res = ref->load_cell();
-  if (res.is_ok()) {
-    auto ld = res.move_as_ok();
+  Cell::LoadedCell ls;
+  if (ref->load_cell_nothrow(ls)) {
     //CHECK(ld.virt.get_virtualization() == 0 || ld.data_cell->special_type() != Cell::SpecialType::PrunnedBranch);
-    return ld;
+    return ls;
   }
+
   return {};
 }
 
 inline Cell::LoadedCell load_cell_nothrow(const Ref<Cell>& ref, int mode) {
-  auto res = ref->load_cell();
-  if (res.is_ok()) {
-    auto ld = res.move_as_ok();
+  Cell::LoadedCell ls;
+  if (ref->load_cell_nothrow(ls)) {
     //CHECK(ld.virt.get_virtualization() == 0 || ld.data_cell->special_type() != Cell::SpecialType::PrunnedBranch);
-    if ((mode >> (ld.data_cell->is_special() ? 1 : 0)) & 1) {
-      return ld;
+    if ((mode >> (ls.data_cell->is_special() ? 1 : 0)) & 1) {
+      return ls;
     }
   }
   return {};
@@ -71,7 +81,15 @@ inline CellSlice::CellSlice(NoVmOrd, Ref<Cell> ref) : CellSlice(load_cell_nothro
 }
 inline CellSlice::CellSlice(NoVmSpec, Ref<Cell> ref) : CellSlice(load_cell_nothrow(std::move(ref), 2)) {
 }
-inline CellSlice::CellSlice(Ref<DataCell> ref) : CellSlice(VirtualCell::LoadedCell{std::move(ref), {}, {}}) {
+inline CellSlice::CellSlice(Ref<DataCell> ref)
+  : virt()
+  , cell(std::move(ref))
+  , tree_node()
+  , bits_st(0)
+  , refs_st(0)
+  , ptr(0)
+  , zd(0) {
+  init_bits_refs();
 }
 inline CellSlice::CellSlice(const CellSlice& cs) = default;
 
@@ -1087,8 +1105,53 @@ inline VirtualCell::LoadedCell load_cell_slice_impl(Ref<Cell> cell, bool* can_be
   }
 }
 
+inline VirtualCell::LoadedCell load_cell_slice_impl(Ref<Cell> cell) {
+  VirtualCell::LoadedCell loaded_cell;
+  auto* vm_state_interface = VmStateInterface::get();
+  bool library_loaded = false;
+  while (true) {
+    if (vm_state_interface && !library_loaded) {
+      vm_state_interface->register_cell_load(cell->get_hash());
+    }
+    /// \remark Это основное место траффика, где вызываются Cell::load_cell (17,900,000 из 25,178,000)
+    cell->load_cell(loaded_cell);
+    if (loaded_cell.data_cell->special_type() == DataCell::SpecialType::PrunnedBranch) {
+      auto virtualization = loaded_cell.virt.get_virtualization();
+      if (virtualization != 0) {
+        throw VmVirtError{virtualization};
+      }
+    }
+    if (loaded_cell.data_cell->is_special()) {
+      if (loaded_cell.data_cell->special_type() == DataCell::SpecialType::Library) {
+        if (vm_state_interface) {
+          if (vm_state_interface->get_global_version() >= 5) {
+            if (library_loaded) {
+              throw VmError{Excno::cell_und, "failed to load library cell: recursive library cells are not allowed"};
+            }
+            library_loaded = true;
+          }
+          CellSlice cs(std::move(loaded_cell));
+          DCHECK(cs.size() == Cell::hash_bits + 8);
+          auto library_cell = vm_state_interface->load_library(cs.data_bits() + 8);
+          if (library_cell.not_null()) {
+            cell = library_cell;
+            continue;
+          }
+          throw VmError{Excno::cell_und, "failed to load library cell"};
+        }
+        throw VmError{Excno::cell_und, "failed to load library cell (no vm_state_interface available)"};
+      } else if (loaded_cell.data_cell->special_type() == DataCell::SpecialType::PrunnedBranch) {
+        CHECK(loaded_cell.virt.get_virtualization() == 0);
+        throw VmError{Excno::cell_und, "trying to load prunned cell"};
+      }
+      throw VmError{Excno::cell_und, "unexpected special cell"};
+    }
+    return loaded_cell;
+  }
+}
+
 inline CellSlice load_cell_slice(const Ref<Cell>& cell) {
-  return CellSlice{load_cell_slice_impl(cell, nullptr)};
+  return CellSlice{load_cell_slice_impl(cell)};
 }
 
 inline CellSlice load_cell_slice_special(const Ref<Cell>& cell, bool& special) {
@@ -1096,7 +1159,7 @@ inline CellSlice load_cell_slice_special(const Ref<Cell>& cell, bool& special) {
 }
 
 inline Ref<CellSlice> load_cell_slice_ref(const Ref<Cell>& cell) {
-  return Ref<CellSlice>{true, CellSlice(load_cell_slice_impl(cell, nullptr))};
+  return Ref<CellSlice>{true, load_cell_slice_impl(cell)};
 }
 
 inline Ref<CellSlice> load_cell_slice_ref_special(const Ref<Cell>& cell, bool& special) {
@@ -1104,7 +1167,11 @@ inline Ref<CellSlice> load_cell_slice_ref_special(const Ref<Cell>& cell, bool& s
 }
 
 inline CellSlice load_cell_slice(Ref<Cell>&& cell) {
-  return CellSlice{load_cell_slice_impl(std::move(cell), nullptr)};
+  return CellSlice{load_cell_slice_impl(std::move(cell))};
+}
+
+inline void load_cell_slice(Ref<Cell>&& cell, CellSlice &cs) {
+  cs = load_cell_slice_impl(std::move(cell));
 }
 
 inline CellSlice load_cell_slice_special(Ref<Cell>&& cell, bool& special) {
@@ -1112,11 +1179,11 @@ inline CellSlice load_cell_slice_special(Ref<Cell>&& cell, bool& special) {
 }
 
 inline Ref<CellSlice> load_cell_slice_ref(Ref<Cell>&& cell) {
-  return Ref<CellSlice>{true, CellSlice(load_cell_slice_impl(std::move(cell), nullptr))};
+  return Ref<CellSlice>{true, load_cell_slice_impl(std::move(cell))};
 }
 
 inline Ref<CellSlice> load_cell_slice_ref_special(Ref<Cell>&& cell, bool& special) {
-  return Ref<CellSlice>{true, CellSlice(load_cell_slice_impl(std::move(cell), &special))};
+  return Ref<CellSlice>{true, load_cell_slice_impl(std::move(cell), &special)};
 }
 
 inline void print_load_cell(std::ostream& os, Ref<Cell> cell, int indent) {
@@ -1125,11 +1192,11 @@ inline void print_load_cell(std::ostream& os, Ref<Cell> cell, int indent) {
 }
 
 inline bool CellSlice::load(Ref<Cell> cell) {
-  return load(load_cell_slice_impl(std::move(cell), nullptr));
+  return load(load_cell_slice_impl(std::move(cell)));
 }
 
 inline bool CellSlice::load_ord(Ref<Cell> cell) {
-  return load(load_cell_slice_impl(std::move(cell), nullptr));
+  return load(load_cell_slice_impl(std::move(cell)));
 }
 
 // END (SLICE LOAD FUNCTIONS)

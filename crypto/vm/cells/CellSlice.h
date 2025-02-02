@@ -33,8 +33,12 @@ struct NoVmOrd {};
 struct NoVmSpec {};
 
 class CellSlice : public td::CntObject {
+ public:
+   /// \toto Make 'cell' as private. Add 'is_null' method.
+   Ref<DataCell> cell;
+
+ private:
   Cell::VirtualizationParameters virt;
-  Ref<DataCell> cell;
   CellUsageTree::NodePtr tree_node;
   unsigned bits_st, refs_st;
   unsigned bits_en, refs_en;
@@ -53,6 +57,7 @@ class CellSlice : public td::CntObject {
   CellSlice(NoVmSpec, Ref<Cell> cell_ref);
   CellSlice(Ref<DataCell> dc_ref);
   CellSlice(VirtualCell::LoadedCell loaded_cell);
+  CellSlice(Ref<DataCell> data_cell, detail::VirtualizationParameters virt, CellUsageTree::NodePtr tree_node);
   /*
   CellSlice(Ref<DataCell> dc_ref, unsigned _bits_en, unsigned _refs_en, unsigned _bits_st = 0, unsigned _refs_st = 0);*/
   CellSlice(const CellSlice& cs, unsigned _bits_en, unsigned _refs_en);
@@ -60,14 +65,6 @@ class CellSlice : public td::CntObject {
   CellSlice(const CellSlice&);
   CellSlice& operator=(const CellSlice& other) = default;
   CellSlice();
-
-  static void* operator new(std::size_t count) {
-    return td::tl_policies::memory::allocate(count);
-  }
-
-  static void operator delete(void* ptr) {
-    return td::tl_policies::memory::deallocate(ptr);
-  }
 
   Cell::LoadedCell move_as_loaded_cell();
   td::CntObject* make_copy() const override {
@@ -361,6 +358,8 @@ CellSlice load_cell_slice_special(const Ref<Cell>& cell, bool& is_special);
 Ref<CellSlice> load_cell_slice_ref_special(const Ref<Cell>& cell, bool& is_special);
 
 CellSlice load_cell_slice(Ref<Cell>&& cell);
+void load_cell_slice(Ref<Cell>&& cell, VirtualCell::LoadedCell& cs);
+void load_cell_slice(Ref<Cell>&& cell, CellSlice& cs);
 Ref<CellSlice> load_cell_slice_ref(Ref<Cell>&& cell);
 CellSlice load_cell_slice_special(Ref<Cell>&& cell, bool& is_special);
 Ref<CellSlice> load_cell_slice_ref_special(Ref<Cell>&& cell, bool& is_special);
