@@ -22,6 +22,7 @@
 #include "vm/stack.hpp"
 #include "common/bitstring.h"
 #include "td/utils/Random.h"
+#include "vm/ng/CellView.h"
 
 #include "td/utils/bits.h"
 
@@ -180,7 +181,7 @@ bool DictionaryBase::append_dict_to_bool(CellBuilder& cb) && {
   return cb.store_maybe_ref(std::move(root_cell));
 }
 
-bool DictionaryBase::append_dict_to_bool(CellBuilder& cb) const & {
+bool DictionaryBase::append_dict_to_bool(CellBuilder& cb) const& {
   return is_valid() && cb.store_maybe_ref(root_cell);
 }
 
@@ -455,31 +456,166 @@ Ref<Cell> Dictionary::extract_value_ref(Ref<CellSlice> cs) {
   }
 }
 
+namespace {
+
+class ViewLabelParser {
+ public:
+  enum class ValidationMode {
+    None = 0,
+    Min = 1,
+    Simple = 2,
+    All = 3,
+  };
+
+  ViewLabelParser(BitReader reader, int refs_cnt, int max_label_len, ValidationMode validation_mode)
+      : m_reader(reader), m_max_label_len(max_label_len) {
+    m_label_parsed_correctly = advance_to_label();
+
+    if (validation_mode >= ValidationMode::Min && !m_label_parsed_correctly) {
+      throw VmError{Excno::cell_und, "error while parsing a dictionary node label"};
+    }
+
+    if (validation_mode >= ValidationMode::Simple && m_label_length > m_max_label_len) {
+      throw VmError{Excno::dict_err, "invalid dictionary node"};
+    }
+
+    // Fork node
+    if (validation_mode >= ValidationMode::Simple && m_label_length < m_max_label_len) {
+      int label_bits_to_read = m_is_third_type ? 0 : m_label_length;
+      int remaining_bits = m_reader.remaining_bits();
+
+      bool bad_data = remaining_bits < label_bits_to_read ||
+                      (validation_mode == ValidationMode::All && remaining_bits > label_bits_to_read);
+      bool wrong_refs_cnt = refs_cnt < 2 || (validation_mode == ValidationMode::All && refs_cnt != 2);
+
+      if (bad_data || wrong_refs_cnt) {
+        throw VmError{Excno::dict_err, "invalid dictionary fork node"};
+      }
+    }
+  }
+
+  bool is_prefix_of(td::ConstBitPtr key, int len) const {
+    if (!m_label_parsed_correctly || m_label_length > len) {
+      return false;
+    }
+
+    if (m_is_third_type) {
+      return td::bitstring::bits_memscan(key, m_label_length, m_bit) == (unsigned)m_label_length;
+    } else {
+      return m_reader.has_prefix(key, m_label_length);
+    }
+  }
+
+  int label_length() const {
+    return m_label_length;
+  }
+
+  int value_offset() const {
+    return m_value_offset;
+  }
+
+ private:
+  bool advance_to_label() {
+    auto hm_label_constructor = m_reader.read_le32(2);
+    if (!hm_label_constructor) {
+      return false;
+    }
+
+    m_value_offset = 2;
+
+    if (*hm_label_constructor == 0) {
+      m_label_length = 0;
+      return true;
+    }
+
+    if (*hm_label_constructor == 1) {
+      m_label_length = m_reader.skip_ones() + 1;
+      if (m_label_length > m_max_label_len) {
+        // This condition should not trigger exception with ValidationMode::Min but it will for
+        // compatibility reasons.
+        return false;
+      }
+      if (m_reader.remaining_bits() < m_label_length + 1) {
+        return false;
+      }
+      CHECK(m_reader.advance_le32(1));
+      m_value_offset += 2 * m_label_length;
+      return true;
+    }
+
+    if (*hm_label_constructor == 3) {
+      m_is_third_type = true;
+      auto bit = m_reader.read_bit();
+      if (!bit) {
+        return false;
+      }
+      m_bit = *bit;
+      ++m_value_offset;
+    }
+
+    int len_bits = 32 - td::count_leading_zeroes32(m_max_label_len);
+    auto label_length = m_reader.read_le32(len_bits);
+    if (!label_length) {
+      return false;
+    }
+    m_label_length = *label_length;
+    m_value_offset += len_bits;
+
+    if (*hm_label_constructor == 2) {
+      if (m_reader.remaining_bits() < m_label_length) {
+        return false;
+      }
+      m_value_offset += m_label_length;
+    }
+
+    return true;
+  }
+
+  BitReader m_reader;
+  int m_max_label_len;
+
+  int m_label_length = 0;
+  bool m_is_third_type = false;
+  bool m_bit = 0;
+  int m_value_offset = 0;
+  bool m_label_parsed_correctly = false;
+};
+
+}  // namespace
+
 Ref<CellSlice> DictionaryFixed::lookup(td::ConstBitPtr key, int key_len) {
   force_validate();
   if (key_len != get_key_bits() || is_empty()) {
     return {};
   }
-  //std::cerr << "dictionary lookup for key = " << key.to_hex(key_len) << std::endl;
-  Ref<Cell> cell = get_root_cell();
+
+  auto cell = NonnullCellView::create_from(*root_cell);
+  auto validation_mode = static_cast<ViewLabelParser::ValidationMode>(label_mode());
   int n = key_len;
+
   while (true) {
-    LabelParser label{std::move(cell), n, label_mode()};
-    if (!label.is_prefix_of(key, n)) {
-      //std::cerr << "(not a prefix)\n";
+    cell = cell.resolve(VmStateInterface::get(), NonnullCellView::CanBeSpecial::No).unwrap_or_throw();
+    ViewLabelParser parser{cell.data_bit_reader(), cell.refs_cnt(), n, validation_mode};
+
+    if (!parser.is_prefix_of(key, n)) {
       return {};
     }
-    n -= label.l_bits;
+    n -= parser.label_length();
+
     if (n <= 0) {
-      assert(!n);
-      label.skip_label();
-      return std::move(label.remainder);
+      CHECK(n == 0);
+      auto slice = cell.as_ref_slice();
+      slice.write().advance(parser.value_offset());
+      return slice;
     }
-    key += label.l_bits;
+
+    key += parser.label_length();
     bool sw = *key++;
-    //std::cerr << "key bit at position " << key_bits - n << " equals " << sw << std::endl;
     --n;
-    cell = label.remainder->prefetch_ref(sw);
+    if (cell.refs_cnt() <= sw) {
+      return {};
+    }
+    cell = cell.ref(sw);
   }
 }
 
