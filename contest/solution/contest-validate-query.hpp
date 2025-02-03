@@ -93,6 +93,7 @@ class ContestValidateQuery : public td::actor::Actor {
  public:
   ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice collated_data,
                        td::Promise<td::BufferSlice> promise);
+  ~ContestValidateQuery();
 
  private:
   int verbosity{0};

@@ -57,6 +57,9 @@ ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice 
     , shard_pfx_len_(ton::shard_prefix_length(shard_)) {
 }
 
+ContestValidateQuery::~ContestValidateQuery() {
+}
+
 /**
  * Aborts the validation with the given error.
  *
@@ -345,7 +348,7 @@ bool ContestValidateQuery::init_parse() {
   }
   CHECK(mc_blkid_.id.is_masterchain_ext());
   mc_seqno_ = mc_blkid_.seqno();
-  prev_blocks_ = prev_blks;
+  prev_blocks_ = std::move(prev_blks);
   after_merge_ = prev_blocks_.size() == 2;
   after_split_ = !after_merge_ && prev_blocks_[0].shard_full() != shard_;
   if (after_split != after_split_) {
@@ -1137,7 +1140,7 @@ bool ContestValidateQuery::request_neighbor_queues() {
       return reject_query("invalid block id "s + shard_ptr->blk_.to_str() + " returned in information for neighbor " +
                           blk_id.to_str());
     }
-    neighbors_.emplace_back(*shard_ptr);
+    neighbors_.emplace_back(std::move(*shard_ptr));
   }
   int i = 0;
   {
@@ -1277,7 +1280,7 @@ bool ContestValidateQuery::request_aux_mc_state(BlockSeqno seqno, Ref<Masterchai
     state = mc_state_;
     return true;
   }
-  auto res = aux_mc_states_.insert(std::make_pair(seqno, Ref<MasterchainStateQ>{}));
+  auto res = aux_mc_states_.emplace(seqno, Ref<MasterchainStateQ>{});
   if (!res.second) {
     state = res.first->second;
     return true;
