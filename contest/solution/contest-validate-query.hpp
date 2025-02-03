@@ -20,6 +20,7 @@
 #include "multithreading-guard.hpp"
 #include "my-threader.hpp"
 #include "my-timer.hpp"
+#include "merkle.hpp"
 
 
 // For std::unordered_map

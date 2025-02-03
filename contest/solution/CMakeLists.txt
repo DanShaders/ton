@@ -6,6 +6,7 @@ add_library(contest-solution STATIC
   various.hpp various.cpp
   my-threader.hpp my-threader.cpp
   my-timer.hpp my-timer.cpp
+  merkle.hpp merkle.cpp
   multithreading-guard.hpp multithreading-guard.cpp
 )
 target_include_directories(contest-solution PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>)

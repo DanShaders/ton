@@ -11,7 +11,7 @@
 #include "block/block-auto.h"
 #include "block/output-queue-merger.h"
 #include "vm/cells/MerkleProof.h"
-#include "vm/cells/MerkleUpdate.h"
+// #include "vm/cells/MerkleUpdate.h"
 #include "common/errorlog.h"
 #include "fabric.h"
 #include <ctime>
@@ -5755,7 +5755,7 @@ void ContestValidateQuery::build_state_update() {
     fatal_throw("cannot create new ShardState");
   }
 
-  auto state_update = vm::MerkleUpdate::generate(prev_state_root_, state_root, state_usage_tree_.get());
+  auto state_update = MyMerkleUpdate::generate(prev_state_root_, state_root, state_usage_tree_.get());
   if (state_update.is_null()) {
     fatal_throw("failed to generate Merkle update");
   }
