@@ -22,10 +22,11 @@
 #include <utility>
 #include <atomic>
 #include <iostream>
+#include <absl/base/attributes.h>
 
 #include "td/utils/StringBuilder.h"
 #include "td/utils/logging.h"
-#include "crypto/common/thread_local_policies.hpp"
+#include "tlp-ref-cnt.hpp"
 
 namespace td {
 
@@ -34,26 +35,64 @@ class Ref;
 
 class CntObject {
  private:
-  mutable std::atomic<int> cnt_;
+  using int_ts = std::atomic<int>;
+  static constexpr size_t buf_size = std::max(sizeof(int), sizeof(int_ts));
+
+  /// Thread-safe or normal counter allocation area
+  /// \remark Cannot be done via std::variant<int_ts, int>. It does not distinguish atomic<> from int.
+  ABSL_ATTRIBUTE_FUNC_ALIGN(buf_size) mutable std::array<uint8_t, buf_size> cnt_buf_;
+  const bool use_ts_cnt = tl_policies::ref_cnt::Policy::get();
+
   template <class T>
   friend class Ref;
 
+  int_ts& as_int_ts() const {
+    return *reinterpret_cast<int_ts*>(cnt_buf_.data());
+  }
+  int& as_int() const {
+    return *reinterpret_cast<int*>(cnt_buf_.data());
+  }
   void inc() const {
-    cnt_.fetch_add(1, std::memory_order_relaxed);
+    if (use_ts_cnt) {
+      as_int_ts().fetch_add(1, std::memory_order_relaxed);
+    } else {
+      ++as_int();
+    }
   }
   bool dec() const {
-    return cnt_.fetch_sub(1, std::memory_order_acq_rel) == 1;
+    if (use_ts_cnt) {
+      return as_int_ts().fetch_sub(1, std::memory_order_acq_rel) == 1;
+    } else {
+      return (--as_int()) == 0;
+    }
   }
   void inc(int cnt) const {
-    cnt_.fetch_add(cnt, std::memory_order_relaxed);
+    if (use_ts_cnt) {
+      as_int_ts().fetch_add(cnt, std::memory_order_relaxed);
+    } else {
+      as_int() += cnt;
+    }
   }
   bool dec(int cnt) const {
-    return cnt_.fetch_sub(cnt, std::memory_order_acq_rel) == cnt;
+    if (use_ts_cnt) {
+      return as_int_ts().fetch_sub(cnt, std::memory_order_acq_rel) == cnt;
+    } else {
+      return (as_int() -= cnt) == 0;
+    }
+  }
+  void init() {
+    if (use_ts_cnt) {
+      int_ts* p = new (cnt_buf_.data()) int_ts{1};
+      DCHECK((uintptr_t)p == (uintptr_t)cnt_buf_.data());
+    } else {
+      as_int() = 1;
+    }
   }
 
  public:
   struct WriteError {};
-  CntObject() : cnt_(1) {
+  CntObject() {
+    init();
   }
   CntObject(const CntObject& other) : CntObject() {
   }
@@ -66,7 +105,13 @@ class CntObject {
     return *this;
   }
   virtual ~CntObject() {
-    auto cnt = cnt_.load(std::memory_order_relaxed);
+    int cnt; 
+    if (use_ts_cnt) {
+      cnt = as_int_ts().load(std::memory_order_relaxed);
+      as_int_ts().~int_ts();
+    } else {
+      cnt = as_int();
+    }
     (void)cnt;
     //TODO: assert(cnt == 0) will fail if object is allocated on stack
     assert(cnt == 0 || cnt == 1);
@@ -75,11 +120,19 @@ class CntObject {
     throw WriteError();
   }
   bool is_unique() const {
-    return cnt_.load(std::memory_order_acquire) == 1;
+    if (use_ts_cnt) {
+      return as_int_ts().load(std::memory_order_acquire) == 1;
+    } else {
+      return as_int() == 1;
+    }
   }
   int get_refcnt() const {
-    // use std::memory_order_acquire
-    return cnt_.load(std::memory_order_acquire);
+    if (use_ts_cnt) {
+      // use std::memory_order_acquire
+      return as_int_ts().load(std::memory_order_acquire);
+    } else {
+      return as_int();
+    }
   }
   void assert_unique() const {
     assert(is_unique());
@@ -344,12 +397,19 @@ class Ref {
     obj->inc(cnt);
   }
 
- private:
   void assign(T* p) {
     ptr = p;
     if (p) {
       acquire_shared(p);
       ///std::cout << "(r+ " << (const void*)ptr << ")";
+    }
+  }
+  void assign(const T* _p) {
+    /// const_cast like in the constructor
+    T* p = const_cast<T*>(_p);
+    ptr = p;
+    if (p) {
+      acquire_shared(p);
     }
   }
 };
