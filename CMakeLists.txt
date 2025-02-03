@@ -348,6 +348,10 @@ if (GCC OR CLANG)
   endif()
 endif()
 
+if (CMAKE_BUILD_TYPE MATCHES "Release" OR CMAKE_BUILD_TYPE MATCHES "RelWithDebInfo")
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
+
 #add_cxx_compiler_flag("-Wno-unused-function")
 #add_cxx_compiler_flag("-Wno-unused-variable")
 #add_cxx_compiler_flag("-Wno-shorten-64-to-32")
