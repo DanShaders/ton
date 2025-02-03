@@ -13,6 +13,7 @@
 #include "vm/cells/MerkleProof.h"
 #include "vm/cells/MerkleUpdate.h"
 #include "common/errorlog.h"
+#include "common/tlp-ref-cnt.hpp"
 #include "fabric.h"
 #include <ctime>
 
@@ -199,6 +200,7 @@ void ContestValidateQuery::finish_query() {
  */
 /// Вызывается перед каждым блоком. Сколько блоков - столько вызовов
 void ContestValidateQuery::start_up() {
+  td::tl_policies::ref_cnt::PolicyHolder policy_disable_ts_cnt;
   LOG(INFO) << "validate query for " << id_.to_str() << " started";
   rand_seed_.set_zero();
 
@@ -501,6 +503,7 @@ bool ContestValidateQuery::extract_collated_data() {
  */
 /// 1 вызов на блок
 void ContestValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
+  td::tl_policies::ref_cnt::PolicyHolder policy_disable_ts_cnt;
   LOG(INFO) << "in ContestValidateQuery::after_get_mc_state() for " << mc_blkid_.to_str();
   --pending;
   if (res.is_error()) {
@@ -526,6 +529,7 @@ void ContestValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
  */
 /// 1 вызов на блок
 void ContestValidateQuery::after_get_shard_state(int idx, td::Result<Ref<ShardState>> res) {
+  td::tl_policies::ref_cnt::PolicyHolder policy_disable_ts_cnt;
   LOG(INFO) << "in ContestValidateQuery::after_get_shard_state(" << idx << ")";
   --pending;
   if (res.is_error()) {
@@ -1169,6 +1173,7 @@ bool ContestValidateQuery::request_neighbor_queues() {
 
 /// 1250 вызово на 250 блоков. Всегда по 5
 void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQueue>> res) {
+  td::tl_policies::ref_cnt::PolicyHolder policy_disable_ts_cnt;
   --pending;
   if (res.is_error()) {
     fatal_error(res.move_as_error());
@@ -1325,6 +1330,7 @@ Ref<MasterchainStateQ> ContestValidateQuery::get_aux_mc_state(BlockSeqno seqno) 
  * @param res The result of retrieving the shard state.
  */
 void ContestValidateQuery::after_get_aux_shard_state(ton::BlockIdExt blkid, td::Result<Ref<ShardState>> res) {
+  td::tl_policies::ref_cnt::PolicyHolder policy_disable_ts_cnt;
   LOG(DEBUG) << "in ContestValidateQuery::after_get_aux_shard_state(" << blkid.to_str() << ")";
   --pending;
   if (res.is_error()) {
