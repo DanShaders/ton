@@ -33,6 +33,7 @@ set(TON_CRYPTO_CORE_SOURCE
   common/util.h
   common/linalloc.hpp
   common/promiseop.hpp
+  common/tlp-memory.hpp
 
   ellcurve/Ed25519.h
   ellcurve/Fp25519.h

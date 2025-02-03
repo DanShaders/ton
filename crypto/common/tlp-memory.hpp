@@ -1,6 +1,8 @@
 
 #pragma once
 
+/// \file Thread Local Policy: memory.
+
 #include "refcnt.hpp"
 
 namespace td {
@@ -22,47 +24,8 @@ struct DefaultAllocator : public IAllocator {
   }
 };
 
-struct MultiPagedFixedBlockAllocator : public IAllocator {
-  explicit MultiPagedFixedBlockAllocator(std::size_t size) : size_(size) {
-    cur_ = ptr_ = static_cast<std::uint8_t*>(malloc(size_));
-    if (!ptr_) {
-      throw std::bad_alloc();
-    }
-    end_ = ptr_ + size;
-  }
-
-  ~MultiPagedFixedBlockAllocator() override {
-    free(ptr_);
-  }
-
-  void* allocate(std::size_t count) override {
-    std::uint8_t* t = cur_;
-    cur_ += (count + 7) & -8;
-    if (cur_ > end_) {
-      throw std::bad_alloc();
-    }
-    return (void*)t;
-  }
-  void deallocate(const void* ptr) override {
-  }
-  std::size_t used() const {
-    return cur_ - ptr_;
-  }
-  void clear() {
-    cur_ = ptr_;
-  }
- private:
-  std::uint8_t *ptr_, *cur_, *end_;
-  std::size_t size_;
-};
-
 inline IAllocator* get_default_allocator() {
   static DefaultAllocator obj;
-  return &obj;
-}
-
-inline IAllocator* get_multipaged_fixed_block_allocator() {
-  static TD_THREAD_LOCAL MultiPagedFixedBlockAllocator obj{static_cast<uint64_t>(1.5 * 1024.0 * 1024.0 * 1024.0)};
   return &obj;
 }
 
@@ -74,9 +37,10 @@ class Policy {
   Policy() = default;
 
   static IAllocator*& instance() {
-    static TD_THREAD_LOCAL IAllocator* obj = 
-      //get_multipaged_fixed_block_allocator();
-      get_default_allocator();
+    static TD_THREAD_LOCAL IAllocator* obj = nullptr;
+    if (obj == nullptr) {
+      obj = get_default_allocator();
+    }
     return obj;
   }
 

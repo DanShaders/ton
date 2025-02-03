@@ -21,7 +21,7 @@
 #include "common/refcnt.hpp"
 #include "common/refint.h"
 #include "vm/cells.h"
-#include "common/thread_local_policies.hpp"
+#include "common/tlp-memory.hpp"
 
 namespace td {
 class StringBuilder;
