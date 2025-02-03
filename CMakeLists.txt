@@ -340,14 +340,6 @@ add_cxx_compiler_flag("-Qunused-arguments")
 add_cxx_compiler_flag("-Wno-unused-private-field")
 add_cxx_compiler_flag("-Wno-redundant-move")
 
-if (GCC OR CLANG)
-  if (CMAKE_BUILD_TYPE MATCHES "RelWithDebInfo")
-    # For some reason, CMake falls back to -O2 optimization level when CMAKE_BUILD_TYPE is set to
-    # RelWithDebInfo.
-    add_compile_options(-O3)
-  endif()
-endif()
-
 if (CMAKE_BUILD_TYPE MATCHES "Release" OR CMAKE_BUILD_TYPE MATCHES "RelWithDebInfo")
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
