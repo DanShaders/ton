@@ -18,6 +18,8 @@
 */
 #pragma once
 
+#include <vector>
+
 #include "common/refcnt.hpp"
 #include "common/refint.h"
 #include "vm/cells.h"
@@ -291,6 +293,22 @@ class CellSlice : public td::CntObject {
     return Cell::VirtualizationParameters(static_cast<td::uint8>(child_merkle_depth(virt.get_level())),
                                           virt.get_virtualization());
   }
+
+  // mutable std::vector<Ref<Cell> > refs_cache_{4};
+  // With cache:
+  // Passed 30000/300 tests
+  // Total time (only passed valid tests): 740.26499
+  // Total CPU time (only passed valid tests): 979.65650
+  // Without cache:
+  // Passed 29999/300 tests
+  // Total time (only passed valid tests): 727.98525
+  // Total CPU time (only passed valid tests): 961.18403
+  // Failed 1/300 tests
+  // With cache:
+  // Passed 30000/300 tests
+  // Total time (only passed valid tests): 735.24494
+  // Total CPU time (only passed valid tests): 973.85558
+  // Optimization idea failed
 };
 
 td::StringBuilder& operator<<(td::StringBuilder& sb, const CellSlice& cs);

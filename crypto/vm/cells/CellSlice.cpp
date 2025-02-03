@@ -87,6 +87,9 @@ bool CellSlice::load(VirtualCell::LoadedCell loaded_cell) {
   ptr = 0;
   zd = 0;
   init_bits_refs();
+
+  // refs_cache_.assign(4, Ref<Cell>());
+
   return cell.not_null();
 }
 
@@ -740,10 +743,14 @@ bool CellSlice::prefetch_bytes(td::MutableSlice slice) const {
 Ref<Cell> CellSlice::prefetch_ref(unsigned offset) const {
   if (offset < size_refs()) {
     auto ref_id = refs_st + offset;
+    // if (refs_cache_[ref_id].not_null())
+    //   return refs_cache_[ref_id];
+    
     auto res = cell->get_ref(ref_id)->virtualize(child_virt());
     if (!tree_node.empty()) {
       res = UsageCell::create(std::move(res), tree_node.create_child(ref_id));
     }
+    // refs_cache_[ref_id] = res;
     return res;
   } else {
     return Ref<Cell>{};
@@ -753,10 +760,14 @@ Ref<Cell> CellSlice::prefetch_ref(unsigned offset) const {
 Ref<Cell> CellSlice::fetch_ref() {
   if (have_refs()) {
     auto ref_id = refs_st++;
+    // if (refs_cache_[ref_id].not_null())
+    //   return refs_cache_[ref_id];
+
     auto res = cell->get_ref(ref_id)->virtualize(child_virt());
     if (!tree_node.empty()) {
       res = UsageCell::create(std::move(res), tree_node.create_child(ref_id));
     }
+    // refs_cache_[ref_id] = res;
     return res;
   } else {
     return Ref<Cell>{};
