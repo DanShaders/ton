@@ -34,7 +34,9 @@ static td::uint64 get_cpu_usage() {
 
 class ContestGrader : public td::actor::Actor {
  public:
-  explicit ContestGrader(std::string tests_dir) : tests_dir_(tests_dir) {
+  explicit ContestGrader(std::string tests_dir, size_t iterations_count) :
+    tests_dir_(tests_dir),
+    iterations_count_(iterations_count) {
   }
 
   void start_up() override {
@@ -75,8 +77,13 @@ class ContestGrader : public td::actor::Actor {
 
   void run_next_test() {
     if (test_idx_ == test_files_.size()) {
-      finish();
-      return;
+      ++iteration_idx_;
+      if (iteration_idx_ == iterations_count_) {
+        finish();
+        return;
+      }
+      test_idx_ = 0;
+      printf("Iteration %lu finished", iteration_idx_);
     }
 
     auto r_test = read_test_file();
@@ -148,6 +155,14 @@ class ContestGrader : public td::actor::Actor {
              (int)test_name_column_width_, test_files_[test_idx_].c_str(), elapsed, cpu_time,
              (valid ? "VALID" : "INVALID"), (got_valid ? "VALID" : "INVALID"));
       fflush(stdout);
+
+      if (valid) {
+        total_time_ += elapsed;
+        total_cpu_time_ += cpu_time;
+        // ^ Let's say I'd like to measure how big of a performance hit is CellUsageTree
+        // I might remove it and get a wrong result, but I'd still like to factor in the time spent on such tests
+      }
+
       ++cnt_fail_;
       ++test_idx_;
       run_next_test();
@@ -167,6 +182,12 @@ class ContestGrader : public td::actor::Actor {
       printf("%*lu  %-*s %8.5f %8.5f  ERROR  invalid Merkle update %s\n", (int)test_idx_column_width_, test_idx_ + 1,
              (int)test_name_column_width_, test_files_[test_idx_].c_str(), elapsed, cpu_time, S.to_string().c_str());
       fflush(stdout);
+
+      total_time_ += elapsed;
+      total_cpu_time_ += cpu_time;
+      // ^ Let's say I'd like to measure how big of a performance hit is CellUsageTree
+      // I might remove it and get a wrong result, but I'd still like to factor in the time spent on such tests
+
       ++cnt_fail_;
       ++test_idx_;
       run_next_test();
@@ -221,6 +242,10 @@ class ContestGrader : public td::actor::Actor {
 
   double total_time_ = 0.0;
   double total_cpu_time_ = 0.0;
+
+  // Added:
+  size_t iterations_count_;
+  size_t iteration_idx_ = 0;
 };
 
 int main(int argc, char* argv[]) {
@@ -238,6 +263,11 @@ int main(int argc, char* argv[]) {
     int v = VERBOSITY_NAME(FATAL) + (td::to_integer<int>(arg));
     SET_VERBOSITY_LEVEL(v);
   });
+  size_t iterations_count = 1;
+  p.add_option('i', "iterations", "set number of iterations", [&](td::Slice arg) {
+    iterations_count = td::to_integer<int>(arg);
+  });
+
   p.add_option('h', "help", "prints a help message", [&]() {
     char b[10240];
     td::StringBuilder sb(td::MutableSlice{b, 10000});
@@ -257,7 +287,7 @@ int main(int argc, char* argv[]) {
   p.run(argc, argv).ensure();
   td::actor::Scheduler scheduler({threads});
 
-  scheduler.run_in_context([&] { x = td::actor::create_actor<ContestGrader>("grader", tests_dir); });
+  scheduler.run_in_context([&] { x = td::actor::create_actor<ContestGrader>("grader", tests_dir, iterations_count); });
   while (scheduler.run(1)) {
   }
 
