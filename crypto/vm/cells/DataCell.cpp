@@ -325,27 +325,52 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
 }
 
 const DataCell::Hash DataCell::do_get_hash(td::uint32 level) const {
+  // some caching here
+  if (hash_cached_[level]) {
+    return cached_hashes_[level];
+  }
+
   auto hash_i = get_level_mask().apply(level).get_hash_i();
   if (special_type() == SpecialType::PrunnedBranch) {
     auto this_hash_i = get_level_mask().get_hash_i();
     if (hash_i != this_hash_i) {
-      return reinterpret_cast<const Hash*>(info_.get_data(get_storage()) + 2)[hash_i];
+      auto h = reinterpret_cast<const Hash *>(info_.get_data(get_storage()) + 2)[hash_i];
+      // store in cache
+      cached_hashes_[level] = h;
+      hash_cached_[level] = true;
+      return h;
     }
     hash_i = 0;
   }
-  return info_.get_hashes(get_storage())[hash_i];
+
+  auto h = info_.get_hashes(get_storage())[hash_i];
+  cached_hashes_[level] = h;
+  hash_cached_[level] = true;
+  return h;
 }
 
 td::uint16 DataCell::do_get_depth(td::uint32 level) const {
+  // check cache
+  if (depth_cached_[level]) {
+    return cached_depths_[level];
+  }
+
   auto hash_i = get_level_mask().apply(level).get_hash_i();
   if (special_type() == SpecialType::PrunnedBranch) {
     auto this_hash_i = get_level_mask().get_hash_i();
     if (hash_i != this_hash_i) {
-      return load_depth(info_.get_data(get_storage()) + 2 + hash_bytes * this_hash_i + hash_i * depth_bytes);
+      auto offset = 2 + hash_bytes * this_hash_i + hash_i * depth_bytes;
+      auto d = load_depth(info_.get_data(get_storage()) + offset);
+      cached_depths_[level] = d;
+      depth_cached_[level] = true;
+      return d;
     }
     hash_i = 0;
   }
-  return info_.get_depth(get_storage())[hash_i];
+  auto d = info_.get_depth(get_storage())[hash_i];
+  cached_depths_[level] = d;
+  depth_cached_[level] = true;
+  return d;
 }
 
 int DataCell::serialize(unsigned char* buff, int buff_size, bool with_hashes) const {

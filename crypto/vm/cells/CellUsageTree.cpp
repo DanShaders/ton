@@ -23,46 +23,39 @@ namespace vm {
 // CellUsageTree::NodePtr
 //
 bool CellUsageTree::NodePtr::on_load(const td::Ref<vm::DataCell>& cell) const {
-  auto tree = tree_weak_.lock();
-  if (!tree) {
+  if (!tree_) {
     return false;
   }
-  tree->on_load(node_id_, cell);
+  tree_->on_load(node_id_, cell);
   return true;
 }
 
 CellUsageTree::NodePtr CellUsageTree::NodePtr::create_child(unsigned ref_id) const {
-  auto tree = tree_weak_.lock();
-  if (!tree) {
+  if (!tree_) {
     return {};
   }
-  return {tree_weak_, tree->create_child(node_id_, ref_id)};
-}
-
-bool CellUsageTree::NodePtr::is_from_tree(const CellUsageTree* master_tree) const {
-  DCHECK(master_tree);
-  auto tree = tree_weak_.lock();
-  if (tree.get() != master_tree) {
-    return false;
-  }
-  return true;
+  auto new_node_id = tree_->create_child(node_id_, ref_id);
+  return NodePtr(tree_, new_node_id);
 }
 
 bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
-  DCHECK(master_tree);
-  auto tree = tree_weak_.lock();
-  if (tree.get() != master_tree) {
+  // Check that the pointer is the same instance
+  if (tree_ != master_tree) {
     return false;
   }
   master_tree->mark_path(node_id_);
   return true;
 }
 
+bool CellUsageTree::NodePtr::is_from_tree(const CellUsageTree* master_tree) const {
+  return tree_ == master_tree;
+}
+
 //
 // CellUsageTree
 //
 CellUsageTree::NodePtr CellUsageTree::root_ptr() {
-  return {shared_from_this(), 1};
+  return NodePtr(this, 1);
 }
 
 CellUsageTree::NodeId CellUsageTree::root_id() const {

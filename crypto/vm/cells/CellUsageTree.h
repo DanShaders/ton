@@ -28,18 +28,20 @@ namespace vm {
 
 class DataCell;
 
-class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
+class CellUsageTree {
  public:
   using NodeId = td::uint32;
 
   struct NodePtr {
    public:
     NodePtr() = default;
-    NodePtr(std::weak_ptr<CellUsageTree> tree_weak, NodeId node_id)
-        : tree_weak_(std::move(tree_weak)), node_id_(node_id) {
+    NodePtr(CellUsageTree* tree, NodeId node_id)
+        : tree_(tree), node_id_(node_id) {
     }
+
     bool empty() const {
-      return node_id_ == 0 || tree_weak_.expired();
+      // Just check if we have a valid node_id and a non-null pointer
+      return node_id_ == 0 || tree_ == nullptr;
     }
 
     bool on_load(const td::Ref<vm::DataCell>& cell) const;
@@ -48,7 +50,7 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
     bool is_from_tree(const CellUsageTree* master_tree) const;
 
    private:
-    std::weak_ptr<CellUsageTree> tree_weak_;
+    CellUsageTree* tree_{nullptr};
     NodeId node_id_{0};
   };
 

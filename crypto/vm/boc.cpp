@@ -1081,69 +1081,62 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::compute_used_storage(Ref<
   return res;
 }
 
+
+inline td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage_impl(
+    vm::CellSlice cs, bool kill_dup, unsigned skip_count_root) {
+  if (!(skip_count_root & 1)) {
+    ++cells;
+    if (cells > limit_cells) {
+      return td::Status::Error("too many cells");
+    }
+  }
+  if (!(skip_count_root & 2)) {
+    bits += cs.size();
+    if (bits > limit_bits) {
+      return td::Status::Error("too many bits");
+    }
+  }
+
+  CellInfo res;
+  unsigned ref_count = cs.size_refs();
+  for (unsigned i = 0; i < ref_count; i++) {
+    auto child_cell = cs.prefetch_ref(i);
+    TRY_RESULT(child_info, add_used_storage(std::move(child_cell), kill_dup));
+    res.max_merkle_depth = std::max(res.max_merkle_depth, child_info.max_merkle_depth);
+  }
+
+  if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
+      cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
+    ++res.max_merkle_depth;
+  }
+
+  return res;
+}
+
 td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::CellSlice> cs_ref, bool kill_dup,
                                                                         unsigned skip_count_root) {
-  if (cs_ref->is_unique()) {
-    return add_used_storage(std::move(cs_ref.unique_write()), kill_dup, skip_count_root);
-  } else {
-    return add_used_storage(*cs_ref, kill_dup, skip_count_root);
-  }
+
+  vm::CellSlice tmp = cs_ref->clone(); 
+  return add_used_storage_impl(std::move(tmp), kill_dup, skip_count_root);
 }
 
-td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(const CellSlice& cs, bool kill_dup,
-                                                                        unsigned skip_count_root) {
-  if (!(skip_count_root & 1)) {
-    ++cells;
-    if (cells > limit_cells) {
-      return td::Status::Error("too many cells");
-    }
-  }
-  if (!(skip_count_root & 2)) {
-    bits += cs.size();
-    if (bits > limit_bits) {
-      return td::Status::Error("too many bits");
-    }
-  }
-  CellInfo res;
-  for (unsigned i = 0; i < cs.size_refs(); i++) {
-    TRY_RESULT(child, add_used_storage(cs.prefetch_ref(i), kill_dup));
-    res.max_merkle_depth = std::max(res.max_merkle_depth, child.max_merkle_depth);
-  }
-  if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
-      cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
-    ++res.max_merkle_depth;
-  }
-  return res;
+td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(
+    const CellSlice &cs, bool kill_dup, unsigned skip_count_root) {
+
+  vm::CellSlice tmp = cs.clone();
+  return add_used_storage_impl(std::move(tmp), kill_dup, skip_count_root);
 }
 
-td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlice&& cs, bool kill_dup,
-                                                                        unsigned skip_count_root) {
-  if (!(skip_count_root & 1)) {
-    ++cells;
-    if (cells > limit_cells) {
-      return td::Status::Error("too many cells");
-    }
-  }
-  if (!(skip_count_root & 2)) {
-    bits += cs.size();
-    if (bits > limit_bits) {
-      return td::Status::Error("too many bits");
-    }
-  }
-  CellInfo res;
-  while (cs.size_refs()) {
-    TRY_RESULT(child, add_used_storage(cs.fetch_ref(), kill_dup));
-    res.max_merkle_depth = std::max(res.max_merkle_depth, child.max_merkle_depth);
-  }
-  if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
-      cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
-    ++res.max_merkle_depth;
-  }
-  return res;
+td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(
+    CellSlice &&cs, bool kill_dup, unsigned skip_count_root) {
+
+  // directly pass it to the unified impl
+  return add_used_storage_impl(std::move(cs), kill_dup, skip_count_root);
 }
 
-td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::Cell> cell, bool kill_dup,
-                                                                        unsigned skip_count_root) {
+td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(
+    Ref<vm::Cell> cell, bool kill_dup, unsigned skip_count_root) {
+
   if (cell.is_null()) {
     return td::Status::Error("cell is null");
   }
@@ -1154,7 +1147,7 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
     }
   }
   vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
-  return add_used_storage(std::move(cs), kill_dup, skip_count_root);
+  return add_used_storage_impl(std::move(cs), kill_dup, skip_count_root);
 }
 
 void NewCellStorageStat::add_cell(Ref<Cell> cell) {

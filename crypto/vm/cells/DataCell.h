@@ -213,6 +213,11 @@ class DataCell : public Cell {
   }
   static std::unique_ptr<DataCell> create_empty_data_cell(Info info);
 
+  mutable bool hash_cached_[max_level + 1] = {false, false, false, false};
+  mutable bool depth_cached_[max_level + 1] = {false, false, false, false};
+  mutable Hash cached_hashes_[max_level + 1];
+  mutable td::uint16 cached_depths_[max_level + 1];
+
   const Hash do_get_hash(td::uint32 level) const override;
   td::uint16 do_get_depth(td::uint32 level) const override;
 
