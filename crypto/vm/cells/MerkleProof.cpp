@@ -44,7 +44,8 @@ class MerkleProofImpl {
       is_prunned_ = [this](const Ref<Cell> &cell) { return visited_cells_.count(cell->get_hash()) == 0; };
     }
     try {
-      return dfs(cell, cell->get_level());
+      CHECK(cell->get_level() == 0);
+      return dfs(view, 0);
     } catch (CellBuilder::CellWriteError &) {
       return {};
     } catch (CellBuilder::CellCreateError &) {
@@ -53,8 +54,7 @@ class MerkleProofImpl {
   }
 
  private:
-  using Key = std::pair<Cell::Hash, int>;
-  td::HashMap<Key, Ref<Cell>> cells_;
+  td::HashMap<CellHash, Ref<Cell>> cells_;
   td::HashSet<Cell::Hash> visited_cells_;
   CellUsageTree *usage_tree_{nullptr};
   MerkleProof::IsPrunnedFunction is_prunned_;
@@ -69,34 +69,32 @@ class MerkleProofImpl {
     }
   }
 
-  Ref<Cell> dfs(Ref<Cell> cell, int merkle_depth) {
-    CHECK(cell.not_null());
-    Key key{cell->get_hash(), merkle_depth};
-    {
-      auto it = cells_.find(key);
-      if (it != cells_.end()) {
-        CHECK(it->second.not_null());
-        return it->second;
+  Ref<Cell> dfs(NonnullCellView view, int merkle_depth) {
+    auto hash = view.hash(merkle_depth);
+
+    if (is_prunned_(view.as_cell())) {
+      auto res = DataCell::create_pruned_branch(view, merkle_depth);
+      cells_.emplace(hash, res);
+      return res;
+    }
+
+    std::array<Ref<Cell>, CellTraits::max_refs> refs;
+    int child_depth = merkle_depth + (view.special_type() == Cell::SpecialType::MerkleProof ||
+                                      view.special_type() == Cell::SpecialType::MerkleUpdate);
+    CHECK(child_depth <= 2);
+    for (int i = 0; i < view.refs_cnt(); ++i) {
+      auto child = view.ref(i);
+      if (auto it = cells_.find(child.hash(child_depth)); it == cells_.end()) {
+        refs[i] = dfs(child, child_depth);
+      } else {
+        refs[i] = it->second;
       }
     }
 
-    if (is_prunned_(cell)) {
-      auto res = CellBuilder::create_pruned_branch(cell, merkle_depth + 1);
-      CHECK(res.not_null());
-      cells_.emplace(key, res);
-      return res;
-    }
-    CellSlice cs(NoVm(), cell);
-    int children_merkle_depth = cs.child_merkle_depth(merkle_depth);
-    CellBuilder cb;
-    cb.store_bits(cs.fetch_bits(cs.size()));
-    for (unsigned i = 0; i < cs.size_refs(); i++) {
-      cb.store_ref(dfs(cs.prefetch_ref(i), children_merkle_depth));
-    }
-    auto res = cb.finalize(cs.is_special());
-    CHECK(res.not_null());
-    cells_.emplace(key, res);
-    return res;
+    td::Slice data_slice{view.data(), static_cast<size_t>((view.bit_length() + 7) / 8)};
+    return cells_[hash] = DataCell::create(data_slice, view.bit_length(), td::Span{refs}.substr(0, view.refs_cnt()),
+                                           view.special_type() != Cell::SpecialType::Ordinary)
+                              .move_as_ok();
   }
 };
 }  // namespace detail

@@ -6,6 +6,7 @@
 
 #include "openssl/digest.hpp"
 #include "vm/cells/DataCell.h"
+#include "vm/ng/CellView.h"
 #include "vm/ng/DataCellStorage.h"
 
 namespace vm {
@@ -387,6 +388,64 @@ td::Result<Ref<DataCell>> DataCell::create(td::Slice data, int bit_length, td::S
     auto ref = reinterpret_cast<uintptr_t>(Ref{refs[i]}.release());
     cell.m_refs[i] = ref | (refs[i]->is_data_cell() ? pointer_tag : 0);
   }
+
+  return result;
+}
+
+Ref<DataCell> DataCell::create_pruned_branch(NonnullCellView view, int merkle_up_depth) {
+  auto& cell_to_prune = view.underlying_data_cell();
+
+  CHECK(merkle_up_depth >= 0 && merkle_up_depth <= 2);
+  auto new_mask = cell_to_prune.m_level_mask.apply(merkle_up_depth).apply_or(LevelMask::one_level(merkle_up_depth + 1));
+  CHECK(new_mask.get_level() == static_cast<td::uint32>(merkle_up_depth + 1));
+
+  int hash_count = new_mask.get_hash_i();
+
+  int byte_length = 2 + hash_count * (Cell::hash_bytes + Cell::depth_bytes);
+
+  auto result = allocate_cell(byte_length * 8, new_mask, 0, SpecialType::PrunnedBranch, 0);
+  auto& cell = result.write();
+
+  // First, fill level_info that we can directly copy from cell_to_prune.
+  auto mutable_level_info = const_cast<LevelInfo*>(cell.m_level_info);
+  for (int i = 0; i < cell.m_level; ++i) {
+    int j = std::min<int>({i, cell_to_prune.m_level, view.virtualization_level()});
+    mutable_level_info[i] = cell_to_prune.m_level_info[j];
+  }
+
+  // Then, populate cell data.
+  auto mutable_data = const_cast<char*>(cell.m_data);
+  mutable_data[0] = static_cast<char>(SpecialType::PrunnedBranch);
+  mutable_data[1] = static_cast<char>(new_mask.get_mask());
+
+  int hash_offset = 2;
+  int depth_offset = 2 + hash_count * Cell::hash_bytes;
+
+  for (int i = 0; i < result->m_level; ++i) {
+    if (new_mask.is_significant(i)) {
+      std::memcpy(mutable_data + hash_offset, cell.m_level_info[i].hash.as_slice().data(), Cell::hash_bytes);
+      hash_offset += Cell::hash_bytes;
+
+      auto depth = __builtin_bswap16(cell.m_level_info[i].depth);
+      std::memcpy(mutable_data + depth_offset, &depth, Cell::depth_bytes);
+      depth_offset += Cell::depth_bytes;
+    }
+  }
+
+  CHECK(depth_offset == byte_length);
+
+  // Lastly, compute representation hash.
+  mutable_level_info[cell.m_level].depth = 0;
+
+  digest::SHA256 hasher;
+
+  auto d1 = 0 + (1 << 3) + (new_mask.get_mask() << 5);
+  auto d2 = byte_length * 2;
+  td::uint8 header[] = {static_cast<td::uint8>(d1), static_cast<td::uint8>(d2)};
+  hasher.feed(header, 2);
+
+  hasher.feed({mutable_data, static_cast<size_t>(byte_length)});
+  hasher.extract(mutable_level_info[cell.m_level].hash.as_slice());
 
   return result;
 }
