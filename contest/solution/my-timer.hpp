@@ -8,6 +8,7 @@
 #include <fstream>
 
 #include "various.hpp"
+#include "settings.hpp"
 
 
 namespace solution {
@@ -35,9 +36,18 @@ using std::chrono::_V2::system_clock;
 using timepoint = system_clock::time_point;
 
 
-class MyTimer {
+#ifdef ENABLE_PROFILING
+  #define MyTimer RealTimer
+  #define TimerGrab RealTimerGrab
+#else
+  #define MyTimer FakeTimer
+  #define TimerGrab FakeTimerGrab
+#endif
+
+
+class RealTimer {
  public:
-  MyTimer(string name, bool store_timings);
+  RealTimer(string name, bool store_timings);
   void writeToFile(const string& filename, int testIndex);
 
 
@@ -53,20 +63,35 @@ class MyTimer {
   vector<timepoint> startTimes;
   vector<timepoint> endTimes;
 
-  friend class TimerGrab;
+  friend class RealTimerGrab;
 };
 
 
-class TimerGrab {
+class RealTimerGrab {
  public:
-  TimerGrab(MyTimer& timer);
-  ~TimerGrab();
+  RealTimerGrab(RealTimer& timer);
+  ~RealTimerGrab();
+  void stop();
 
  private:
-  MyTimer& timer;
+  bool stopped = false;
+  RealTimer& timer;
   int my_index;
   timepoint startTime;
 };
+
+
+class FakeTimer {
+ public:
+  FakeTimer(string name, bool store_timings) { }
+  void writeToFile(const string& filename, int testIndex) { }
+};
+class FakeTimerGrab {
+ public:
+  FakeTimerGrab(FakeTimer& timer) { }
+  void stop() { }
+};
+
 
 
 

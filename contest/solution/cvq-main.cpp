@@ -28,6 +28,7 @@ ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice 
     , shard_pfx_len_(ton::shard_prefix_length(shard_)) {
 
   testIndex = ++globalTestIndex;
+  testDataIndex = (testIndex - 1) % 300 + 1;
   // msg_proc_lt_.reserve(100000); // !TEMP_BAD_THREAD
 
   //<%assigned%>: debug_checks_
@@ -177,6 +178,8 @@ void ContestValidateQuery::start_up() {
     my_threader.writeProfileToFile("profile.ts", testIndex);
     account_transactions_timer.writeToFile("account_transactions_times.ts", testIndex);
     one_transaction_timer.writeToFile("one_transaction_times.ts", testIndex);
+    transaction_execution_timer.writeToFile("transaction_execution_times.ts", testIndex);
+    fetch_neighbor_timer.writeToFile("fetch_neighbor_times.ts", testIndex);
 
     finish_query();
   } catch (std::string error) {

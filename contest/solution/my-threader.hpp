@@ -9,6 +9,8 @@
 #include "BS_thread_pool.hpp"
 
 #include "various.hpp"
+#include "settings.hpp"
+
 
 
 namespace solution {
@@ -47,7 +49,7 @@ class MyThreader {
 
   const int MaxFuturesHeld = 200;
 
-  BS::thread_pool<> pool{8};
+  BS::thread_pool<> pool{9};
  private:
 
   atomic<int> futuresCount{0};

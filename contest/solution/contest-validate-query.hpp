@@ -16,6 +16,7 @@
 #include "common/global-version.h"
 #include "tonlib/tonlib/ExtClient.h"
 
+#include "settings.hpp"
 #include "multithreading-guard.hpp"
 #include "my-threader.hpp"
 #include "my-timer.hpp"
@@ -478,6 +479,7 @@ public:
   // My stuff
  private:
   int testIndex;
+  int testDataIndex;
   static int globalTestIndex;
   int doesItCreateNewInstancePerTest = 0;
 
@@ -492,7 +494,9 @@ public:
   void generated_root();
 
   MyTimer account_transactions_timer{"account_transactions_timer", true},
-          one_transaction_timer{"one_transaction_timer", true};
+          one_transaction_timer{"one_transaction_timer", true},
+          transaction_execution_timer{"transaction_execution_timer", true},
+          fetch_neighbor_timer{"fetch_neighbor_timer", true};
 
   MyThreader my_threader;
 

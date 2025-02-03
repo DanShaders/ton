@@ -5,6 +5,7 @@
 
 #include "shard.hpp" // Include something to be able to LOG
 
+#include "settings.hpp"
 
 
 namespace solution {

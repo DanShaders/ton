@@ -36,7 +36,9 @@ void ContestValidateQuery::reject_throw(std::string err_msg, td::Status error, t
   reject_throw(err_msg + " : " + error.to_string(), std::move(reason));
 }
 
-
+#ifdef DEBUG_OUTPUT
+  const int validBlocksFromTest = 51;
+#endif
 
 /**
  * Aborts the validation with the given error.
@@ -63,6 +65,12 @@ bool ContestValidateQuery::top_level_reject_query(std::string error, td::BufferS
   //   // LOG(ERROR) << "Not main thread. Main thread (" << std::hash<std::thread::id>{}(main_thread_id)
   //   //            << "), current thread (" << std::hash<std::thread::id>{}(std::this_thread::get_id()) << ")";
   // }
+  #ifdef DEBUG_OUTPUT
+    if (testDataIndex >= validBlocksFromTest) {
+      LOG(ERROR) << "Test #" << testIndex << " should be valid, but errored: " << error;
+    }
+  #endif
+
   LOG(WARNING) << "REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
   if (main_promise) {
     main_promise.set_error(td::Status::Error(error));
@@ -96,6 +104,13 @@ bool ContestValidateQuery::top_level_reject_query(std::string err_msg, td::Statu
  */
 bool ContestValidateQuery::top_level_soft_reject_query(std::string error, td::BufferSlice reason) {
   error = error_ctx() + error;
+
+  #ifdef DEBUG_OUTPUT
+    if (testDataIndex >= validBlocksFromTest) {
+      LOG(ERROR) << "Test #" << testIndex << " should be valid, but errored: " << error;
+    }
+  #endif
+
   LOG(WARNING) << "SOFT REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
   if (main_promise) {
     main_promise.set_error(td::Status::Error(std::move(error)));
@@ -129,6 +144,13 @@ void ContestValidateQuery::fatal_throw(int err_code, std::string err_msg) {
 bool ContestValidateQuery::top_level_fatal_error(td::Status error) {
   // LOG(ERROR) << "fatal error: " << error.to_string(); // !TEMP_DEBUG
   error.ensure_error();
+
+  #ifdef DEBUG_OUTPUT
+    if (testDataIndex >= validBlocksFromTest) {
+      LOG(ERROR) << "Test #" << testIndex << " should be valid, but errored: " << error;
+    }
+  #endif
+
   LOG(WARNING) << "aborting validation of block candidate for " << shard_.to_str() << " : " << error.to_string();
   // if (in_multithreading) {
   //   throw error;
@@ -184,6 +206,7 @@ bool ContestValidateQuery::top_level_fatal_error(std::string err_msg, int err_co
  * Finishes the query and sends the result to the promise.
  */
 void ContestValidateQuery::finish_query() {
+#ifdef DEBUG_OUTPUT
   // <{generated_atomic_zero_checks
   if (__pending_build_state_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_build_state_update ended up as: " << __pending_build_state_update;
   if (__pending_unpack_prev_state != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_unpack_prev_state ended up as: " << __pending_unpack_prev_state;
@@ -208,6 +231,7 @@ void ContestValidateQuery::finish_query() {
   if (__pending_check_message_processing_order != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_message_processing_order ended up as: " << __pending_check_message_processing_order;
   if (__pending_check_dispatch_queue_update != 0) LOG(ERROR) << "Generated atomic variable should be exactly 0, when reaching 'finish_query', but variable __pending_check_dispatch_queue_update ended up as: " << __pending_check_dispatch_queue_update;
   // generated_atomic_zero_checks}/>
+#endif
 
   if (main_promise) {
     LOG(WARNING) << "validate query done";

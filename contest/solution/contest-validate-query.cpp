@@ -808,12 +808,18 @@ void ContestValidateQuery::compute_prev_state() {
       fatal_throw(-667, "cannot construct mechanically merged previously state");
     }
   }
+  // !TODO: I was wrong about _state_usage_tree_ being assigned here, as it gets modified indirectly
+  // The questions is: where are all of those places?
   state_usage_tree_ = std::make_shared<vm::CellUsageTree>();
   //<%assigned%>: state_usage_tree_
 							//<%generated%>
 							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
   prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr()); // !TEMP_THREAD likely breaks Merkle Update
+  // prev_state_root_ = prev_state_root_->virtualize();
+  // With the line ^ commented out, it obviously produces a wrong Merkle Tree Update,
+  // but somehow also makes everything significantly slower:
+  // Total time: ~6.8s -> 8.2s
   //<%assigned%>: prev_state_root_
 							//<%generated%>
 							if (--__pending_unpack_prev_state == 0) my_threader.launchAndProfile("unpack_prev_state", [this] { unpack_prev_state(); });
@@ -1045,6 +1051,8 @@ void ContestValidateQuery::request_neighbor_queues() {
   int i = 0;
   {
     for (block::McShardDescr& descr : neighbors_) {
+      TimerGrab _time_it(fetch_neighbor_timer);
+
       LOG(DEBUG) << "requesting outbound queue of neighbor #" << i << " : " << descr.blk_.to_str();
       auto r_state = fetch_block_state(descr.blk_);
       if (r_state.is_error()) {
@@ -2440,8 +2448,7 @@ void ContestValidateQuery::build_new_message_queue() {
  *
  * @returns True if the update is valid, false otherwise.
  */
-void ContestValidateQuery::precheck_one_message_queue_update(td::ConstBitPtr out_msg_id, Ref<vm::CellSlice> old_value,
-                                                             Ref<vm::CellSlice> new_value) {
+void ContestValidateQuery::precheck_one_message_queue_update(td::ConstBitPtr out_msg_id, Ref<vm::CellSlice> old_value, Ref<vm::CellSlice> new_value) {
   LOG(DEBUG) << "checking update of enqueued outbound message " << out_msg_id.get_int(32) << ":"
              << (out_msg_id + 32).to_hex(64) << "... with hash " << (out_msg_id + 96).to_hex(256);
   old_value = ps_.out_msg_queue_->extract_value(std::move(old_value));
@@ -4769,6 +4776,7 @@ void ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
 
       // Because of the following lines, check_one_transaction executions for a specific account
       // can't be parallelized ... at least not as easily, maybe later
+      // Edit: actually, the "account" parameter is changed and that is the biggest problem here
       if (account_expected_defer_all_messages_.count(ss_addr) && !is_deferred) {
         reject_throw(
             PSTRING() << "outbound message #" << i + 1 << " on account " << workchain() << ":" << ss_addr.to_hex()
@@ -4934,6 +4942,8 @@ void ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   // check transaction computation by re-doing it
   // similar to Collator::create_ordinary_transaction() and Collator::create_ticktock_transaction()
   // ....
+  TimerGrab _time_transaction_execution(transaction_execution_timer);
+
   std::unique_ptr<block::transaction::Transaction> trs =
       std::make_unique<block::transaction::Transaction>(account, trans_type, lt, now_, in_msg_root);
   if (in_msg_root.not_null()) {
@@ -5031,6 +5041,9 @@ void ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     reject_throw(PSTRING() << "the re-created transaction " << lt << " for smart contract " << addr.to_hex()
                                   << " could not be committed");
   }
+
+  _time_transaction_execution.stop();
+
   // now compare the re-created transaction with the one we have
   if (trans_root2->get_hash() != trans_root->get_hash()) {
     // !CAREFUL_REMOVAL of the following lines
@@ -5258,24 +5271,84 @@ void ContestValidateQuery::check_transactions() {
   const int maxTransactions = 1000; // !TEMP_THREAD_STUFF
   std::vector<td::BitPtr> keys;
   vm::CellSlice values[maxTransactions];
+  vector<unsigned long long> fees;
+  // vector<td::RefInt256> fees;
 
   account_blocks_dict_->check_for_each_extra(
-      [this, &keys, &values](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
+      [this, &keys, &values, &fees](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
         ORIGINAL_CHECK(key_len == 256);
 
         // block::gen::AccountBlock::Record acc_blk;
         // tlb::csr_unpack(value, acc_blk);
         // LOG(ERROR) << key << " " << acc_blk.account_addr;
 
+        // Using PREfetch exclusively, because who knows if "fetch" is going to destroy the slice
+        unsigned long long extraLen = extra->prefetch_ulong(4) * 8;
+        unsigned long long fee;
+        if (extraLen > 58)
+          fee = ~0ull;
+        else {
+          fee = extra->prefetch_ulong(4ull + extraLen);
+          fee &= ~(0b1111ull << extraLen); // get rid of the extraLen part
+        }
+        // LOG(ERROR) << "fee: " << fee;
+        fees.push_back(fee);
+        // fees.push_back(block::tlb::t_Grams.as_integer(extra)); // This one worked, but trying to sort it afterwards crashed
+
+        values[keys.size()] = value->clone();
+
         // !!!TODO: fix this temp shit
         auto temp = new unsigned char[500];
         td::BitPtr newBitPtr(temp, 0);
         newBitPtr.copy_from(key, 256);
         keys.push_back(newBitPtr);
-        values[keys.size()-1] = value->clone();
         // values[keys.size()-1] = std::move(value);
         return true;
       });
+
+  vector<int> check_order(fees.size());
+  for (size_t i = 0; i < check_order.size(); i++) {
+    check_order[i] = (int)i;
+  }
+  std::sort(check_order.begin(), check_order.end(), [&](int a, int b) {
+    return fees[a] > fees[b];
+  });
+
+  // Changing check_order, obviously, doesn't change total CPU time,
+  // but I hope it will decrease the Multi-Threading stall
+  // by starting the longer checks first.
+  // Oops, errors:
+  // Passed 29981/300 tests
+  // Total time (only passed valid tests): 674.48589
+  // Total CPU time (only passed valid tests): 919.33116
+  // Failed 19/300 tests
+  // Another run:
+  // Passed 29973/300 tests
+  // Total time (only passed valid tests): 673.03731
+  // Total CPU time (only passed valid tests): 917.79751
+  // Failed 27/300 tests
+  // Now, with fees computed and sorted, but check_order ignored (int accI = i): slightly slower, but no errors:
+  // Passed 30000/300 tests
+  // Total time (only passed valid tests): 685.31913
+  // Total CPU time (only passed valid tests): 909.17212
+  // Now, with "fees" and "check_order" removed - no difference:
+  // Passed 30000/300 tests
+  // Total time (only passed valid tests): 685.73197
+  // Total CPU time (only passed valid tests): 912.35981
+
+  // After fixing CellUsageTree:
+  // With reordering:
+  // Passed 30000/300 tests
+  // Total time (only passed valid tests): 696.04931
+  // Total CPU time (only passed valid tests): 921.71160
+  // Without:
+  // Passed 30000/300 tests
+  // Total time (only passed valid tests): 699.90552
+  // Total CPU time (only passed valid tests): 899.57163
+  // With:
+  // Passed 30000/300 tests
+  // Total time (only passed valid tests): 693.07392
+  // Total CPU time (only passed valid tests): 909.10826
 
   // for (int i = 0; i < keys.size(); i++) {
   //   block::gen::AccountBlock::Record acc_blk;
@@ -5297,13 +5370,15 @@ void ContestValidateQuery::check_transactions() {
 
 
   //*
-  MultithreadingGuard mg(this, std::string("Test index #") + std::to_string(testIndex));
 
-  bool check_account_transactions_result = true;
+  // MultithreadingGuard mg(this, std::string("Test index #") + std::to_string(testIndex));
+
+  // bool check_account_transactions_result = true;
 
   BS::multi_future<void> loop_future = my_threader.pool.submit_loop(0, keys.size(), 
-    [this, keys, values, &check_account_transactions_result] (const std::size_t i) {
-      check_account_transactions((td::ConstBitPtr)keys[i], td::Ref<vm::CellSlice>(&values[i]));
+    [this, keys, values, &check_order] (const std::size_t i) {
+      auto accI = check_order[i]; // check_order.size()-1-i; //
+      check_account_transactions((td::ConstBitPtr)keys[accI], td::Ref<vm::CellSlice>(&values[accI]));
     }, keys.size()
   );
   loop_future.wait();
@@ -5688,6 +5763,13 @@ void ContestValidateQuery::build_state_update() {
   //<%assigned%>: result_state_update_
 							//<%generated%>
 							//<%/generated%>
+
+  // vm::CellSlice cs{vm::NoVm(), state_update};
+  // ofstream fo("state_root_hashes " + std::to_string(testDataIndex) + ".txt", std::ios::app);
+  // fo << "state_root_hash: " << state_root->get_hash().to_hex() << " "
+  //    << "state_update_hash: " << state_update->get_hash().to_hex() << " "
+  //    << "old_proof_hash: " << cs.prefetch_ref(0)->get_hash().to_hex() << " "
+  //    << "new_proof_hash: " << cs.prefetch_ref(1)->get_hash().to_hex() << endl;
 }
 
 /**

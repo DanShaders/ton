@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "settings.hpp"
 #include "contest-validate-query.hpp"
 
 namespace solution {

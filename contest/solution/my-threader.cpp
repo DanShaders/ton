@@ -31,15 +31,19 @@ void MyThreader::launch(LaunchFunction callable) {
 void MyThreader::launchAndProfile(string name, LaunchFunction callable) {
   int fi = futuresCount++;
   names[fi] = name;
-  futures[fi] = pool.submit_task(
-  // futures[fi] = async(
-  //     std::launch::async,
-      [this, fi, callable] {
-        startTimes[fi] = high_resolution_clock::now();
-        callable();
-        endTimes[fi] = high_resolution_clock::now();
-      }
-  );
+  #ifndef ENABLE_PROFILING
+    futures[fi] = pool.submit_task(callable);
+  #else
+    futures[fi] = pool.submit_task(
+    // futures[fi] = async(
+    //     std::launch::async,
+        [this, fi, callable] {
+          startTimes[fi] = high_resolution_clock::now();
+          callable();
+          endTimes[fi] = high_resolution_clock::now();
+        }
+    );
+  #endif
 }
 
 
@@ -58,6 +62,10 @@ void MyThreader::waitForAll() {
 
 
 void MyThreader::writeProfileToFile(const string& filename, int testIndex) {
+  #ifndef ENABLE_PROFILING
+    return;
+  #endif
+
   ofstream file(filename, std::ios::app);
 
   // file << "export const timings = {" << endl;

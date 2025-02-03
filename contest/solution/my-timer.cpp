@@ -5,7 +5,7 @@
 namespace solution {
 
 
-MyTimer::MyTimer(string name, bool store_timings): store_timings(store_timings) {
+RealTimer::RealTimer(string name, bool store_timings): store_timings(store_timings) {
   totalTime = 0s;
   startTimes.resize(MaxGrabs);
   endTimes.resize(MaxGrabs);
@@ -13,7 +13,7 @@ MyTimer::MyTimer(string name, bool store_timings): store_timings(store_timings) 
   // endTimes[10] = high_resolution_clock::now();
 }
 
-void MyTimer::writeToFile(const string& filename, int testIndex) {
+void RealTimer::writeToFile(const string& filename, int testIndex) {
   ofstream file(filename, std::ios::app);
 
   file << "'" << testIndex << "' : {" << endl;
@@ -36,7 +36,7 @@ void MyTimer::writeToFile(const string& filename, int testIndex) {
 }
 
 
-void MyTimer::record_timing(timepoint start, timepoint end, int grab_id) {
+void RealTimer::record_timing(timepoint start, timepoint end, int grab_id) {
   auto duration = end - start;
 
   if (store_timings) {
@@ -53,7 +53,7 @@ void MyTimer::record_timing(timepoint start, timepoint end, int grab_id) {
 
 
 
-TimerGrab::TimerGrab(MyTimer& timer): timer(timer) {
+RealTimerGrab::RealTimerGrab(RealTimer& timer): timer(timer) {
   // if (timer.store_timings) {
     my_index = timer.timer_grab_count++;
     if (my_index >= 900) {
@@ -63,9 +63,14 @@ TimerGrab::TimerGrab(MyTimer& timer): timer(timer) {
   // }
   startTime = high_resolution_clock::now();
 }
-TimerGrab::~TimerGrab() {
+void RealTimerGrab::stop() {
+  stopped = true;
   auto endTime = high_resolution_clock::now();
   timer.record_timing(startTime, endTime, my_index);
+}
+RealTimerGrab::~RealTimerGrab() {
+  if (!stopped)
+    stop();
 }
 
 
