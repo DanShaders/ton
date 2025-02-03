@@ -92,9 +92,10 @@ class MerkleProofImpl {
     }
 
     td::Slice data_slice{view.data(), static_cast<size_t>((view.bit_length() + 7) / 8)};
-    return cells_[hash] = DataCell::create(data_slice, view.bit_length(), td::Span{refs}.substr(0, view.refs_cnt()),
-                                           view.special_type() != Cell::SpecialType::Ordinary)
-                              .move_as_ok();
+    return cells_[hash] =
+               DataCell::create(data_slice, view.bit_length(), td::Span<Ref<Cell>>{refs}.substr(0, view.refs_cnt()),
+                                view.special_type() != Cell::SpecialType::Ordinary)
+                   .move_as_ok();
   }
 };
 }  // namespace detail

@@ -144,7 +144,7 @@ class DataCell : public Cell {
   // BitReader relies on inline_data being aligned on 4-byte boundary and being at least
   // `max(ceil(bit_length / 32) * 4, 2)` bytes long.
   DataCell(int bit_length, int refs_cnt, Cell::SpecialType type, LevelMask level_mask, td::uint8 virtualization,
-           std::span<char const> data, std::span<LevelInfo const> level_info)
+           td::Span<char> data, td::Span<LevelInfo> level_info)
       : m_bit_length(bit_length)
       , m_refs_cnt(static_cast<td::uint8>(refs_cnt))
       , m_type(type)

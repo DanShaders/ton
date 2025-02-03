@@ -1182,7 +1182,7 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
   if (kill_dup) {
     auto ins = seen.emplace(cell->get_hash());
     if (!ins.second) {
-      return 0;
+      return CellInfo{0};
     }
   }
   vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
