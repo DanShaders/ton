@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include "refcnt.hpp"
+
 namespace td {
 namespace tl_policies {
 namespace memory {
@@ -21,36 +23,41 @@ struct DefaultAllocator : public IAllocator {
 };
 
 struct MultiPagedFixedBlockAllocator : public IAllocator {
-  explicit MultiPagedFixedBlockAllocator(std::size_t _size) : size(_size) {
-    cur = ptr = static_cast<std::uint8_t*>(malloc(size));
-    if (!ptr) {
+  explicit MultiPagedFixedBlockAllocator(std::size_t size) : size_(size) {
+    cur_ = ptr_ = static_cast<std::uint8_t*>(malloc(size_));
+    if (!ptr_) {
       throw std::bad_alloc();
     }
-    end = ptr + size;
+    end_ = ptr_ + size;
   }
 
   ~MultiPagedFixedBlockAllocator() override {
-    free(ptr);
+    free(ptr_);
   }
 
   void* allocate(std::size_t count) override {
-    std::uint8_t* t = cur;
-    cur += (count + 7) & -8;
-    if (cur > end) {
+    std::uint8_t* t = cur_;
+    cur_ += (count + 7) & -8;
+    if (cur_ > end_) {
       throw std::bad_alloc();
     }
     return (void*)t;
   }
   void deallocate(const void* ptr) override {
   }
-
+  std::size_t used() const {
+    return cur_ - ptr_;
+  }
+  void clear() {
+    cur_ = ptr_;
+  }
  private:
-  std::uint8_t *ptr, *cur, *end;
-  std::size_t size;
+  std::uint8_t *ptr_, *cur_, *end_;
+  std::size_t size_;
 };
 
 inline IAllocator* get_default_allocator() {
-  static TD_THREAD_LOCAL DefaultAllocator obj;
+  static DefaultAllocator obj;
   return &obj;
 }
 
@@ -59,15 +66,17 @@ inline IAllocator* get_multipaged_fixed_block_allocator() {
   return &obj;
 }
 
-/// \brief Установка локализованной политики выделения и освобождения памяти.
-///   При помощи ее можно изменить механизм аллокации для конкретного
-///   места в коде, не влияя на поведение в других местах.
+/// \brief Sets a localized memory allocation and deallocation policy.
+///   It can be used to change the allocation mechanism for a specific
+///   place in the code without affecting the behavior elsewhere.
 class Policy {
  private:
   Policy() = default;
 
   static IAllocator*& instance() {
-    static TD_THREAD_LOCAL IAllocator* obj = get_multipaged_fixed_block_allocator(); // get_default_allocator();
+    static TD_THREAD_LOCAL IAllocator* obj = 
+      //get_multipaged_fixed_block_allocator();
+      get_default_allocator();
     return obj;
   }
 
@@ -77,8 +86,6 @@ class Policy {
   }
 
   static void set(IAllocator* ptr) {
-    /// \remark не удаляем предыдущий аллокатор, т.к. PolicyAllocation не должен им владеть
-    ///   потоки могут завершиться в любой момент и выделенная память не должна от этого зависеть.
     instance() = ptr;
   }
 };
@@ -87,9 +94,33 @@ inline void* allocate(std::size_t count) {
   return Policy::get()->allocate(count);
 }
 
-inline void deallocate(const void* ptr) {
-  Policy::get()->deallocate(ptr);
-}
+struct PolicyHolder {
+  explicit PolicyHolder(IAllocator* allocator) {
+    Policy::set(allocator);
+  }
+  ~PolicyHolder() {
+    Policy::set(get_default_allocator());
+  }
+};
+
+/// Cannot be used for classes that have virtual inheritance, such as:
+///   MasterchainState->public virtual->ShardState->CntObject
+class Switchable : public CntObject {
+ public:
+  virtual ~Switchable() = default;
+
+  static void* operator new(std::size_t count) {
+    return allocate(count);
+  }
+
+  static void operator delete(void* ptr) {
+    Switchable* p = static_cast<Switchable*>(ptr);
+    p->allocator_->deallocate(ptr);
+  }
+
+ private:
+  IAllocator* allocator_ = Policy::get();
+};
 
 }  // namespace memory
 }  // namespace tl_policies
