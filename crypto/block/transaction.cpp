@@ -3128,7 +3128,7 @@ static td::optional<vm::CellStorageStat> try_update_storage_stat(const vm::CellS
   if (old_stat.get_cells() == 0 || old_cs.is_null()) {
     return {};
   }
-  vm::CellSlice new_cs = vm::CellSlice(vm::NoVm(), new_cell);
+  vm::CellSlice new_cs{vm::NoVm(), std::move(new_cell)};
   if (old_cs->size_refs() != new_cs.size_refs()) {
     return {};
   }

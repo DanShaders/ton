@@ -61,12 +61,12 @@ ton::LogicalTime OutputQueueMerger::MsgKeyValue::get_node_lt(Ref<vm::Cell> node,
   if (node.is_null() || (unsigned)key_pfx_len > (unsigned)max_key_len) {
     return std::numeric_limits<td::uint64>::max();
   }
-  vm::dict::LabelParser label{std::move(node), max_key_len - key_pfx_len, vm::dict::LabelParser::chk_size};
+  vm::dict::LabelParserStatic label{std::move(node), max_key_len - key_pfx_len, vm::dict::LabelParser::chk_size};
   if (!label.is_valid()) {
     return std::numeric_limits<td::uint64>::max();
   }
   label.skip_label();
-  return label.remainder->prefetch_ulong(64);
+  return label.remainder.prefetch_ulong(64);
 }
 
 bool OutputQueueMerger::MsgKeyValue::unpack_node(td::ConstBitPtr key_pfx, int key_pfx_len, Ref<vm::Cell> node) {

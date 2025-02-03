@@ -131,21 +131,21 @@ Ref<Cell> MerkleProof::generate(Ref<Cell> cell, CellUsageTree *usage_tree) {
   return CellBuilder::create_merkle_proof(std::move(raw));
 }
 
-td::Result<Ref<Cell>> unpack_proof(Ref<Cell> cell) {
+td::Result<Ref<Cell>> unpack_proof(const Ref<Cell> &cell) {
   CHECK(cell.not_null());
   td::uint8 level = static_cast<td::uint8>(cell->get_level());
   if (level != 0) {
     return td::Status::Error("Level of MerkleProof must be zero");
   }
-  CellSlice cs(NoVm(), std::move(cell));
+  CellSlice cs(NoVm(), cell);
   if (cs.special_type() != Cell::SpecialType::MerkleProof) {
     return td::Status::Error("Not a MekleProof cell");
   }
   return cs.fetch_ref();
 }
 
-Ref<Cell> MerkleProof::virtualize(Ref<Cell> cell, int virtualization) {
-  auto r_raw = unpack_proof(std::move(cell));
+Ref<Cell> MerkleProof::virtualize(const Ref<Cell> &cell, int virtualization) {
+  auto r_raw = unpack_proof(cell);
   if (r_raw.is_error()) {
     return {};
   }

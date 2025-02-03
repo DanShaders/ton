@@ -30,6 +30,7 @@
 #include "td/utils/Time.h"
 #include "td/utils/Timer.h"
 #include "td/utils/port/FileFd.h"
+#include "td/utils/misc.h"
 
 namespace vm {
 using td::Ref;
@@ -181,7 +182,7 @@ struct Cache {
   using HashTable = td::HashMap<TKey, std::pair<TValue, bool>>;
 
   static HashTable& instance() {
-    static HashTable cache;
+    static TD_THREAD_LOCAL HashTable cache;
     return cache;
   }
   static void reset_flags() {
@@ -355,7 +356,18 @@ struct CellSerializationInfo {
 
   td::Status init(td::Slice data, int ref_byte_size);
   td::Status init(td::uint8 d1, td::uint8 d2, int ref_byte_size);
-  td::Result<int> get_bits(td::Slice cell) const;
+  td::Result<int> get_bits(const td::Slice& cell) const {
+    if (data_with_bits) {
+      DCHECK(data_len != 0);
+      int last = cell[data_offset + data_len - 1];
+      if (!(last & 0x7f)) {
+        return td::Status::Error("overlong encoding");
+      }
+      return td::narrow_cast<int>((data_len - 1) * 8 + 7 - td::count_trailing_zeroes_non_zero32(last));
+    } else {
+      return td::narrow_cast<int>(data_len * 8);
+    }
+  }
 
   td::Result<Ref<DataCell>> create_data_cell(td::Slice data, td::Span<Ref<Cell>> refs) const;
 };

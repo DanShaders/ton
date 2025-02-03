@@ -31,7 +31,7 @@ class MerkleUpdateApply {
     if (from_level != from->get_level()) {
       return {};
     }
-    dfs_both(from, update_from, from_level);
+    dfs_both(std::move(from), std::move(update_from), from_level);
     return dfs(update_to, to_level);
   }
 
@@ -41,14 +41,14 @@ class MerkleUpdateApply {
   td::HashMap<Key, Ref<Cell>> ready_cells_;
 
   void dfs_both(Ref<Cell> original, Ref<Cell> update_from, int merkle_depth) {
-    CellSlice cs_update_from(NoVm(), update_from);
+    CellSlice cs_update_from(NoVm(), std::move(update_from));
     known_cells_.emplace(original->get_hash(merkle_depth), original);
     if (cs_update_from.special_type() == Cell::SpecialType::PrunnedBranch) {
       return;
     }
     int child_merkle_depth = cs_update_from.child_merkle_depth(merkle_depth);
 
-    CellSlice cs_original(NoVm(), original);
+    CellSlice cs_original(NoVm(), std::move(original));
     for (unsigned i = 0; i < cs_original.size_refs(); i++) {
       dfs_both(cs_original.prefetch_ref(i), cs_update_from.prefetch_ref(i), child_merkle_depth);
     }
@@ -86,7 +86,7 @@ class MerkleUpdateApply {
       cb.store_ref(std::move(ref));
     }
     auto res = cb.finalize(cs.is_special());
-    ready_cells_.emplace(key, res);
+    ready_cells_.emplace(std::move(key), res);
     return res;
   }
 };
@@ -94,8 +94,8 @@ class MerkleUpdateApply {
 class MerkleUpdateValidator {
  public:
   td::Status validate(Ref<Cell> update_from, Ref<Cell> update_to, td::uint32 from_level, td::uint32 to_level) {
-    dfs_from(update_from, from_level);
-    return dfs_to(update_to, to_level);
+    dfs_from(std::move(update_from), from_level);
+    return dfs_to(std::move(update_to), to_level);
   }
 
  private:
@@ -143,7 +143,7 @@ class MerkleUpdateValidator {
 };
 }  // namespace detail
 
-td::Status MerkleUpdate::may_apply(Ref<Cell> from, Ref<Cell> update) {
+td::Status MerkleUpdate::may_apply(const Ref<Cell> &from, Ref<Cell> update) {
   if (update->get_level() != 0 || from->get_level() != 0) {
     return td::Status::Error("Level of update of from is not zero");
   }
@@ -178,12 +178,12 @@ Ref<Cell> MerkleUpdate::apply_raw(Ref<Cell> from, Ref<Cell> update_from, Ref<Cel
                << ", applied to value with hash = " << from->get_hash(from_level).to_hex();
     return {};
   }
-  return detail::MerkleUpdateApply().apply(from, std::move(update_from), std::move(update_to), from_level, to_level);
+  return detail::MerkleUpdateApply().apply(std::move(from), std::move(update_from), std::move(update_to), from_level, to_level);
 }
 
 std::pair<Ref<Cell>, Ref<Cell>> MerkleUpdate::generate_raw(Ref<Cell> from, Ref<Cell> to, CellUsageTree *usage_tree) {
   // create Merkle update cell->new_cell
-  auto update_to = MerkleProof::generate_raw(to, [tree = usage_tree](const Ref<Cell> &cell) {
+  auto update_to = MerkleProof::generate_raw(std::move(to), [tree = usage_tree](const Ref<Cell> &cell) {
     auto loaded_cell = cell->load_cell().move_as_ok();  // FIXME
     if (loaded_cell.data_cell->size_refs() == 0) {
       return false;
@@ -191,7 +191,7 @@ std::pair<Ref<Cell>, Ref<Cell>> MerkleUpdate::generate_raw(Ref<Cell> from, Ref<C
     return !loaded_cell.tree_node.empty() && loaded_cell.tree_node.mark_path(tree);
   });
   usage_tree->set_use_mark_for_is_loaded(true);
-  auto update_from = MerkleProof::generate_raw(from, usage_tree);
+  auto update_from = MerkleProof::generate_raw(std::move(from), usage_tree);
 
   return {std::move(update_from), std::move(update_to)};
 }
