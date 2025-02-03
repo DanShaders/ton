@@ -92,6 +92,6 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);
   NodeId create_node(NodeId parent);
 
-  // std::mutex mt;
+  std::mutex mt;
 };
 }  // namespace vm

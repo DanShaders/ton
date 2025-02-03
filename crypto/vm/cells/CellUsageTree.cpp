@@ -127,7 +127,15 @@ CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_i
   if (res) {
     return res;
   }
-  res = create_node(node_id);
+  std::lock_guard _(mt);
+  res = nodes_[node_id].children[ref_id];
+  if (res) {
+    return res;
+  }
+
+  // res = create_node(node_id);
+  res = nodes_count_++;
+  nodes_[res].parent = node_id;
   nodes_[node_id].children[ref_id] = res;
   return res;
 }
