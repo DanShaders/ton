@@ -72,6 +72,10 @@ struct CellHash {
     return res;
   }
 
+  inline size_t cell_hash_slice_hash() const {
+    return *reinterpret_cast<const size_t*>(hash_.data() + 8);
+  }
+
  private:
   std::array<td::uint8, CellTraits::hash_bytes> hash_;
 };
@@ -103,6 +107,6 @@ struct hash<vm::CellHash> {
 namespace vm {
 template <class H>
 H AbslHashValue(H h, const CellHash& cell_hash) {
-  return H::combine(std::move(h), std::hash<vm::CellHash>()(cell_hash));
+  return H::combine(std::move(h), cell_hash.cell_hash_slice_hash());
 }
 }  // namespace vm
