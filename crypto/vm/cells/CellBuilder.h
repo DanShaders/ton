@@ -242,3 +242,5 @@ Ref<CellBuilder>& operator<<(Ref<CellBuilder>& cb_ref, const T& val) {
 }
 
 }  // namespace vm
+
+#include "CellBuilder.inl"

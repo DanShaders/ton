@@ -51,12 +51,10 @@ set(TON_CRYPTO_CORE_SOURCE
   keccak/keccak.h
   keccak/keccak.cpp
 
-  vm/cells/Cell.cpp
   vm/cells/CellBuilder.cpp
   vm/cells/CellHash.cpp
   vm/cells/CellString.cpp
   vm/cells/CellTraits.cpp
-  vm/cells/CellUsageTree.cpp
   vm/cells/DataCell.cpp
   vm/cells/LevelMask.cpp
   vm/cells/MerkleProof.cpp
@@ -65,13 +63,16 @@ set(TON_CRYPTO_CORE_SOURCE
   vm/dict.h
   vm/dict.hpp
   vm/cells/Cell.h
+  vm/cells/Cell.inl
   vm/cells/CellBuilder.h
+  vm/cells/CellBuilder.inl
   vm/cells/CellHash.h
   vm/cells/CellSlice.h
   vm/cells/CellSlice.inl
   vm/cells/CellString.h
   vm/cells/CellTraits.h
   vm/cells/CellUsageTree.h
+  vm/cells/CellUsageTree.inl
   vm/cells/CellWithStorage.h
   vm/cells/DataCell.h
   vm/cells/ExtCell.h

@@ -16,14 +16,13 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
-#include "vm/cells/Cell.h"
 #include "vm/cells/VirtualCell.h"
 #include "vm/cells/DataCell.h"
 
 #include <iostream>
 
 namespace vm {
-td::Status Cell::check_equals_unloaded(const Ref<Cell>& other) const {
+inline td::Status Cell::check_equals_unloaded(const Ref<Cell>& other) const {
   auto level_mask = get_level_mask();
   if (level_mask != other->get_level_mask()) {
     return td::Status::Error("level mismatch");
@@ -48,11 +47,11 @@ td::Status Cell::check_equals_unloaded(const Ref<Cell>& other) const {
   return td::Status::OK();
 }
 
-Ref<Cell> Cell::virtualize(VirtualizationParameters virt) const {
+inline Ref<Cell> Cell::virtualize(VirtualizationParameters virt) const {
   return VirtualCell::create(virt, Ref<Cell>(this));
 }
 
-std::ostream& operator<<(std::ostream& os, const Cell& c) {
+inline std::ostream& operator<<(std::ostream& os, const Cell& c) {
   return os << c.get_hash().to_hex();
 }
 

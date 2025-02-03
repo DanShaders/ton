@@ -119,3 +119,5 @@ struct CellHashF {
 };
 using CellHashSet = td::HashSet<td::Ref<Cell>, CellHashF, CellEqF>;
 }  // namespace vm
+
+#include "Cell.inl"

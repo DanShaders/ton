@@ -16,13 +16,12 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
-#include "vm/cells/CellUsageTree.h"
 
 namespace vm {
 //
 // CellUsageTree::NodePtr
 //
-bool CellUsageTree::NodePtr::on_load(const td::Ref<vm::DataCell>& cell) const {
+inline bool CellUsageTree::NodePtr::on_load(const td::Ref<vm::DataCell>& cell) const {
   auto tree = tree_weak_.lock();
   if (!tree) {
     return false;
@@ -31,7 +30,7 @@ bool CellUsageTree::NodePtr::on_load(const td::Ref<vm::DataCell>& cell) const {
   return true;
 }
 
-CellUsageTree::NodePtr CellUsageTree::NodePtr::create_child(unsigned ref_id) const {
+inline CellUsageTree::NodePtr CellUsageTree::NodePtr::create_child(unsigned ref_id) const {
   auto tree = tree_weak_.lock();
   if (!tree) {
     return {};
@@ -39,7 +38,7 @@ CellUsageTree::NodePtr CellUsageTree::NodePtr::create_child(unsigned ref_id) con
   return {tree_weak_, tree->create_child(node_id_, ref_id)};
 }
 
-bool CellUsageTree::NodePtr::is_from_tree(const CellUsageTree* master_tree) const {
+inline bool CellUsageTree::NodePtr::is_from_tree(const CellUsageTree* master_tree) const {
   DCHECK(master_tree);
   auto tree = tree_weak_.lock();
   if (tree.get() != master_tree) {
@@ -48,7 +47,7 @@ bool CellUsageTree::NodePtr::is_from_tree(const CellUsageTree* master_tree) cons
   return true;
 }
 
-bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
+inline bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
   DCHECK(master_tree);
   auto tree = tree_weak_.lock();
   if (tree.get() != master_tree) {
@@ -61,33 +60,33 @@ bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
 //
 // CellUsageTree
 //
-CellUsageTree::NodePtr CellUsageTree::root_ptr() {
+inline CellUsageTree::NodePtr CellUsageTree::root_ptr() {
   return {shared_from_this(), 1};
 }
 
-CellUsageTree::NodeId CellUsageTree::root_id() const {
+inline CellUsageTree::NodeId CellUsageTree::root_id() const {
   return 1;
 };
 
-bool CellUsageTree::is_loaded(NodeId node_id) const {
+inline bool CellUsageTree::is_loaded(NodeId node_id) const {
   if (use_mark_) {
     return nodes_[node_id].has_mark;
   }
   return nodes_[node_id].is_loaded;
 }
 
-bool CellUsageTree::has_mark(NodeId node_id) const {
+inline bool CellUsageTree::has_mark(NodeId node_id) const {
   return nodes_[node_id].has_mark;
 }
 
-void CellUsageTree::set_mark(NodeId node_id, bool mark) {
+inline void CellUsageTree::set_mark(NodeId node_id, bool mark) {
   if (node_id == 0) {
     return;
   }
   nodes_[node_id].has_mark = mark;
 }
 
-void CellUsageTree::mark_path(NodeId node_id) {
+inline void CellUsageTree::mark_path(NodeId node_id) {
   auto cur_node_id = get_parent(node_id);
   while (cur_node_id != 0) {
     if (has_mark(cur_node_id)) {
@@ -98,20 +97,20 @@ void CellUsageTree::mark_path(NodeId node_id) {
   }
 }
 
-CellUsageTree::NodeId CellUsageTree::get_parent(NodeId node_id) {
+inline CellUsageTree::NodeId CellUsageTree::get_parent(NodeId node_id) {
   return nodes_[node_id].parent;
 }
 
-CellUsageTree::NodeId CellUsageTree::get_child(NodeId node_id, unsigned ref_id) {
+inline CellUsageTree::NodeId CellUsageTree::get_child(NodeId node_id, unsigned ref_id) {
   DCHECK(ref_id < CellTraits::max_refs);
   return nodes_[node_id].children[ref_id];
 }
 
-void CellUsageTree::set_use_mark_for_is_loaded(bool use_mark) {
+inline void CellUsageTree::set_use_mark_for_is_loaded(bool use_mark) {
   use_mark_ = use_mark;
 }
 
-void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
+inline void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
   if (nodes_[node_id].is_loaded) {
     return;
   }
@@ -121,7 +120,7 @@ void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
   }
 }
 
-CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_id) {
+inline CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_id) {
   DCHECK(ref_id < CellTraits::max_refs);
   NodeId res = nodes_[node_id].children[ref_id];
   if (res) {
@@ -132,7 +131,7 @@ CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_i
   return res;
 }
 
-CellUsageTree::NodeId CellUsageTree::create_node(NodeId parent) {
+inline CellUsageTree::NodeId CellUsageTree::create_node(NodeId parent) {
   NodeId res = static_cast<NodeId>(nodes_.size());
   nodes_.emplace_back();
   nodes_.back().parent = parent;

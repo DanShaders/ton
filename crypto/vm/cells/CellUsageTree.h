@@ -83,3 +83,5 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   NodeId create_node(NodeId parent);
 };
 }  // namespace vm
+
+#include "CellUsageTree.inl"
