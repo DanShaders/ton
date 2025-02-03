@@ -87,13 +87,6 @@ std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
   return detail::CellWithArrayStorage<DataCell>::create(storage_size, std::move(info)); // default allocator
 }
 
-DataCell::DataCell(Info info) : info_(std::move(info)) {
-  get_thread_safe_counter().add(1);
-}
-DataCell::~DataCell() {
-  get_thread_safe_counter().add(-1);
-}
-
 void DataCell::destroy_storage(char* storage) {
   auto* refs = info_.get_refs(storage);
   for (size_t i = 0; i < get_refs_cnt(); i++) {
