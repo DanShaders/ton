@@ -50,6 +50,22 @@ class NonnullCellView {
     return NonnullCellView{*loaded_cell.data_cell.get(), loaded_cell.virt, std::move(loaded_cell.tree_node)};
   }
 
+  DataCell const& underlying_data_cell() const {
+    return *m_cell;
+  }
+
+  CellUsageTree::NodePtr node() const {
+    return m_node;
+  }
+
+  VirtualizationParams virtualization() const {
+    return m_virtualization;
+  }
+
+  int virtualization_level() const {
+    return m_virtualization.get_level();
+  }
+
   int bit_length() const {
     return m_cell->get_bits();
   }
@@ -66,16 +82,16 @@ class NonnullCellView {
     return m_cell->special_type();
   }
 
+  int level() const {
+    return m_cell->get_level();
+  }
+
   CellHash hash(int level = Cell::max_level) const {
     return m_cell->get_hash(std::min<int>(m_virtualization.get_level(), level));
   }
 
   td::uint16 depth(int level = Cell::max_level) const {
     return m_cell->get_depth(std::min<int>(m_virtualization.get_level(), level));
-  }
-
-  CellUsageTree::NodePtr node() const {
-    return m_node;
   }
 
   NonnullCellView ref(int idx) const {
@@ -106,6 +122,14 @@ class NonnullCellView {
 
   BitReader data_bit_reader() const {
     return BitReader{reinterpret_cast<td::uint32 const*>(data()), bit_length()};
+  }
+
+  Ref<Cell> as_cell() const {
+    Ref<Cell> result{m_cell};
+    if (!m_virtualization.empty()) {
+      result = result->virtualize(m_virtualization);
+    }
+    return UsageCell::create(result, m_node);
   }
 
   Ref<CellSlice> as_ref_slice() const {

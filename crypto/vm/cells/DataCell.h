@@ -12,6 +12,8 @@
 
 namespace vm {
 
+class NonnullCellView;
+
 class DataCell : public Cell {
  public:
   DataCell(DataCell const&) = delete;
@@ -20,6 +22,7 @@ class DataCell : public Cell {
   virtual ~DataCell();
 
   static td::Result<Ref<DataCell>> create(td::Slice data, int bit_length, td::Span<Ref<Cell>> refs, bool is_special);
+  static Ref<DataCell> create_pruned_branch(NonnullCellView view, int merkle_up_depth);
 
   virtual td::Result<LoadedCell> load_cell() const override final {
     return LoadedCell{
