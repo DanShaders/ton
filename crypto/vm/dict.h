@@ -717,4 +717,4 @@ class AugmentedDictionary final : public DictionaryFixed {
 
 }  // namespace vm
 
-#include "dict.hpp"
+#include "dict.inl"

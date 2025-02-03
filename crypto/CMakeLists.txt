@@ -63,7 +63,7 @@ set(TON_CRYPTO_CORE_SOURCE
   vm/cells/MerkleUpdate.cpp
 
   vm/dict.h
-  vm/dict.hpp
+  vm/dict.inl
   vm/cells/Cell.h
   vm/cells/Cell.inl
   vm/cells/CellBuilder.h
