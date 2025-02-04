@@ -58,15 +58,26 @@ std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
   if (use_arena) {
     ArenaAllocator<DataCell> allocator;
     auto res = detail::CellWithArrayStorage<DataCell>::create(allocator, info.get_storage_size(), info);
+
+    // res->is_fresh = mark_new_cells_as_fresh; // %ADDED%
+
     // this is dangerous
     Ref<DataCell>(res.get()).release();
     return res;
   }
 
   return detail::CellWithUniquePtrStorage<DataCell>::create(info.get_storage_size(), info);
+  // auto res = detail::CellWithUniquePtrStorage<DataCell>::create(info.get_storage_size(), info);
+  // res->is_fresh = mark_new_cells_as_fresh; // %ADDED%
+  // return res;
 }
 
+
+// bool DataCell::mark_new_cells_as_fresh = false; // %ADDED%
+
 DataCell::DataCell(Info info) : info_(std::move(info)) {
+  // this->is_fresh = mark_new_cells_as_fresh; // %ADDED%
+
   get_thread_safe_counter().add(1);
 }
 DataCell::~DataCell() {
@@ -87,6 +98,7 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
   for (size_t i = 0; i < refs.size(); i++) {
     copied_refs[i] = refs[i];
   }
+
   return create(std::move(data), bits, td::MutableSpan<Ref<Cell>>(copied_refs.data(), refs.size()), special);
 }
 

@@ -20,18 +20,25 @@
 
 #define TD_DUMMY_CHECK(condition) ((void)(condition))
 
+
+
+// #define CHECK(condition) do { } while (0);
+#define DCHECK(condition) do { } while (0);
+// #define UNREACHABLE() do { } while (0);
+
+
 #define CHECK(condition)                                               \
   if (!(condition)) {                                                  \
     ::td::detail::process_check_error(#condition, __FILE__, __LINE__); \
   }
 
-// clang-format off
-#ifdef NDEBUG
-  #define DCHECK TD_DUMMY_CHECK
-#else
-  #define DCHECK CHECK
-#endif
-// clang-format on
+// // clang-format off
+// #ifdef NDEBUG
+//   #define DCHECK TD_DUMMY_CHECK
+// #else
+//   #define DCHECK CHECK
+// #endif
+// // clang-format on
 
 #define UNREACHABLE() ::td::detail::process_check_error("Unreachable", __FILE__, __LINE__)
 

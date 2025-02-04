@@ -33,13 +33,8 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
  public:
   using NodeId = td::uint32;
 
-  CellUsageTree() {
-    // nodes_.reserve(200000); // !TEMP_THREAD
-    nodes_ = new Node[200000];
-  }
-  ~CellUsageTree() {
-    delete[] nodes_;
-  }
+  CellUsageTree();
+  ~CellUsageTree();
 
   struct NodePtr {
    public:
@@ -48,6 +43,9 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
         : tree_weak_(std::move(tree_weak)), node_id_(node_id) {
     }
     bool empty() const {
+      // if (tree_weak_.expired()) {
+      //   LOG(ERROR) << "NodePtr::empty(): tree_weak_.expired() at " << this->node_id_; // 
+      // }
       return node_id_ == 0 || tree_weak_.expired();
     }
 
@@ -85,12 +83,13 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   };
   bool use_mark_{false};
   // std::vector<Node> nodes_{2};
+  NodeId nodes_count = 2;
   Node* nodes_;
-  std::atomic<NodeId> nodes_count_{2};
+  // std::atomic<NodeId> nodes_count_{2};
   std::function<void(const td::Ref<vm::DataCell>&)> cell_load_callback_;
 
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);
-  NodeId create_node(NodeId parent);
+  // NodeId create_node(NodeId parent);
 
   std::mutex mt;
 };

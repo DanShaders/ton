@@ -39,8 +39,11 @@ class UsageCell : public Cell {
   // load interface
   td::Result<LoadedCell> load_cell() const override {
     TRY_RESULT(loaded_cell, cell_->load_cell());
+
     if (tree_node_.on_load(loaded_cell.data_cell)) {
       CHECK(loaded_cell.tree_node.empty());
+      // this->has_been_loaded = true;
+      // loaded_cell.data_cell->has_been_loaded = true;
       loaded_cell.tree_node = tree_node_;
     }
     return std::move(loaded_cell);

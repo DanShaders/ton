@@ -39,6 +39,8 @@ class VirtualCell : public Cell {
   // load interface
   td::Result<LoadedCell> load_cell() const override {
     TRY_RESULT(loaded_cell, cell_->load_cell());
+    // this->has_been_loaded = true;
+
     loaded_cell.virt = loaded_cell.virt.apply(virt_);
     return std::move(loaded_cell);
   }

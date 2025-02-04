@@ -79,7 +79,7 @@ void ContestValidateQuery::start_up() {
     // 3. unpack block candidate (while necessary data is being loaded)
     unpack_block_candidate(); // reject_query("error unpacking block candidate");
 
-    LOG(ERROR) << "----------------------------------- unpack_block_candidate finished --------------- "; // !!TODO: remove
+    // LOG(ERROR) << "----------------------------------- unpack_block_candidate finished --------------- ";
 
     SoftRejectIfWithComment(prev_blocks.size() > 2, "cannot have more than two previous blocks");
     SoftRejectIfWithComment(!prev_blocks.size(), "must have one or two previous blocks to generate a next block");
@@ -175,13 +175,15 @@ void ContestValidateQuery::start_up() {
     // }
 
     generated_root();
-
-    // sleep(1);
-    my_threader.writeProfileToFile("profile.ts", testIndex);
-    account_transactions_timer.writeToFile("account_transactions_times.ts", testIndex);
-    one_transaction_timer.writeToFile("one_transaction_times.ts", testIndex);
-    transaction_execution_timer.writeToFile("transaction_execution_times.ts", testIndex);
-    fetch_neighbor_timer.writeToFile("fetch_neighbor_times.ts", testIndex);
+    
+    #ifdef ENABLE_PROFILING
+      // sleep(1);
+      my_threader.writeProfileToFile("profile.ts", testIndex);
+      account_transactions_timer.writeToFile("account_transactions_times.ts", testIndex);
+      one_transaction_timer.writeToFile("one_transaction_times.ts", testIndex);
+      transaction_execution_timer.writeToFile("transaction_execution_times.ts", testIndex);
+      fetch_neighbor_timer.writeToFile("fetch_neighbor_times.ts", testIndex);
+    #endif
 
     finish_query();
   } catch (std::string error) {
@@ -191,8 +193,10 @@ void ContestValidateQuery::start_up() {
   } catch (vm::VmVirtError& err) {
     top_level_reject_query(err.get_msg()); return;
   } catch (...) {
-    // It shouldn't happen from what I understand, but better to put it just in case
-    LOG(ERROR) << "Caught some unknown exception";
+    #ifdef DEBUG_OUTPUT
+      // It shouldn't happen from what I understand, but better to put it just in case
+      LOG(ERROR) << "Caught some unknown exception";
+    #endif
     top_level_fatal_error(-555, "Caught some unknown exception"); return;
   }
 }

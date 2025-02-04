@@ -54,6 +54,7 @@ class ExtCell : public Cell {
 
   td::Result<LoadedCell> load_cell() const override {
     TRY_RESULT(data_cell, load_data_cell());
+    // this->has_been_loaded = true;
     return LoadedCell{std::move(data_cell), {}, {}};
   }
   td::uint32 get_virtualization() const override {

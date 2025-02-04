@@ -816,7 +816,7 @@ void ContestValidateQuery::compute_prev_state() {
 							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
 
-  vm::DataCell::mark_new_cells_as_fresh = true;
+  // vm::DataCell::mark_new_cells_as_fresh = true;
   prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr()); // !TEMP_THREAD likely breaks Merkle Update
   // prev_state_root_ = prev_state_root_->virtualize();
   // With the line ^ commented out, it obviously produces a wrong Merkle Tree Update,
@@ -5270,9 +5270,10 @@ void ContestValidateQuery::check_transactions() {
   //     });
   // return ok;
 
-  const int maxTransactions = 1000; // !TEMP_THREAD_STUFF
+  const int maxTransactions = 2000; // !TEMP_THREAD_STUFF
   std::vector<td::BitPtr> keys;
-  vm::CellSlice values[maxTransactions];
+  vm::CellSlice values[maxTransactions]; // It doesn't work the other way
+  // vector<Ref<vm::CellSlice>> values;
   vector<unsigned long long> fees;
   // vector<td::RefInt256> fees;
 
@@ -5301,6 +5302,7 @@ void ContestValidateQuery::check_transactions() {
         // fees.push_back(block::tlb::t_Grams.as_integer(extra)); // This one worked, but trying to sort it afterwards crashed
 
         values[keys.size()] = value->clone();
+        // values.emplace_back(value->clone());
 
         // I have no idea how to properly copy BitPtr
         // without the following part, parallelization doesn't work
@@ -5396,7 +5398,7 @@ void ContestValidateQuery::check_transactions() {
 
   /* // Working parallel code in this section
 
-  std::vector<std::future<bool> > results(keys.size()); // !TODO: preallocate
+  std::vector<std::future<bool> > results(keys.size()); //
   for (size_t i = 0; i < keys.size(); i++) {
     // results.push_back(std::async(
     // results[i] = (std::async(
@@ -5776,11 +5778,11 @@ void ContestValidateQuery::build_state_update() {
 							//<%/generated%>
 
   vm::CellSlice cs{vm::NoVm(), state_update};
-  ofstream fo("state_root_hashes " + std::to_string(testDataIndex) + ".txt", std::ios::app);
-  fo << "state_root_hash: " << state_root->get_hash().to_hex() << " "
-     << "state_update_hash: " << state_update->get_hash().to_hex() << " "
-     << "old_proof_hash: " << cs.prefetch_ref(0)->get_hash().to_hex() << " "
-     << "new_proof_hash: " << cs.prefetch_ref(1)->get_hash().to_hex() << endl;
+  // ofstream fo("state_root_hashes " + std::to_string(testDataIndex) + ".txt", std::ios::app);
+  // fo << "state_root_hash: " << state_root->get_hash().to_hex() << " "
+  //    << "state_update_hash: " << state_update->get_hash().to_hex() << " "
+  //    << "old_proof_hash: " << cs.prefetch_ref(0)->get_hash().to_hex() << " "
+  //    << "new_proof_hash: " << cs.prefetch_ref(1)->get_hash().to_hex() << endl;
 }
 
 /**

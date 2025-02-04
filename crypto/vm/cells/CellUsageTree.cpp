@@ -25,6 +25,7 @@ namespace vm {
 bool CellUsageTree::NodePtr::on_load(const td::Ref<vm::DataCell>& cell) const {
   auto tree = tree_weak_.lock();
   if (!tree) {
+    LOG(ERROR) << "on_load !tree at " << this->node_id_; // !! TODO: remove
     return false;
   }
   tree->on_load(node_id_, cell);
@@ -34,6 +35,7 @@ bool CellUsageTree::NodePtr::on_load(const td::Ref<vm::DataCell>& cell) const {
 CellUsageTree::NodePtr CellUsageTree::NodePtr::create_child(unsigned ref_id) const {
   auto tree = tree_weak_.lock();
   if (!tree) {
+    LOG(ERROR) << "create_child !tree at " << this->node_id_; // !! TODO: remove
     return {};
   }
   return {tree_weak_, tree->create_child(node_id_, ref_id)};
@@ -43,6 +45,7 @@ bool CellUsageTree::NodePtr::is_from_tree(const CellUsageTree* master_tree) cons
   DCHECK(master_tree);
   auto tree = tree_weak_.lock();
   if (tree.get() != master_tree) {
+    LOG(ERROR) << "is_from_tree (tree.get() != master_tree) at " << this->node_id_; // !! TODO: remove
     return false;
   }
   return true;
@@ -52,6 +55,7 @@ bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
   DCHECK(master_tree);
   auto tree = tree_weak_.lock();
   if (tree.get() != master_tree) {
+    LOG(ERROR) << "mark_path (tree.get() != master_tree) at " << this->node_id_; // !! TODO: remove
     return false;
   }
   master_tree->mark_path(node_id_);
@@ -61,6 +65,25 @@ bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
 //
 // CellUsageTree
 //
+CellUsageTree::CellUsageTree() {
+  // LOG(ERROR) << "CellUsageTree constructor";
+  // nodes_.resize(600000); // !TEMP_THREAD
+  nodes_ = new Node[600000];
+
+  // Based on (https://answers.ton.org/question/1555820646674468864/what-is-the-byte-size-of-a-smart-contract-that-can-be-deployed-on-ton)
+  // (not a good source, but the only one I found)
+  // the maximum block size is 2Mb
+  // In order to store 600 000 cells in BOC, even if they only have refs without data,
+  // at least 2.7Mb is needed:
+  //     Per cell: 2 descriptor bytes + at least 20 addressing bits = 4.5 bytes
+  //            x 600 000 cells
+  // Preallocating everything seems better for performance, and it's not that much data.
+}
+CellUsageTree::~CellUsageTree() {
+  delete[] nodes_;
+}
+
+
 CellUsageTree::NodePtr CellUsageTree::root_ptr() {
   return {shared_from_this(), 1};
 }
@@ -116,7 +139,7 @@ void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
     return;
   }
   nodes_[node_id].is_loaded = true;
-  if (cell_load_callback_) {
+  if (cell_load_callback_) { // Not thread-safe, can be called several times, but it's not used in the challenge
     cell_load_callback_(cell);
   }
 }
@@ -134,28 +157,38 @@ CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_i
   }
 
   // res = create_node(node_id);
-  res = nodes_count_++;
+
+  // // nodes_.emplace_back( { false, false, node_id, {0, 0, 0, 0} } );
+  // res = nodes_[node_id].children[ref_id] = (td::uint32)nodes_.size();
+  // nodes_.push_back({ false, false, node_id, {0, 0, 0, 0} });
+  // // nodes_.emplace_back(false, false, node_id, std::array<td::uint32, CellTraits::max_refs>{0, 0, 0, 0}); // Doesn't compile
+  // dynamic vector times:
+  // Passed 30000/300 tests
+  // Total time (only passed valid tests): 653.57978
+  // Total CPU time (only passed valid tests): 888.27448
+
+  res = nodes_count++;
   nodes_[res].parent = node_id;
   nodes_[node_id].children[ref_id] = res;
   return res;
 }
 
-CellUsageTree::NodeId CellUsageTree::create_node(NodeId parent) {
-  // NodeId res = static_cast<NodeId>(nodes_.size());
-  // nodes_.emplace_back();
-  // nodes_.back().parent = parent;
+// CellUsageTree::NodeId CellUsageTree::create_node(NodeId parent) {
+//   // NodeId res = static_cast<NodeId>(nodes_.size());
+//   // nodes_.emplace_back();
+//   // nodes_.back().parent = parent;
 
-  NodeId res;
-  {
-    // std::lock_guard<std::mutex> g(mt);
-    res = nodes_count_++; // static_cast<NodeId>(nodes_.size());
-    if (res >= 160000) {
-      LOG(ERROR) << "CellUsageTree reached 160 000 elements!"; 
-    }
-    CellUsageTree::Node& newNode = nodes_[res]; // nodes_.emplace_back();
-    newNode.parent = parent;
-  }
-  return res;
-}
+//   NodeId res;
+//   {
+//     // std::lock_guard<std::mutex> g(mt);
+//     res = nodes_count_++; // static_cast<NodeId>(nodes_.size());
+//     if (res >= 160000) {
+//       LOG(ERROR) << "CellUsageTree reached 160 000 elements!"; 
+//     }
+//     CellUsageTree::Node& newNode = nodes_[res]; // nodes_.emplace_back();
+//     newNode.parent = parent;
+//   }
+//   return res;
+// }
 
 }  // namespace vm

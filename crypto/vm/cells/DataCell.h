@@ -127,6 +127,7 @@ class DataCell : public Cell {
 
  public:
   td::Result<LoadedCell> load_cell() const override {
+    // this->has_been_loaded = true;
     return LoadedCell{Ref<DataCell>{this}, {}, {}};
   }
   unsigned get_refs_cnt() const {
@@ -220,7 +221,12 @@ class DataCell : public Cell {
   static td::Result<Ref<DataCell>> create(td::ConstBitPtr data, unsigned bits, td::Span<Ref<Cell>> refs, bool special);
   static td::Result<Ref<DataCell>> create(td::ConstBitPtr data, unsigned bits, td::MutableSpan<Ref<Cell>> refs,
                                           bool special);
+
+ public:
+  // bool is_fresh = false;
+  // static bool mark_new_cells_as_fresh;
 };
+
 
 std::ostream& operator<<(std::ostream& os, const DataCell& c);
 inline CellHash as_cell_hash(const Ref<DataCell>& cell) {
