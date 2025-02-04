@@ -50,6 +50,7 @@ class RealTimer {
   RealTimer(string name, bool store_timings);
   void writeToFile(const string& filename, int testIndex);
 
+  const string name;
 
  private:
   void record_timing(timepoint start, timepoint end, int grab_id);

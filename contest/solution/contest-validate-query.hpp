@@ -494,13 +494,13 @@ public:
   friend class MultithreadingGuard;
   void generated_root();
 
+
+  MyTimer account_transactions_timer{"account_transactions_timer", true}
+        , one_transaction_timer{"one_transaction_timer", true}
+        , transaction_execution_timer{"transaction_execution_timer", true}
+        , fetch_neighbor_timer{"fetch_neighbor_timer", true};
+
   BS::thread_pool<> pool{9};
-
-  MyTimer account_transactions_timer{"account_transactions_timer", true},
-          one_transaction_timer{"one_transaction_timer", true},
-          transaction_execution_timer{"transaction_execution_timer", true},
-          fetch_neighbor_timer{"fetch_neighbor_timer", true};
-
   MyThreader my_threader{pool};
 
   //<{generated_atomic_vars

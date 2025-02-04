@@ -5275,7 +5275,7 @@ void ContestValidateQuery::check_transactions() {
   // vector<td::RefInt256> fees;
 
   account_blocks_dict_->check_for_each_extra(
-      [this, &keys, &values, &fees](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
+      [&keys, &values, &fees](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
         ORIGINAL_CHECK(key_len == 256);
 
         // block::gen::AccountBlock::Record acc_blk;
@@ -5288,7 +5288,7 @@ void ContestValidateQuery::check_transactions() {
         if (extraLen > 58)
           fee = ~0ull;
         else {
-          fee = extra->prefetch_ulong(4ull + extraLen);
+          fee = extra->prefetch_ulong((unsigned int)(4ull + extraLen));
           fee &= ~(0b1111ull << extraLen); // get rid of the extraLen part
         }
         // LOG(ERROR) << "fee: " << fee;
@@ -5764,12 +5764,12 @@ void ContestValidateQuery::build_state_update() {
 							//<%generated%>
 							//<%/generated%>
 
-  // vm::CellSlice cs{vm::NoVm(), state_update};
-  // ofstream fo("state_root_hashes " + std::to_string(testDataIndex) + ".txt", std::ios::app);
-  // fo << "state_root_hash: " << state_root->get_hash().to_hex() << " "
-  //    << "state_update_hash: " << state_update->get_hash().to_hex() << " "
-  //    << "old_proof_hash: " << cs.prefetch_ref(0)->get_hash().to_hex() << " "
-  //    << "new_proof_hash: " << cs.prefetch_ref(1)->get_hash().to_hex() << endl;
+  vm::CellSlice cs{vm::NoVm(), state_update};
+  ofstream fo("state_root_hashes " + std::to_string(testDataIndex) + ".txt", std::ios::app);
+  fo << "state_root_hash: " << state_root->get_hash().to_hex() << " "
+     << "state_update_hash: " << state_update->get_hash().to_hex() << " "
+     << "old_proof_hash: " << cs.prefetch_ref(0)->get_hash().to_hex() << " "
+     << "new_proof_hash: " << cs.prefetch_ref(1)->get_hash().to_hex() << endl;
 }
 
 /**
