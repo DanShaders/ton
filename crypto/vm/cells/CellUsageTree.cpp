@@ -70,6 +70,7 @@ CellUsageTree::NodeId CellUsageTree::root_id() const {
 };
 
 bool CellUsageTree::is_loaded(NodeId node_id) const {
+  std::lock_guard<std::mutex> guard{lock_};
   if (use_mark_) {
     return nodes_[node_id].has_mark;
   }
@@ -77,6 +78,7 @@ bool CellUsageTree::is_loaded(NodeId node_id) const {
 }
 
 bool CellUsageTree::has_mark(NodeId node_id) const {
+  std::lock_guard<std::mutex> guard{lock_};
   return nodes_[node_id].has_mark;
 }
 
@@ -84,6 +86,7 @@ void CellUsageTree::set_mark(NodeId node_id, bool mark) {
   if (node_id == 0) {
     return;
   }
+  std::lock_guard<std::mutex> guard{lock_};
   nodes_[node_id].has_mark = mark;
 }
 
@@ -99,11 +102,13 @@ void CellUsageTree::mark_path(NodeId node_id) {
 }
 
 CellUsageTree::NodeId CellUsageTree::get_parent(NodeId node_id) {
+  std::lock_guard<std::mutex> guard{lock_};
   return nodes_[node_id].parent;
 }
 
 CellUsageTree::NodeId CellUsageTree::get_child(NodeId node_id, unsigned ref_id) {
   DCHECK(ref_id < CellTraits::max_refs);
+  std::lock_guard<std::mutex> guard{lock_};
   return nodes_[node_id].children[ref_id];
 }
 
@@ -112,10 +117,13 @@ void CellUsageTree::set_use_mark_for_is_loaded(bool use_mark) {
 }
 
 void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
+  {
+    std::lock_guard<std::mutex> guard{lock_};
   if (nodes_[node_id].is_loaded) {
     return;
   }
   nodes_[node_id].is_loaded = true;
+  }
   if (cell_load_callback_) {
     cell_load_callback_(cell);
   }
@@ -123,6 +131,7 @@ void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
 
 CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_id) {
   DCHECK(ref_id < CellTraits::max_refs);
+  std::lock_guard<std::mutex> guard{lock_};
   NodeId res = nodes_[node_id].children[ref_id];
   if (res) {
     return res;

@@ -15,6 +15,9 @@
 #include "common/errorlog.h"
 #include "fabric.h"
 #include <ctime>
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 namespace solution {
 
@@ -4551,6 +4554,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
         }
       }
       if (info.created_lt != start_lt_ || !is_special_tx) {
+        std::lock_guard<std::mutex> guard{ns_lock_};
         msg_proc_lt_.emplace_back(addr, lt, emitted_lt);
       }
       dest = std::move(info.dest);
@@ -5008,6 +5012,8 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
       // account created
       CHECK(account.status != block::Account::acc_nonexist);
       vm::CellBuilder cb;
+      {
+        std::lock_guard<std::mutex> guard{ns_lock_};
       if (!(cb.store_ref_bool(account.total_state)             // account_descr$_ account:^Account
             && cb.store_bits_bool(account.last_trans_hash_)    // last_trans_hash:bits256
             && cb.store_long_bool(account.last_trans_lt_, 64)  // last_trans_lt:uint64
@@ -5015,14 +5021,18 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
         return fatal_error(std::string{"cannot add newly-created account "} + account.addr.to_hex() +
                            " into ShardAccounts");
       }
+      }
     } else if (account.status == block::Account::acc_nonexist) {
       // account deleted
       if (verbosity > 2) {
         std::cerr << "deleting account " << account.addr.to_hex() << " with empty new value ";
         block::gen::t_Account.print_ref(std::cerr, account.total_state);
       }
+      {
+        std::lock_guard<std::mutex> guard{ns_lock_};
       if (ns_.account_dict_->lookup_delete(account.addr).is_null()) {
         return fatal_error(std::string{"cannot delete account "} + account.addr.to_hex() + " from ShardAccounts");
+      }
       }
     } else {
       // existing account modified
@@ -5031,12 +5041,15 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
         block::gen::t_Account.print_ref(std::cerr, account.total_state);
       }
       vm::CellBuilder cb;
+      {
+        std::lock_guard<std::mutex> guard{ns_lock_};
       if (!(cb.store_ref_bool(account.total_state)             // account_descr$_ account:^Account
             && cb.store_bits_bool(account.last_trans_hash_)    // last_trans_hash:bits256
             && cb.store_long_bool(account.last_trans_lt_, 64)  // last_trans_lt:uint64
             && ns_.account_dict_->set_builder(account.addr, cb, vm::Dictionary::SetMode::Replace))) {
         return fatal_error(std::string{"cannot modify existing account "} + account.addr.to_hex() +
                            " in ShardAccounts");
+      }
       }
     }
   }
@@ -5046,9 +5059,12 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
     return reject_query("cannot extract (HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex());
   }
   block::tlb::ShardAccount::Record old_state, new_state;
+  {
+    std::lock_guard<std::mutex> guard{ns_lock_};
   if (!(old_state.unpack(ps_.account_dict_->lookup(account.addr)) &&
         new_state.unpack(ns_.account_dict_->lookup(account.addr)))) {
     return reject_query("cannot extract Account from the ShardAccount of "s + account.addr.to_hex());
+  }
   }
   if (hash_upd.old_hash != old_state.account->get_hash().bits()) {
     return reject_query("(HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex() +
@@ -5071,13 +5087,29 @@ bool ContestValidateQuery::check_transactions() {
   LOG(INFO) << "checking all transactions";
   ns_.account_dict_ =
       std::make_unique<vm::AugmentedDictionary>(ps_.account_dict_->get_root(), 256, block::tlb::aug_ShardAccounts);
+  std::atomic_size_t n{};
+  std::atomic_bool ok2{true};
   bool ok = account_blocks_dict_->check_for_each_extra(
-      [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
+      [this, &n, &ok2](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
         CHECK(key_len == 256);
-        return check_account_transactions(key, std::move(value));
+        //return check_account_transactions(key, std::move(value));
+        n++;
+        td::actor::create_actor<CheckAccountTransactions>("CheckAccountTransactions", this, key, std::move(value),
+                                                          [&n, &ok2](bool res) {
+          n--;
+          if (!res) {
+            ok2 = false;
+          }
+        }).release();
+        return true;
       });
-
-  return ok;
+  while (n > 0) {
+    if (!ok || !ok2) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::microseconds{1u});
+  }
+  return ok && ok2;
 }
 
 /**

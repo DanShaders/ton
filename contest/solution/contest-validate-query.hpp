@@ -12,6 +12,7 @@
 #include <map>
 #include "common/global-version.h"
 #include "tonlib/tonlib/ExtClient.h"
+#include <mutex>
 
 namespace solution {
 
@@ -174,6 +175,7 @@ class ContestValidateQuery : public td::actor::Actor {
 
   block::ShardState ps_;
   block::ShardState ns_;
+  std::mutex ns_lock_{};
   bool processed_upto_updated_{false};
   std::unique_ptr<vm::AugmentedDictionary> sibling_out_msg_queue_;
   std::shared_ptr<block::MsgProcessedUptoCollection> sibling_processed_upto_;
@@ -336,6 +338,26 @@ class ContestValidateQuery : public td::actor::Actor {
 
   bool store_master_ref(vm::CellBuilder& cb);
   bool build_state_update();
+
+  friend class CheckAccountTransactions;
+};
+
+class CheckAccountTransactions : public td::actor::Actor {
+ public:
+  CheckAccountTransactions(ContestValidateQuery* owner, StdSmcAddress acc_addr, Ref<vm::CellSlice> acc_blk_root,
+                           td::Promise<bool> promise)
+      : owner_(owner), acc_addr_(acc_addr), acc_blk_root_(std::move(acc_blk_root)), promise_(std::move(promise)) {}
+ private:
+  ContestValidateQuery* owner_;
+  StdSmcAddress acc_addr_;
+  Ref<vm::CellSlice> acc_blk_root_;
+  td::Promise<bool> promise_{};
+
+  void start_up() override {
+    bool res = owner_->check_account_transactions(acc_addr_, std::move(acc_blk_root_));
+    promise_.set_result(res);
+    stop();
+  }
 };
 
 }  // namespace solution

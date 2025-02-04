@@ -23,6 +23,7 @@
 #include "td/utils/int_types.h"
 #include "td/utils/logging.h"
 #include <functional>
+#include <mutex>
 
 namespace vm {
 
@@ -76,6 +77,7 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   };
   bool use_mark_{false};
   std::vector<Node> nodes_{2};
+  mutable std::mutex lock_{};
   std::function<void(const td::Ref<vm::DataCell>&)> cell_load_callback_;
 
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);

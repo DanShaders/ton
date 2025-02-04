@@ -3538,7 +3538,7 @@ Ref<vm::Cell> Transaction::commit(Account& acc) {
   acc.last_trans_end_lt_ = end_lt;
   acc.last_trans_hash_ = root->get_hash().bits();
   acc.last_paid = last_paid;
-  acc.storage_stat = new_storage_stat;
+  acc.storage_stat = std::move(new_storage_stat);
   acc.storage = new_storage;
   acc.balance = std::move(balance);
   acc.due_payment = std::move(due_payment);
