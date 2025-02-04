@@ -19,6 +19,7 @@
 #pragma once
 #include <iostream>
 #include <map>
+#include <unordered_map>
 #include "vm/cellslice.h"
 #include <functional>
 
@@ -583,7 +584,7 @@ struct PrettyPrinter {
 namespace tlb {
 
 class TypenameLookup {
-  std::map<std::string, const TLB*> types;
+  std::unordered_map<std::string, const TLB*> types;
 
  public:
   typedef std::function<bool(const char*, const TLB*)> simple_register_func_t;

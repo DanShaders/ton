@@ -12,6 +12,26 @@
 #include <map>
 #include "common/global-version.h"
 #include "tonlib/tonlib/ExtClient.h"
+#include <mutex>
+
+#include <cstddef>
+#include <functional>
+
+namespace std {
+  template <>
+  struct hash<td::BitArray<256>> {
+    std::size_t operator()(const td::BitArray<256>& bits) const {
+      // Use the raw bytes from the BitArray for hashing.
+      // Since 256 bits equals 32 bytes, we iterate over those bytes.
+      const unsigned char* p = bits.data();  // assuming data() returns a pointer to the internal array
+      std::size_t h = 0;
+      for (unsigned i = 0; i < 32; i++) {
+        h = h * 131 + p[i];  // 131 is a prime number; adjust as desired
+      }
+      return h;
+    }
+  };
+}
 
 namespace solution {
 
@@ -95,6 +115,11 @@ class ContestValidateQuery : public td::actor::Actor {
                        td::Promise<td::BufferSlice> promise);
 
  private:
+  std::mutex ns_account_dict_mutex;   // mutex for lock ns_.account_dict_ 
+  std::mutex ps_account_dict_mutex;   // mutex for lock ps_.account_dict_
+  std::mutex msg_proc_lt_mutex_;
+   
+  std::atomic<int> stop_count_{0};
   int verbosity{0};
   int pending{0};
   const ShardIdFull shard_;
@@ -118,6 +143,7 @@ class ContestValidateQuery : public td::actor::Actor {
   td::BitArray<64> shard_pfx_;
   int shard_pfx_len_;
   td::Bits256 created_by_;
+  
 
   Ref<vm::Cell> prev_state_root_;
   std::shared_ptr<vm::CellUsageTree> state_usage_tree_;  // used to construct Merkle update
@@ -214,6 +240,7 @@ class ContestValidateQuery : public td::actor::Actor {
   void abort_query(td::Status error);
   bool reject_query(std::string error, td::BufferSlice reason = {});
   bool reject_query(std::string err_msg, td::Status error, td::BufferSlice reason = {});
+  bool reject_query_without_stop(std::string error, td::BufferSlice reason = {}) ;
   bool soft_reject_query(std::string error, td::BufferSlice reason = {});
   void start_up() override;
 
@@ -221,6 +248,7 @@ class ContestValidateQuery : public td::actor::Actor {
   bool fatal_error(int err_code, std::string err_msg);
   bool fatal_error(int err_code, std::string err_msg, td::Status error);
   bool fatal_error(std::string err_msg, int err_code = -666);
+  bool fatal_error_without_stop(std::string err_msg, int err_code = -666);
 
   std::string error_ctx() const {
     return error_ctx_.as_string();

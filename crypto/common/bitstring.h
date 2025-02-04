@@ -496,7 +496,7 @@ class BitArray {
   BitPtr bits() {
     return BitPtr{data()};
   }
-  BitArray() = default;
+  BitArray() : bytes{} {} // add an explicit default constructor:
   BitArray(const BitArray&) = default;
   BitArray(const byte_array_t& init_bytes) : bytes(init_bytes) {
   }
