@@ -46,6 +46,7 @@ class CellSlice : public td::CntObject {
   static constexpr unsigned long long fetch_ulong_eof = (unsigned long long)-1LL;
   enum { default_recursive_print_limit = 100 };
   struct CellReadError {};
+  static std::unordered_map<vm::Cell::Hash, CellSlice> cs_refs_cache;
 
   CellSlice(NoVm, Ref<Cell> cell_ref);
   CellSlice(NoVmOrd, Ref<Cell> cell_ref);

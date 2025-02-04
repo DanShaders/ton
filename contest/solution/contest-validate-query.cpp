@@ -81,6 +81,7 @@ bool ContestValidateQuery::reject_query(std::string error, td::BufferSlice reaso
     main_promise.set_error(td::Status::Error(error));
   }
   stop();
+  vm::CellSlice::cs_refs_cache.clear();
   return false;
 }
 
@@ -113,6 +114,7 @@ bool ContestValidateQuery::soft_reject_query(std::string error, td::BufferSlice 
     main_promise.set_error(td::Status::Error(std::move(error)));
   }
   stop();
+  vm::CellSlice::cs_refs_cache.clear();
   return false;
 }
 
@@ -130,6 +132,7 @@ bool ContestValidateQuery::fatal_error(td::Status error) {
     main_promise.set_error(std::move(error));
   }
   stop();
+  vm::CellSlice::cs_refs_cache.clear();
   return false;
 }
 
@@ -180,6 +183,7 @@ void ContestValidateQuery::finish_query() {
     main_promise.set_result(std::move(result_state_update_));
   }
   stop();
+  vm::CellSlice::cs_refs_cache.clear();
 }
 
 /*

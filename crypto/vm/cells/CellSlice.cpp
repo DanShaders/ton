@@ -29,6 +29,8 @@ CellSlice::CellSlice(Ref<Cell>&& ref) : cell(std::move(ref)), bits_st(0), refs_s
 }
 */
 
+std::unordered_map<vm::Cell::Hash, CellSlice> CellSlice::cs_refs_cache;
+
 CellSlice::CellSlice(VirtualCell::LoadedCell loaded_cell)
     : virt(loaded_cell.virt)
     , cell(std::move(loaded_cell.data_cell))
@@ -1114,7 +1116,21 @@ CellSlice load_cell_slice_special(const Ref<Cell>& cell, bool& special) {
 }
 
 Ref<CellSlice> load_cell_slice_ref(const Ref<Cell>& cell) {
-  return Ref<CellSlice>{true, CellSlice(load_cell_slice_impl(cell, nullptr))};
+  auto hash = cell->get_hash();
+  auto it = CellSlice::cs_refs_cache.find(hash);
+  auto* vm_state_interface = VmStateInterface::get();
+  if (it != CellSlice::cs_refs_cache.end()) {
+    if (vm_state_interface) {
+        vm_state_interface->register_cell_load(hash);
+    }
+    return Ref<CellSlice>{true, it->second};
+  } else {
+    auto cs = CellSlice(load_cell_slice_impl(cell, nullptr));
+    if (!vm_state_interface) {
+      CellSlice::cs_refs_cache.emplace(hash, cs);
+    }
+    return Ref<CellSlice>{true, cs};
+  }
 }
 
 Ref<CellSlice> load_cell_slice_ref_special(const Ref<Cell>& cell, bool& special) {
