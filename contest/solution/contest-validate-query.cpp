@@ -815,6 +815,8 @@ void ContestValidateQuery::compute_prev_state() {
 							//<%generated%>
 							if (--__pending_build_state_update == 0) my_threader.launchAndProfile("build_state_update", [this] { build_state_update(); });
 							//<%/generated%>
+
+  vm::DataCell::mark_new_cells_as_fresh = true;
   prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr()); // !TEMP_THREAD likely breaks Merkle Update
   // prev_state_root_ = prev_state_root_->virtualize();
   // With the line ^ commented out, it obviously produces a wrong Merkle Tree Update,
@@ -5274,8 +5276,11 @@ void ContestValidateQuery::check_transactions() {
   vector<unsigned long long> fees;
   // vector<td::RefInt256> fees;
 
+  // int bitPtrByteSize = 32;
+  vector<unsigned char*> temps;
+
   account_blocks_dict_->check_for_each_extra(
-      [&keys, &values, &fees](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
+      [&keys, &values, &fees, &temps](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
         ORIGINAL_CHECK(key_len == 256);
 
         // block::gen::AccountBlock::Record acc_blk;
@@ -5297,11 +5302,13 @@ void ContestValidateQuery::check_transactions() {
 
         values[keys.size()] = value->clone();
 
-        // !!!TODO: fix this temp shit
-        auto temp = new unsigned char[500];
+        // I have no idea how to properly copy BitPtr
+        // without the following part, parallelization doesn't work
+        auto temp = new unsigned char[32];
         td::BitPtr newBitPtr(temp, 0);
         newBitPtr.copy_from(key, 256);
         keys.push_back(newBitPtr);
+        temps.push_back(temp);
         // values[keys.size()-1] = std::move(value);
         return true;
       });
@@ -5382,6 +5389,10 @@ void ContestValidateQuery::check_transactions() {
     }, keys.size()
   );
   loop_future.wait();
+
+  for (unsigned char* temp : temps) {
+    delete[] temp;
+  }
 
   /* // Working parallel code in this section
 

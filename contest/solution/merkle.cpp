@@ -130,10 +130,23 @@ Ref<Cell> MyMerkleUpdate::generate(BS::thread_pool<>& pool, Ref<Cell> from, Ref<
 std::pair<Ref<Cell>, Ref<Cell>> MyMerkleUpdate::generate_raw(BS::thread_pool<>& pool, Ref<Cell> from, Ref<Cell> to, CellUsageTree *usage_tree) {
   // create Merkle update cell->new_cell
   auto update_to = MyMerkleProof::generate_raw(pool, to, [tree = usage_tree](const Ref<Cell> &cell) {
+
     auto loaded_cell = cell->load_cell().move_as_ok();  // FIXME
+    bool has_been_loaded = loaded_cell.data_cell->is_fresh; // loaded_cell.data_cell->has_been_loaded;
+    // if (!has_been_loaded) {
+    //   LOG(ERROR) << "---------------------------------------- has_been_loaded=false"
+    //              << ", special_type(): " << loaded_cell.data_cell->special_type()
+    //              << ", size_refs(): " << loaded_cell.data_cell->size_refs();
+    // }
     if (loaded_cell.data_cell->size_refs() == 0) {
       return false;
     }
+    if (!loaded_cell.tree_node.empty() != has_been_loaded) {
+      LOG(ERROR) << "mismatch: !loaded_cell.tree_node.empty()=" << !loaded_cell.tree_node.empty()
+                 << ", but has_been_loaded=" << has_been_loaded;
+    }
+    return !loaded_cell.tree_node.empty();
+    return has_been_loaded; // ??
     return !loaded_cell.tree_node.empty() && loaded_cell.tree_node.mark_path(tree);
   });
   usage_tree->set_use_mark_for_is_loaded(true);

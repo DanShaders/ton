@@ -79,6 +79,8 @@ void ContestValidateQuery::start_up() {
     // 3. unpack block candidate (while necessary data is being loaded)
     unpack_block_candidate(); // reject_query("error unpacking block candidate");
 
+    LOG(ERROR) << "----------------------------------- unpack_block_candidate finished --------------- "; // !!TODO: remove
+
     SoftRejectIfWithComment(prev_blocks.size() > 2, "cannot have more than two previous blocks");
     SoftRejectIfWithComment(!prev_blocks.size(), "must have one or two previous blocks to generate a next block");
 
