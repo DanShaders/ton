@@ -76,7 +76,7 @@ td::Status CellSerializationInfo::init(td::uint8 d1, td::uint8 d2, int ref_byte_
 // TODO: check usage when result is empty
 td::Result<Ref<DataCell>> CellSerializationInfo::create_data_cell(td::Slice cell_slice,
                                                                   td::Span<Ref<Cell>> refs) const {
-  static ABSL_ATTRIBUTE_FUNC_ALIGN(16) TD_THREAD_LOCAL CellBuilder cb;
+  CellBuilder cb;
   TRY_RESULT(bits, get_bits(cell_slice));
   cb.store_bits(cell_slice.ubegin() + data_offset, bits);
   DCHECK(refs_cnt == (td::int64)refs.size());

@@ -678,7 +678,7 @@ inline CellSlice DictionaryFixed::lookup_cs(td::ConstBitPtr key, int key_len) {
   Ref<Cell> cell = get_root_cell();
   int n = key_len;
 
-  static TD_THREAD_LOCAL ABSL_ATTRIBUTE_FUNC_ALIGN(16) LabelParserStatic label;
+  LabelParserStatic label;
   while (true) {
     label.init(std::move(cell), n, label_mode());
     if (!label.is_prefix_of(key, n)) {

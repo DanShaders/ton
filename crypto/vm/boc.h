@@ -182,8 +182,9 @@ struct Cache {
   using HashTable = td::HashMap<TKey, std::pair<TValue, bool>>;
 
   static HashTable& instance() {
-    static TD_THREAD_LOCAL HashTable cache;
-    return cache;
+    static TD_THREAD_LOCAL HashTable *cache;
+    td::init_thread_local<HashTable>(cache);
+    return *cache;
   }
   static void reset_flags() {
     HashTable& hm = instance();

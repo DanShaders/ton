@@ -1839,7 +1839,7 @@ td::Status GetCollationManagerStatsQuery::receive(td::BufferSlice data) {
           sb << "never";
         } else {
           std::string status = collator->last_ping_status_;
-          std::erase_if(status, [](char c) { return c < (char)32; });
+          status.erase(std::remove_if(status.begin(), status.end(), [](char c) { return c < (char)32; }), status.end());
           if (status.size() > 128) {
             status.resize(128);
           }

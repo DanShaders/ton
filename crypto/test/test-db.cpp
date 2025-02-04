@@ -983,15 +983,18 @@ struct BocOptions {
   void prepare_commit(DynamicBagOfCellsDb &dboc) {
     if (async_executor) {
       async_executor->inc_generation();
-      std::latch latch(1);
+      std::mutex mtx;
+      std::condition_variable cv;
+      std::atomic<int> count{1};
       td::Result<td::Unit> res;
       async_executor->execute_sync([&] {
         dboc.prepare_commit_async(async_executor, [&](auto r) {
           res = std::move(r);
-          latch.count_down();
+          --count;
         });
       });
-      latch.wait();
+      std::unique_lock<std::mutex> lock(mtx);
+      cv.wait(lock, [&count] { return count == 0; });
       async_executor->execute_sync([&] {});
       async_executor->inc_generation();
     } else {

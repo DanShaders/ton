@@ -1459,10 +1459,14 @@ void ValidatorEngine::alarm() {
         }
         if (!fs_to_del.empty()) {
           need_write = true;
-          std::erase_if(config_.fast_sync_member_certificates,
-                        [&](const std::pair<ton::adnl::AdnlNodeIdShort, ton::overlay::OverlayMemberCertificate> &e) {
-                          return !fs_to_del.contains(e.first);
-                        });
+          using Pair = std::pair<ton::adnl::AdnlNodeIdShort, ton::overlay::OverlayMemberCertificate>;
+          auto func =[&](const Pair &e) -> bool {
+            return (fs_to_del.count(e.first) == 0);
+          };
+
+          config_.fast_sync_member_certificates.erase(
+            std::remove_if(config_.fast_sync_member_certificates.begin(), config_.fast_sync_member_certificates.end(), func),
+            config_.fast_sync_member_certificates.end());
         }
       }
 

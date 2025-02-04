@@ -59,7 +59,7 @@ class ValidatorEngineConsole : public td::actor::Actor {
   std::map<std::string, std::unique_ptr<QueryRunner>> query_runners_;
   std::map<std::string, std::string> alternate_names_;
   static std::string simplify_name(std::string name) {
-    std::erase_if(name, [](char c) { return c == '-'; });
+    name.erase(std::remove_if(name.begin(), name.end(), [](char c) { return c == '-'; }), name.end());
     return name;
   }
   void add_query_runner(std::unique_ptr<QueryRunner> runner) {
