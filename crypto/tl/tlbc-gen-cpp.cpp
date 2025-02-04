@@ -2165,13 +2165,11 @@ void CppTypeCode::generate_check_tag_method(std::ostream& os) {
 bool CppTypeCode::output_print_simple_field(std::ostream& os, const Field& field, std::string field_name,
                                             const TypeExpr* expr) {
   cpp_val_type cvt = detect_cpp_type(expr);
-  MinMaxSize sz = expr->compute_size();
   int i = expr->is_integer();
-  int l = (sz.is_fixed() ? sz.convert_min_size() : -1);
   switch (cvt) {
     case ct_bitstring:
     case ct_bits:
-      assert(!(sz.max_size() & 0xff));
+      assert(!(expr->compute_size().max_size() & 0xff));
       os << "pp.fetch_bits_field(cs, ";
       output_cpp_sizeof_expr(os, expr, 0);
       if (!field_name.empty()) {
@@ -2184,7 +2182,7 @@ bool CppTypeCode::output_print_simple_field(std::ostream& os, const Field& field
     case ct_uint32:
     case ct_int64:
     case ct_uint64:
-      assert(i && l <= 64);
+      assert(i && (expr->compute_size().is_fixed() ? expr->compute_size().convert_min_size() : -1) <= 64);
       os << "pp.fetch_" << (i > 0 ? "u" : "") << "int_field(cs, ";
       output_cpp_sizeof_expr(os, expr, 0);
       if (!field_name.empty()) {
