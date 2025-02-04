@@ -15,9 +15,11 @@ namespace solution {
 
 class MyMerkleProofImpl {
  public:
-  explicit MyMerkleProofImpl(MyMerkleProof::IsPrunnedFunction is_prunned) : is_prunned_(std::move(is_prunned)) {
+  explicit MyMerkleProofImpl(BS::thread_pool<>& pool, MyMerkleProof::IsPrunnedFunction is_prunned) :
+    pool(pool), is_prunned_(std::move(is_prunned)) {
   }
-  explicit MyMerkleProofImpl(CellUsageTree *usage_tree) : usage_tree_(usage_tree) {
+  explicit MyMerkleProofImpl(BS::thread_pool<>& pool, CellUsageTree *usage_tree) :
+    pool(pool), usage_tree_(usage_tree) {
   }
 
   Ref<Cell> create_from(Ref<Cell> cell) {
@@ -36,6 +38,8 @@ class MyMerkleProofImpl {
   }
 
  private:
+  BS::thread_pool<>& pool;
+
   using Key = std::pair<Cell::Hash, int>;
   td::HashMap<Key, Ref<Cell>> cells_;
   td::HashSet<Cell::Hash> visited_cells_;
@@ -72,11 +76,33 @@ class MyMerkleProofImpl {
     }
     CellSlice cs(vm::NoVm(), cell);
     int children_merkle_depth = cs.child_merkle_depth(merkle_depth);
+
     CellBuilder cb;
+
+    // Original:
     cb.store_bits(cs.fetch_bits(cs.size()));
     for (unsigned i = 0; i < cs.size_refs(); i++) {
       cb.store_ref(dfs(cs.prefetch_ref(i), children_merkle_depth));
     }
+
+    // Threaded:
+    // vector<future<Ref<Cell>>> futures;
+    // for (unsigned i = 1; i < cs.size_refs(); i++) {
+    //   futures.push_back(async(
+    //     [this, &cs, i, children_merkle_depth] {
+    //       return dfs(cs.prefetch_ref(i), children_merkle_depth);
+    //     }
+    //   ));
+    // }
+
+    // cb.store_bits(cs.fetch_bits(cs.size()));
+    // if (cs.have_refs()) {
+    //   cb.store_ref(dfs(cs.prefetch_ref(0), children_merkle_depth));
+    // }
+    // for (auto& f : futures) {
+    //   cb.store_ref(f.get());
+    // }
+
     auto res = cb.finalize(cs.is_special());
     CHECK(res.not_null());
     cells_.emplace(key, res);
@@ -86,13 +112,13 @@ class MyMerkleProofImpl {
 
 
 
-Ref<Cell> MyMerkleUpdate::generate(Ref<Cell> from, Ref<Cell> to, CellUsageTree *usage_tree) {
+Ref<Cell> MyMerkleUpdate::generate(BS::thread_pool<>& pool, Ref<Cell> from, Ref<Cell> to, CellUsageTree *usage_tree) {
   auto from_level = from->get_level();
   auto to_level = to->get_level();
   if (from_level != 0 || to_level != 0) {
     return {};
   }
-  auto res = generate_raw(std::move(from), std::move(to), usage_tree);
+  auto res = generate_raw(pool, std::move(from), std::move(to), usage_tree);
   if (res.first.is_null() || res.second.is_null()) {
     return {};
   }
@@ -101,9 +127,9 @@ Ref<Cell> MyMerkleUpdate::generate(Ref<Cell> from, Ref<Cell> to, CellUsageTree *
 
 
 
-std::pair<Ref<Cell>, Ref<Cell>> MyMerkleUpdate::generate_raw(Ref<Cell> from, Ref<Cell> to, CellUsageTree *usage_tree) {
+std::pair<Ref<Cell>, Ref<Cell>> MyMerkleUpdate::generate_raw(BS::thread_pool<>& pool, Ref<Cell> from, Ref<Cell> to, CellUsageTree *usage_tree) {
   // create Merkle update cell->new_cell
-  auto update_to = MyMerkleProof::generate_raw(to, [tree = usage_tree](const Ref<Cell> &cell) {
+  auto update_to = MyMerkleProof::generate_raw(pool, to, [tree = usage_tree](const Ref<Cell> &cell) {
     auto loaded_cell = cell->load_cell().move_as_ok();  // FIXME
     if (loaded_cell.data_cell->size_refs() == 0) {
       return false;
@@ -111,18 +137,18 @@ std::pair<Ref<Cell>, Ref<Cell>> MyMerkleUpdate::generate_raw(Ref<Cell> from, Ref
     return !loaded_cell.tree_node.empty() && loaded_cell.tree_node.mark_path(tree);
   });
   usage_tree->set_use_mark_for_is_loaded(true);
-  auto update_from = MyMerkleProof::generate_raw(from, usage_tree);
+  auto update_from = MyMerkleProof::generate_raw(pool, from, usage_tree);
 
   return {std::move(update_from), std::move(update_to)};
 }
 
 
-Ref<Cell> MyMerkleProof::generate_raw(Ref<Cell> cell, IsPrunnedFunction is_prunned) {
-  return MyMerkleProofImpl(is_prunned).create_from(cell);
+Ref<Cell> MyMerkleProof::generate_raw(BS::thread_pool<>& pool, Ref<Cell> cell, IsPrunnedFunction is_prunned) {
+  return MyMerkleProofImpl(pool, is_prunned).create_from(cell);
 }
 
-Ref<Cell> MyMerkleProof::generate_raw(Ref<Cell> cell, CellUsageTree *usage_tree) {
-  return MyMerkleProofImpl(usage_tree).create_from(cell);
+Ref<Cell> MyMerkleProof::generate_raw(BS::thread_pool<>& pool, Ref<Cell> cell, CellUsageTree *usage_tree) {
+  return MyMerkleProofImpl(pool, usage_tree).create_from(cell);
 }
 
 

@@ -5,7 +5,7 @@ namespace solution {
 
 
 
-MyThreader::MyThreader() {
+MyThreader::MyThreader(BS::thread_pool<>& pool): pool(pool) {
   futures.resize(MaxFuturesHeld);
   names.resize(MaxFuturesHeld);
   startTimes.resize(MaxFuturesHeld);

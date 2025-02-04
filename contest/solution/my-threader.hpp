@@ -36,7 +36,7 @@ using LaunchFunction = std::function<void()>;
 
 class MyThreader {
  public:
-	MyThreader();
+	MyThreader(BS::thread_pool<>& pool);
 
   // template<typename Callable>
   void launch(LaunchFunction callable);
@@ -49,7 +49,7 @@ class MyThreader {
 
   const int MaxFuturesHeld = 200;
 
-  BS::thread_pool<> pool{9};
+  BS::thread_pool<>& pool;
  private:
 
   atomic<int> futuresCount{0};

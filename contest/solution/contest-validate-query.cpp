@@ -5755,7 +5755,7 @@ void ContestValidateQuery::build_state_update() {
     fatal_throw("cannot create new ShardState");
   }
 
-  auto state_update = MyMerkleUpdate::generate(prev_state_root_, state_root, state_usage_tree_.get());
+  auto state_update = MyMerkleUpdate::generate(pool, prev_state_root_, state_root, state_usage_tree_.get());
   if (state_update.is_null()) {
     fatal_throw("failed to generate Merkle update");
   }
