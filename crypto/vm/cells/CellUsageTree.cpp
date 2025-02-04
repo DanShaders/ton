@@ -61,6 +61,13 @@ bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
 //
 // CellUsageTree
 //
+constexpr size_t kBucketsAmount = 8;
+
+CellUsageTree::CellUsageTree() : nodes_(kBucketsAmount) {
+  nodes_[nodes_.get_id()]; // Node #0
+  nodes_[nodes_.get_id()]; // Node #1
+}
+
 CellUsageTree::NodePtr CellUsageTree::root_ptr() {
   return {shared_from_this(), 1};
 }
@@ -71,20 +78,24 @@ CellUsageTree::NodeId CellUsageTree::root_id() const {
 
 bool CellUsageTree::is_loaded(NodeId node_id) const {
   if (use_mark_) {
-    return nodes_[node_id].has_mark;
+    auto node = nodes_[node_id];
+    return node.value->has_mark;
   }
-  return nodes_[node_id].is_loaded;
+  auto node = nodes_[node_id];
+  return node.value->is_loaded;
 }
 
 bool CellUsageTree::has_mark(NodeId node_id) const {
-  return nodes_[node_id].has_mark;
+  auto node = nodes_[node_id];
+  return node.value->has_mark;
 }
 
 void CellUsageTree::set_mark(NodeId node_id, bool mark) {
   if (node_id == 0) {
     return;
   }
-  nodes_[node_id].has_mark = mark;
+  auto node = nodes_[node_id];
+  node.value->has_mark = mark;
 }
 
 void CellUsageTree::mark_path(NodeId node_id) {
@@ -99,12 +110,14 @@ void CellUsageTree::mark_path(NodeId node_id) {
 }
 
 CellUsageTree::NodeId CellUsageTree::get_parent(NodeId node_id) {
-  return nodes_[node_id].parent;
+  auto node = nodes_[node_id];
+  return node.value->parent;
 }
 
 CellUsageTree::NodeId CellUsageTree::get_child(NodeId node_id, unsigned ref_id) {
   DCHECK(ref_id < CellTraits::max_refs);
-  return nodes_[node_id].children[ref_id];
+  auto node = nodes_[node_id];
+  return node.value->children[ref_id];
 }
 
 void CellUsageTree::set_use_mark_for_is_loaded(bool use_mark) {
@@ -112,10 +125,14 @@ void CellUsageTree::set_use_mark_for_is_loaded(bool use_mark) {
 }
 
 void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
-  if (nodes_[node_id].is_loaded) {
-    return;
+  {
+    auto node = nodes_[node_id];
+    if (node.value->is_loaded) {
+      return;
+    }
+    node.value->is_loaded = true;
   }
-  nodes_[node_id].is_loaded = true;
+
   if (cell_load_callback_) {
     cell_load_callback_(cell);
   }
@@ -123,19 +140,25 @@ void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
 
 CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_id) {
   DCHECK(ref_id < CellTraits::max_refs);
-  NodeId res = nodes_[node_id].children[ref_id];
-  if (res) {
-    return res;
+
+  {
+    auto node = nodes_[node_id];
+    auto res = node.value->children[ref_id];
+    if (res) {
+      return res;
+    }
   }
-  res = create_node(node_id);
-  nodes_[node_id].children[ref_id] = res;
+
+  auto res = create_node(node_id);
+  auto node = nodes_[node_id];
+  node.value->children[ref_id] = res;
   return res;
 }
 
 CellUsageTree::NodeId CellUsageTree::create_node(NodeId parent) {
-  NodeId res = static_cast<NodeId>(nodes_.size());
-  nodes_.emplace_back();
-  nodes_.back().parent = parent;
+  NodeId res = nodes_.get_id();
+  auto node = nodes_[res];
+  node.value->parent = parent;
   return res;
 }
 

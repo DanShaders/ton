@@ -13,6 +13,8 @@
 #include "common/global-version.h"
 #include "tonlib/tonlib/ExtClient.h"
 
+#include "thread_pool.h"
+
 namespace solution {
 
 using namespace ton;
@@ -91,10 +93,11 @@ class ContestValidateQuery : public td::actor::Actor {
   }
 
  public:
-  ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice collated_data,
+  ContestValidateQuery(size_t threads, BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice collated_data,
                        td::Promise<td::BufferSlice> promise);
 
  private:
+  ctpl::thread_pool thread_pool_;
   int verbosity{0};
   int pending{0};
   const ShardIdFull shard_;
@@ -123,6 +126,7 @@ class ContestValidateQuery : public td::actor::Actor {
   std::shared_ptr<vm::CellUsageTree> state_usage_tree_;  // used to construct Merkle update
 
   ErrorCtx error_ctx_;
+  mutable std::mutex ns_mutex_;
 
   td::Ref<MasterchainStateQ> mc_state_;
   td::Ref<vm::Cell> mc_state_root_;
@@ -170,7 +174,7 @@ class ContestValidateQuery : public td::actor::Actor {
   td::RefInt256 masterchain_create_fee_, basechain_create_fee_;
 
   std::vector<block::McShardDescr> neighbors_;
-  std::map<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
+  td::HashMap<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
 
   block::ShardState ps_;
   block::ShardState ns_;
@@ -189,6 +193,7 @@ class ContestValidateQuery : public td::actor::Actor {
   ton::LogicalTime proc_lt_{0}, claimed_proc_lt_{0}, min_enq_lt_{~0ULL};
   ton::Bits256 proc_hash_ = ton::Bits256::zero(), claimed_proc_hash_, min_enq_hash_;
 
+  std::mutex msg_proc_mutex_;
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_proc_lt_;
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_emitted_lt_;
 
@@ -215,12 +220,14 @@ class ContestValidateQuery : public td::actor::Actor {
   bool reject_query(std::string error, td::BufferSlice reason = {});
   bool reject_query(std::string err_msg, td::Status error, td::BufferSlice reason = {});
   bool soft_reject_query(std::string error, td::BufferSlice reason = {});
+  bool deferred_reject_query(std::string error, td::BufferSlice reason = {});
   void start_up() override;
 
   bool fatal_error(td::Status error);
   bool fatal_error(int err_code, std::string err_msg);
   bool fatal_error(int err_code, std::string err_msg, td::Status error);
   bool fatal_error(std::string err_msg, int err_code = -666);
+  bool deferred_fatal_error(std::string error, int err_code = -666);
 
   std::string error_ctx() const {
     return error_ctx_.as_string();
@@ -324,7 +331,7 @@ class ContestValidateQuery : public td::actor::Actor {
   std::unique_ptr<block::Account> unpack_account(td::ConstBitPtr addr);
   bool check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first,
                              bool is_last);
-  bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr);
+  bool check_account_transactions(StdSmcAddress acc_addr, Ref<vm::CellSlice> acc_tr);
   bool check_transactions();
   bool check_message_processing_order();
   bool check_new_state();
@@ -336,6 +343,12 @@ class ContestValidateQuery : public td::actor::Actor {
 
   bool store_master_ref(vm::CellBuilder& cb);
   bool build_state_update();
+
+  template <typename F>
+  auto with_ns_lock(const F& f) {
+    std::lock_guard<std::mutex> lock(ns_mutex_);
+    return f();
+  }
 };
 
 }  // namespace solution

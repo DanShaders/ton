@@ -23,6 +23,67 @@
 #include "td/utils/int_types.h"
 #include "td/utils/logging.h"
 #include <functional>
+#include <atomic>
+#include <mutex>
+
+namespace kv {
+
+template <typename V>
+class ConcurrentVector {
+public:
+  ConcurrentVector(size_t buckets_amount)
+    : data_(buckets_amount)
+  {}
+
+  struct Access {
+    Access(const td::uint32& key, std::pair<std::mutex, std::vector<V>>& bucket)
+      : lock(bucket.first)
+    {
+      if (key < bucket.second.size()) {
+        value = &bucket.second[key];
+      } else {
+        bucket.second.emplace_back();
+        value = &bucket.second.back();
+      }
+    }
+
+    std::lock_guard<std::mutex> lock;
+    V* value;
+  };
+
+  struct ConstAccess {
+    ConstAccess(td::uint32 key, std::pair<std::mutex, std::vector<V>>& bucket)
+      : lock(bucket.first)
+    {
+      if (key >= bucket.second.size()) {
+        throw std::runtime_error("invalid index");
+      }
+
+      value = &bucket.second[key];
+    }
+
+    std::lock_guard<std::mutex> lock;
+    const V* value;
+  };
+
+  td::uint32 get_id() {
+    return total_size_++;
+  }
+
+  Access operator[](td::uint32 key) {
+    return Access(key / data_.size(), data_[key % data_.size()]);
+  }
+
+  ConstAccess operator[](td::uint32 key) const {
+    return ConstAccess(key / data_.size(), data_[key % data_.size()]);
+  }
+
+private:
+  std::atomic<td::uint32> total_size_{0};
+  mutable std::vector<std::pair<std::mutex, std::vector<V>>> data_;
+};
+
+}
 
 namespace vm {
 
@@ -52,6 +113,8 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
     NodeId node_id_{0};
   };
 
+  CellUsageTree();
+
   NodePtr root_ptr();
   NodeId root_id() const;
   bool is_loaded(NodeId node_id) const;
@@ -75,7 +138,7 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
     std::array<td::uint32, CellTraits::max_refs> children{};
   };
   bool use_mark_{false};
-  std::vector<Node> nodes_{2};
+  kv::ConcurrentVector<Node> nodes_;
   std::function<void(const td::Ref<vm::DataCell>&)> cell_load_callback_;
 
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);

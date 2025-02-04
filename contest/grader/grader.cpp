@@ -34,7 +34,7 @@ static td::uint64 get_cpu_usage() {
 
 class ContestGrader : public td::actor::Actor {
  public:
-  explicit ContestGrader(std::string tests_dir) : tests_dir_(tests_dir) {
+  explicit ContestGrader(std::string tests_dir, size_t threads) : tests_dir_(tests_dir), threads_(threads) {
   }
 
   void start_up() override {
@@ -127,7 +127,7 @@ class ContestGrader : public td::actor::Actor {
     }
 
     run_contest_solution(
-        block_id, std::move(block_data), std::move(collated_data),
+        threads_, block_id, std::move(block_data), std::move(collated_data),
         [=, SelfId = actor_id(this), timer = td::Timer{}, start_cpu = get_cpu_usage()](td::Result<td::BufferSlice> R) {
           td::actor::send_closure(SelfId, &ContestGrader::got_solution_result, std::move(R), valid,
                                   original_merkle_update, timer.elapsed(),
@@ -212,6 +212,7 @@ class ContestGrader : public td::actor::Actor {
  private:
   std::string tests_dir_;
   std::vector<std::string> test_files_;
+  size_t threads_;
   size_t test_idx_ = 0;
   size_t cnt_ok_ = 0, cnt_fail_ = 0, cnt_fatal_ = 0;
 
@@ -255,9 +256,9 @@ int main(int argc, char* argv[]) {
   });
 
   p.run(argc, argv).ensure();
-  td::actor::Scheduler scheduler({threads});
+  td::actor::Scheduler scheduler({1});
 
-  scheduler.run_in_context([&] { x = td::actor::create_actor<ContestGrader>("grader", tests_dir); });
+  scheduler.run_in_context([&] { x = td::actor::create_actor<ContestGrader>("grader", tests_dir, threads); });
   while (scheduler.run(1)) {
   }
 

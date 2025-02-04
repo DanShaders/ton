@@ -15,6 +15,7 @@
 #include "common/errorlog.h"
 #include "fabric.h"
 #include <ctime>
+#include <future>
 
 namespace solution {
 
@@ -46,9 +47,10 @@ std::string ErrorCtx::as_string() const {
  * @param collated_data Collated data (proofs of shard states)
  * @param promise The Promise to return the serialized state update to
  */
-ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data,
+ContestValidateQuery::ContestValidateQuery(size_t threads, BlockIdExt block_id, td::BufferSlice block_data,
                                            td::BufferSlice collated_data, td::Promise<td::BufferSlice> promise)
-    : shard_(block_id.shard_full())
+    : thread_pool_(threads)
+    , shard_(block_id.shard_full())
     , id_(block_id)
     , block_data(std::move(block_data))
     , collated_data(std::move(collated_data))
@@ -180,6 +182,18 @@ void ContestValidateQuery::finish_query() {
     main_promise.set_result(std::move(result_state_update_));
   }
   stop();
+}
+
+bool ContestValidateQuery::deferred_reject_query(std::string error, td::BufferSlice reason) {
+  error = error_ctx() + error;
+  LOG(WARNING) << "REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
+  return false;
+}
+
+bool ContestValidateQuery::deferred_fatal_error(std::string error_msg, int err_code) {
+  auto error = td::Status::Error(err_code, error_ctx() + error_msg);
+  LOG(WARNING) << "aborting validation of block candidate for " << shard_.to_str() << " : " << error.to_string();
+  return false;
 }
 
 /*
@@ -4505,7 +4519,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   if (in_msg_root.not_null()) {
     auto in_descr_cs = in_msg_dict_->lookup(in_msg_root->get_hash().as_bitslice());
     if (in_descr_cs.is_null()) {
-      return reject_query(PSTRING() << "inbound message with hash " << in_msg_root->get_hash().to_hex()
+      return deferred_reject_query(PSTRING() << "inbound message with hash " << in_msg_root->get_hash().to_hex()
                                     << " of transaction " << lt << " of account " << addr.to_hex()
                                     << " does not have a corresponding InMsg record");
     }
@@ -4513,7 +4527,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     if (in_msg_tag != block::gen::InMsg::msg_import_ext && in_msg_tag != block::gen::InMsg::msg_import_fin &&
         in_msg_tag != block::gen::InMsg::msg_import_imm && in_msg_tag != block::gen::InMsg::msg_import_ihr &&
         in_msg_tag != block::gen::InMsg::msg_import_deferred_fin) {
-      return reject_query(PSTRING() << "inbound message with hash " << in_msg_root->get_hash().to_hex()
+      return deferred_reject_query(PSTRING() << "inbound message with hash " << in_msg_root->get_hash().to_hex()
                                     << " of transaction " << lt << " of account " << addr.to_hex()
                                     << " has an invalid InMsg record (not one of msg_import_ext, msg_import_fin, "
                                        "msg_import_imm, msg_import_ihr or msg_import_deferred_fin)");
@@ -4532,7 +4546,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
       block::gen::CommonMsgInfo::Record_int_msg_info info;
       CHECK(tlb::unpack_cell_inexact(in_msg_root, info));
       if (info.created_lt >= lt) {
-        return reject_query(PSTRING() << "transaction " << lt << " of " << addr.to_hex()
+        return deferred_reject_query(PSTRING() << "transaction " << lt << " of " << addr.to_hex()
                                       << " processed inbound message created later at logical time "
                                       << info.created_lt);
       }
@@ -4541,7 +4555,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
           in_msg_tag == block::gen::InMsg::msg_import_deferred_fin) {
         block::tlb::MsgEnvelope::Record_std msg_env;
         if (!block::tlb::unpack_cell(in_descr_cs->prefetch_ref(), msg_env)) {
-          return reject_query(PSTRING() << "InMsg record for inbound message with hash "
+          return deferred_reject_query(PSTRING() << "InMsg record for inbound message with hash "
                                         << in_msg_root->get_hash().to_hex() << " of transaction " << lt
                                         << " of account " << addr.to_hex() << " does not have a valid MsgEnvelope");
         }
@@ -4551,6 +4565,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
         }
       }
       if (info.created_lt != start_lt_ || !is_special_tx) {
+        std::lock_guard<std::mutex> lock(msg_proc_mutex_);
         msg_proc_lt_.emplace_back(addr, lt, emitted_lt);
       }
       dest = std::move(info.dest);
@@ -4565,13 +4580,13 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     StdSmcAddress d_addr;
     CHECK(block::tlb::t_MsgAddressInt.extract_std_address(dest, d_wc, d_addr));
     if (d_wc != workchain() || d_addr != addr) {
-      return reject_query(PSTRING() << "inbound message of transaction " << lt << " of account " << addr.to_hex()
+      return deferred_reject_query(PSTRING() << "inbound message of transaction " << lt << " of account " << addr.to_hex()
                                     << " has a different destination address " << d_wc << ":" << d_addr.to_hex());
     }
     auto in_msg_trans = in_descr_cs->prefetch_ref(1);  // trans:^Transaction
     CHECK(in_msg_trans.not_null());
     if (in_msg_trans->get_hash() != trans_root->get_hash()) {
-      return reject_query(PSTRING() << "InMsg record for inbound message with hash " << in_msg_root->get_hash().to_hex()
+      return deferred_reject_query(PSTRING() << "InMsg record for inbound message with hash " << in_msg_root->get_hash().to_hex()
                                     << " of transaction " << lt << " of account " << addr.to_hex()
                                     << " refers to a different processing transaction");
     }
@@ -4592,14 +4607,14 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     CHECK(out_msg_root.not_null());  // we have pre-checked this
     auto out_descr_cs = out_msg_dict_->lookup(out_msg_root->get_hash().as_bitslice());
     if (out_descr_cs.is_null()) {
-      return reject_query(PSTRING() << "outbound message #" << i + 1 << " with hash "
+      return deferred_reject_query(PSTRING() << "outbound message #" << i + 1 << " with hash "
                                     << out_msg_root->get_hash().to_hex() << " of transaction " << lt << " of account "
                                     << addr.to_hex() << " does not have a corresponding OutMsg record");
     }
     auto tag = block::gen::t_OutMsg.get_tag(*out_descr_cs);
     if (tag != block::gen::OutMsg::msg_export_ext && tag != block::gen::OutMsg::msg_export_new &&
         tag != block::gen::OutMsg::msg_export_imm && tag != block::gen::OutMsg::msg_export_new_defer) {
-      return reject_query(PSTRING() << "outbound message #" << i + 1 << " with hash "
+      return deferred_reject_query(PSTRING() << "outbound message #" << i + 1 << " with hash "
                                     << out_msg_root->get_hash().to_hex() << " of transaction " << lt << " of account "
                                     << addr.to_hex()
                                     << " has an invalid OutMsg record (not one of msg_export_ext, msg_export_new, "
@@ -4631,7 +4646,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
       CHECK(msg_export_value.is_valid());
       money_exported += msg_export_value;
       if (msg_env.metadata != new_msg_metadata) {
-        return reject_query(PSTRING() << "outbound message #" << i + 1 << " with hash "
+        return deferred_reject_query(PSTRING() << "outbound message #" << i + 1 << " with hash "
                                       << out_msg_root->get_hash().to_hex() << " of transaction " << lt << " of account "
                                       << addr.to_hex() << " has invalid metadata in an OutMsg record: expected "
                                       << (new_msg_metadata ? new_msg_metadata.value().to_str() : "<none>") << ", found "
@@ -4642,21 +4657,21 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     StdSmcAddress ss_addr;  // s_addr is some macros in Windows
     CHECK(block::tlb::t_MsgAddressInt.extract_std_address(src, s_wc, ss_addr));
     if (s_wc != workchain() || ss_addr != addr) {
-      return reject_query(PSTRING() << "outbound message #" << i + 1 << " of transaction " << lt << " of account "
+      return deferred_reject_query(PSTRING() << "outbound message #" << i + 1 << " of transaction " << lt << " of account "
                                     << addr.to_hex() << " has a different source address " << s_wc << ":"
                                     << ss_addr.to_hex());
     }
     auto out_msg_trans = out_descr_cs->prefetch_ref(1);  // trans:^Transaction
     CHECK(out_msg_trans.not_null());
     if (out_msg_trans->get_hash() != trans_root->get_hash()) {
-      return reject_query(PSTRING() << "OutMsg record for outbound message #" << i + 1 << " with hash "
+      return deferred_reject_query(PSTRING() << "OutMsg record for outbound message #" << i + 1 << " with hash "
                                     << out_msg_root->get_hash().to_hex() << " of transaction " << lt << " of account "
                                     << addr.to_hex() << " refers to a different processing transaction");
     }
     if (tag != block::gen::OutMsg::msg_export_ext) {
       bool is_deferred = tag == block::gen::OutMsg::msg_export_new_defer;
       if (account_expected_defer_all_messages_.count(ss_addr) && !is_deferred) {
-        return reject_query(
+        return deferred_reject_query(
             PSTRING() << "outbound message #" << i + 1 << " on account " << workchain() << ":" << ss_addr.to_hex()
                       << " must be deferred because this account has earlier messages in DispatchQueue");
       }
@@ -4664,11 +4679,11 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
         LOG(INFO) << "message from account " << workchain() << ":" << ss_addr.to_hex() << " with lt " << message_lt
                   << " was deferred";
         if (!deferring_messages_enabled_ && !account_expected_defer_all_messages_.count(ss_addr)) {
-          return reject_query(PSTRING() << "outbound message #" << i + 1 << " on account " << workchain() << ":"
+          return deferred_reject_query(PSTRING() << "outbound message #" << i + 1 << " on account " << workchain() << ":"
                                         << ss_addr.to_hex() << " is deferred, but deferring messages is disabled");
         }
         if (i == 0 && !account_expected_defer_all_messages_.count(ss_addr)) {
-          return reject_query(PSTRING() << "outbound message #1 on account " << workchain() << ":" << ss_addr.to_hex()
+          return deferred_reject_query(PSTRING() << "outbound message #1 on account " << workchain() << ":" << ss_addr.to_hex()
                                         << " must not be deferred (the first message cannot be deferred unless some "
                                            "prevoius messages are deferred)");
         }
@@ -4686,42 +4701,42 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     bool split = (tag == block::gen::TransactionDescr::trans_split_prepare ||
                   tag == block::gen::TransactionDescr::trans_split_install);
     if (split && !before_split_) {
-      return reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+      return deferred_reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
                                     << " is a split prepare/install transaction, but this block is not before a split");
     }
     if (split && !is_last) {
-      return reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+      return deferred_reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
                                     << " is a split prepare/install transaction, but it is not the last transaction "
                                        "for this account in this block");
     }
     if (!split && !after_merge_) {
-      return reject_query(
+      return deferred_reject_query(
           PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
                     << " is a merge prepare/install transaction, but this block is not immediately after a merge");
     }
     if (!split && !is_first) {
-      return reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+      return deferred_reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
                                     << " is a merge prepare/install transaction, but it is not the first transaction "
                                        "for this account in this block");
     }
     // check later a global configuration flag in config_.global_flags_
     // (for now, split/merge transactions are always globally disabled)
-    return reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+    return deferred_reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
                                   << " is a split/merge prepare/install transaction, which are globally disabled");
   }
   if (tag == block::gen::TransactionDescr::trans_tick_tock) {
-    return reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+    return deferred_reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
                                   << " is a tick-tock transaction, which is impossible outside a masterchain block");
   }
   if (tag == block::gen::TransactionDescr::trans_storage && !is_first) {
-    return reject_query(
+    return deferred_reject_query(
         PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
                   << " is a storage transaction, but it is not the first transaction for this account in this block");
   }
   // check that the original account state has correct hash
   CHECK(account.total_state.not_null());
   if (hash_upd.old_hash != account.total_state->get_hash().bits()) {
-    return reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+    return deferred_reject_query(PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
                                   << " claims that the original account state hash must be "
                                   << hash_upd.old_hash.to_hex() << " but the actual value is "
                                   << account.total_state->get_hash().to_hex());
@@ -4732,7 +4747,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     case block::gen::TransactionDescr::trans_ord: {
       trans_type = block::transaction::Transaction::tr_ord;
       if (in_msg_root.is_null()) {
-        return reject_query(PSTRING() << "ordinary transaction " << lt << " of account " << addr.to_hex()
+        return deferred_reject_query(PSTRING() << "ordinary transaction " << lt << " of account " << addr.to_hex()
                                       << " has no inbound message");
       }
       need_credit_phase = !external;
@@ -4741,15 +4756,15 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     case block::gen::TransactionDescr::trans_storage: {
       trans_type = block::transaction::Transaction::tr_storage;
       if (in_msg_root.not_null()) {
-        return reject_query(PSTRING() << "storage transaction " << lt << " of account " << addr.to_hex()
+        return deferred_reject_query(PSTRING() << "storage transaction " << lt << " of account " << addr.to_hex()
                                       << " has an inbound message");
       }
       if (trans.outmsg_cnt) {
-        return reject_query(PSTRING() << "storage transaction " << lt << " of account " << addr.to_hex()
+        return deferred_reject_query(PSTRING() << "storage transaction " << lt << " of account " << addr.to_hex()
                                       << " has at least one outbound message");
       }
       // FIXME
-      return reject_query(PSTRING() << "unable to verify storage transaction " << lt << " of account "
+      return deferred_reject_query(PSTRING() << "unable to verify storage transaction " << lt << " of account "
                                     << addr.to_hex());
       break;
     }
@@ -4757,7 +4772,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
       bool is_tock = (td_cs.prefetch_ulong(4) & 1);
       trans_type = is_tock ? block::transaction::Transaction::tr_tock : block::transaction::Transaction::tr_tick;
       if (in_msg_root.not_null()) {
-        return reject_query(PSTRING() << (is_tock ? "tock" : "tick") << " transaction " << lt << " of account "
+        return deferred_reject_query(PSTRING() << (is_tock ? "tock" : "tick") << " transaction " << lt << " of account "
                                       << addr.to_hex() << " has an inbound message");
       }
       break;
@@ -4765,53 +4780,53 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     case block::gen::TransactionDescr::trans_merge_prepare: {
       trans_type = block::transaction::Transaction::tr_merge_prepare;
       if (in_msg_root.not_null()) {
-        return reject_query(PSTRING() << "merge prepare transaction " << lt << " of account " << addr.to_hex()
+        return deferred_reject_query(PSTRING() << "merge prepare transaction " << lt << " of account " << addr.to_hex()
                                       << " has an inbound message");
       }
       if (trans.outmsg_cnt != 1) {
-        return reject_query(PSTRING() << "merge prepare transaction " << lt << " of account " << addr.to_hex()
+        return deferred_reject_query(PSTRING() << "merge prepare transaction " << lt << " of account " << addr.to_hex()
                                       << " must have exactly one outbound message");
       }
       // FIXME
-      return reject_query(PSTRING() << "unable to verify merge prepare transaction " << lt << " of account "
+      return deferred_reject_query(PSTRING() << "unable to verify merge prepare transaction " << lt << " of account "
                                     << addr.to_hex());
       break;
     }
     case block::gen::TransactionDescr::trans_merge_install: {
       trans_type = block::transaction::Transaction::tr_merge_install;
       if (in_msg_root.is_null()) {
-        return reject_query(PSTRING() << "merge install transaction " << lt << " of account " << addr.to_hex()
+        return deferred_reject_query(PSTRING() << "merge install transaction " << lt << " of account " << addr.to_hex()
                                       << " has no inbound message");
       }
       need_credit_phase = true;
       // FIXME
-      return reject_query(PSTRING() << "unable to verify merge install transaction " << lt << " of account "
+      return deferred_reject_query(PSTRING() << "unable to verify merge install transaction " << lt << " of account "
                                     << addr.to_hex());
       break;
     }
     case block::gen::TransactionDescr::trans_split_prepare: {
       trans_type = block::transaction::Transaction::tr_split_prepare;
       if (in_msg_root.not_null()) {
-        return reject_query(PSTRING() << "split prepare transaction " << lt << " of account " << addr.to_hex()
+        return deferred_reject_query(PSTRING() << "split prepare transaction " << lt << " of account " << addr.to_hex()
                                       << " has an inbound message");
       }
       if (trans.outmsg_cnt > 1) {
-        return reject_query(PSTRING() << "split prepare transaction " << lt << " of account " << addr.to_hex()
+        return deferred_reject_query(PSTRING() << "split prepare transaction " << lt << " of account " << addr.to_hex()
                                       << " must have exactly one outbound message");
       }
       // FIXME
-      return reject_query(PSTRING() << "unable to verify split prepare transaction " << lt << " of account "
+      return deferred_reject_query(PSTRING() << "unable to verify split prepare transaction " << lt << " of account "
                                     << addr.to_hex());
       break;
     }
     case block::gen::TransactionDescr::trans_split_install: {
       trans_type = block::transaction::Transaction::tr_split_install;
       if (in_msg_root.is_null()) {
-        return reject_query(PSTRING() << "split install transaction " << lt << " of account " << addr.to_hex()
+        return deferred_reject_query(PSTRING() << "split install transaction " << lt << " of account " << addr.to_hex()
                                       << " has no inbound message");
       }
       // FIXME
-      return reject_query(PSTRING() << "unable to verify split install transaction " << lt << " of account "
+      return deferred_reject_query(PSTRING() << "unable to verify split install transaction " << lt << " of account "
                                     << addr.to_hex());
       break;
     }
@@ -4825,60 +4840,60 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   if (in_msg_root.not_null()) {
     if (!trs->unpack_input_msg(ihr_delivered, &action_phase_cfg_)) {
       // inbound external message was not accepted
-      return reject_query(PSTRING() << "could not unpack inbound " << (external ? "external" : "internal")
+      return deferred_reject_query(PSTRING() << "could not unpack inbound " << (external ? "external" : "internal")
                                     << " message processed by ordinary transaction " << lt << " of account "
                                     << addr.to_hex());
     }
   }
   if (trs->bounce_enabled) {
     if (!trs->prepare_storage_phase(storage_phase_cfg_, true)) {
-      return reject_query(PSTRING() << "cannot re-create storage phase of transaction " << lt << " for smart contract "
+      return deferred_reject_query(PSTRING() << "cannot re-create storage phase of transaction " << lt << " for smart contract "
                                     << addr.to_hex());
     }
     if (need_credit_phase && !trs->prepare_credit_phase()) {
-      return reject_query(PSTRING() << "cannot create re-credit phase of transaction " << lt << " for smart contract "
+      return deferred_reject_query(PSTRING() << "cannot create re-credit phase of transaction " << lt << " for smart contract "
                                     << addr.to_hex());
     }
   } else {
     if (need_credit_phase && !trs->prepare_credit_phase()) {
-      return reject_query(PSTRING() << "cannot re-create credit phase of transaction " << lt << " for smart contract "
+      return deferred_reject_query(PSTRING() << "cannot re-create credit phase of transaction " << lt << " for smart contract "
                                     << addr.to_hex());
     }
     if (!trs->prepare_storage_phase(storage_phase_cfg_, true, need_credit_phase)) {
-      return reject_query(PSTRING() << "cannot re-create storage phase of transaction " << lt << " for smart contract "
+      return deferred_reject_query(PSTRING() << "cannot re-create storage phase of transaction " << lt << " for smart contract "
                                     << addr.to_hex());
     }
   }
   if (!trs->prepare_compute_phase(compute_phase_cfg_)) {
-    return reject_query(PSTRING() << "cannot re-create compute phase of transaction " << lt << " for smart contract "
+    return deferred_reject_query(PSTRING() << "cannot re-create compute phase of transaction " << lt << " for smart contract "
                                   << addr.to_hex());
   }
   if (!trs->compute_phase->accepted) {
     if (external) {
-      return reject_query(PSTRING() << "inbound external message claimed to be processed by ordinary transaction " << lt
+      return deferred_reject_query(PSTRING() << "inbound external message claimed to be processed by ordinary transaction " << lt
                                     << " of account " << addr.to_hex()
                                     << " was in fact rejected (such transaction cannot appear in valid blocks)");
     } else if (trs->compute_phase->skip_reason == block::ComputePhase::sk_none) {
-      return reject_query(PSTRING() << "inbound internal message processed by ordinary transaction " << lt
+      return deferred_reject_query(PSTRING() << "inbound internal message processed by ordinary transaction " << lt
                                     << " of account " << addr.to_hex() << " was not processed without any reason");
     }
   }
   if (trs->compute_phase->success && !trs->prepare_action_phase(action_phase_cfg_)) {
-    return reject_query(PSTRING() << "cannot re-create action phase of transaction " << lt << " for smart contract "
+    return deferred_reject_query(PSTRING() << "cannot re-create action phase of transaction " << lt << " for smart contract "
                                   << addr.to_hex());
   }
   if (trs->bounce_enabled &&
       (!trs->compute_phase->success || trs->action_phase->state_exceeds_limits || trs->action_phase->bounce) &&
       !trs->prepare_bounce_phase(action_phase_cfg_)) {
-    return reject_query(PSTRING() << "cannot re-create bounce phase of  transaction " << lt << " for smart contract "
+    return deferred_reject_query(PSTRING() << "cannot re-create bounce phase of  transaction " << lt << " for smart contract "
                                   << addr.to_hex());
   }
   if (!trs->serialize()) {
-    return reject_query(PSTRING() << "cannot re-create the serialization of  transaction " << lt
+    return deferred_reject_query(PSTRING() << "cannot re-create the serialization of  transaction " << lt
                                   << " for smart contract " << addr.to_hex());
   }
   if (!trs->update_limits(*block_limit_status_, /* with_gas = */ false, /* with_size = */ false)) {
-    return fatal_error(PSTRING() << "cannot update block limit status to include transaction " << lt << " of account "
+    return deferred_fatal_error(PSTRING() << "cannot update block limit status to include transaction " << lt << " of account "
                                  << addr.to_hex());
   }
 
@@ -4889,13 +4904,13 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     (account.is_special ? total_special_gas_used_ : total_gas_used_) += trs->gas_used();
   }
   if (total_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.gas_limit) {
-    return reject_query(PSTRING() << "gas block limits are exceeded: total_gas_used > gas_limit_hard + trx_gas_limit ("
+    return deferred_reject_query(PSTRING() << "gas block limits are exceeded: total_gas_used > gas_limit_hard + trx_gas_limit ("
                                   << "total_gas_used=" << total_gas_used_
                                   << ", gas_limit_hard=" << block_limits_->gas.hard()
                                   << ", trx_gas_limit=" << compute_phase_cfg_.gas_limit << ")");
   }
   if (total_special_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.special_gas_limit) {
-    return reject_query(
+    return deferred_reject_query(
         PSTRING() << "gas block limits are exceeded: total_special_gas_used > gas_limit_hard + special_gas_limit ("
                   << "total_special_gas_used=" << total_special_gas_used_
                   << ", gas_limit_hard=" << block_limits_->gas.hard()
@@ -4904,7 +4919,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
 
   auto trans_root2 = trs->commit(account);
   if (trans_root2.is_null()) {
-    return reject_query(PSTRING() << "the re-created transaction " << lt << " for smart contract " << addr.to_hex()
+    return deferred_reject_query(PSTRING() << "the re-created transaction " << lt << " for smart contract " << addr.to_hex()
                                   << " could not be committed");
   }
   // now compare the re-created transaction with the one we have
@@ -4915,7 +4930,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
       std::cerr << "re-created transaction " << lt << " of " << addr.to_hex() << ": ";
       block::gen::t_Transaction.print_ref(std::cerr, trans_root2);
     }
-    return reject_query(PSTRING() << "the transaction " << lt << " of " << addr.to_hex() << " has hash "
+    return deferred_reject_query(PSTRING() << "the transaction " << lt << " of " << addr.to_hex() << " has hash "
                                   << trans_root->get_hash().to_hex()
                                   << " different from that of the recreated transaction "
                                   << trans_root2->get_hash().to_hex());
@@ -4924,25 +4939,25 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   block::gen::HASH_UPDATE::Record hash_upd2;
   if (!(tlb::unpack_cell(trans_root2, trans2) &&
         tlb::type_unpack_cell(std::move(trans2.state_update), block::gen::t_HASH_UPDATE_Account, hash_upd2))) {
-    return fatal_error(PSTRING() << "cannot unpack the re-created transaction " << lt << " of " << addr.to_hex());
+    return deferred_fatal_error(PSTRING() << "cannot unpack the re-created transaction " << lt << " of " << addr.to_hex());
   }
   if (hash_upd2.old_hash != hash_upd.old_hash) {
-    return fatal_error(PSTRING() << "the re-created transaction " << lt << " of " << addr.to_hex()
+    return deferred_fatal_error(PSTRING() << "the re-created transaction " << lt << " of " << addr.to_hex()
                                  << " is invalid: it starts from account state with different hash");
   }
   if (hash_upd2.new_hash != account.total_state->get_hash().bits()) {
-    return fatal_error(
+    return deferred_fatal_error(
         PSTRING() << "the re-created transaction " << lt << " of " << addr.to_hex()
                   << " is invalid: its claimed new account hash differs from the actual new account state");
   }
   if (hash_upd.new_hash != account.total_state->get_hash().bits()) {
-    return reject_query(PSTRING() << "transaction " << lt << " of " << addr.to_hex()
+    return deferred_reject_query(PSTRING() << "transaction " << lt << " of " << addr.to_hex()
                                   << " is invalid: it claims that the new account state hash is "
                                   << hash_upd.new_hash.to_hex() << " but the re-computed value is "
                                   << hash_upd2.new_hash.to_hex());
   }
   if (!trans.r1.out_msgs->contents_equal(*trans2.r1.out_msgs)) {
-    return reject_query(
+    return deferred_reject_query(
         PSTRING()
         << "transaction " << lt << " of " << addr.to_hex()
         << " is invalid: it has produced a set of outbound messages different from that listed in the transaction");
@@ -4952,11 +4967,11 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   auto new_balance = account.get_balance();
   block::CurrencyCollection total_fees;
   if (!total_fees.validate_unpack(trans.total_fees)) {
-    return reject_query(PSTRING() << "transaction " << lt << " of " << addr.to_hex()
+    return deferred_reject_query(PSTRING() << "transaction " << lt << " of " << addr.to_hex()
                                   << " has an invalid total_fees value");
   }
   if (old_balance + money_imported != new_balance + money_exported + total_fees + trs->blackhole_burned) {
-    return reject_query(
+    return deferred_reject_query(
         PSTRING() << "transaction " << lt << " of " << addr.to_hex()
                   << " violates the currency flow condition: old balance=" << old_balance.to_str()
                   << " + imported=" << money_imported.to_str() << " does not equal new balance=" << new_balance.to_str()
@@ -4976,12 +4991,12 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
  *
  * @returns True if the account transactions are valid, false otherwise.
  */
-bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root) {
+bool ContestValidateQuery::check_account_transactions(StdSmcAddress acc_addr, Ref<vm::CellSlice> acc_blk_root) {
   block::gen::AccountBlock::Record acc_blk;
   CHECK(tlb::csr_unpack(std::move(acc_blk_root), acc_blk) && acc_blk.account_addr == acc_addr);
   auto account_p = unpack_account(acc_addr.cbits());
   if (!account_p) {
-    return reject_query("cannot unpack old state of account "s + acc_addr.to_hex());
+    return deferred_reject_query("cannot unpack old state of account "s + acc_addr.to_hex());
   }
   auto& account = *account_p;
   CHECK(account.addr == acc_addr);
@@ -4998,7 +5013,7 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
         extra.clear();
         return check_one_transaction(account, lt, value->prefetch_ref(), lt == min_trans_lt, lt == max_trans_lt);
       })) {
-    return reject_query("at least one Transaction of account "s + acc_addr.to_hex() + " is invalid");
+    return deferred_reject_query("at least one Transaction of account "s + acc_addr.to_hex() + " is invalid");
   }
 
   // See Collator::combine_account_trabsactions
@@ -5011,8 +5026,8 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
       if (!(cb.store_ref_bool(account.total_state)             // account_descr$_ account:^Account
             && cb.store_bits_bool(account.last_trans_hash_)    // last_trans_hash:bits256
             && cb.store_long_bool(account.last_trans_lt_, 64)  // last_trans_lt:uint64
-            && ns_.account_dict_->set_builder(account.addr, cb, vm::Dictionary::SetMode::Add))) {
-        return fatal_error(std::string{"cannot add newly-created account "} + account.addr.to_hex() +
+            && with_ns_lock([&] { return ns_.account_dict_->set_builder(account.addr, cb, vm::Dictionary::SetMode::Add); }))) {
+        return deferred_fatal_error(std::string{"cannot add newly-created account "} + account.addr.to_hex() +
                            " into ShardAccounts");
       }
     } else if (account.status == block::Account::acc_nonexist) {
@@ -5021,8 +5036,8 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
         std::cerr << "deleting account " << account.addr.to_hex() << " with empty new value ";
         block::gen::t_Account.print_ref(std::cerr, account.total_state);
       }
-      if (ns_.account_dict_->lookup_delete(account.addr).is_null()) {
-        return fatal_error(std::string{"cannot delete account "} + account.addr.to_hex() + " from ShardAccounts");
+      if (with_ns_lock([&] { return ns_.account_dict_->lookup_delete(account.addr).is_null(); })) {
+        return deferred_fatal_error(std::string{"cannot delete account "} + account.addr.to_hex() + " from ShardAccounts");
       }
     } else {
       // existing account modified
@@ -5034,8 +5049,8 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
       if (!(cb.store_ref_bool(account.total_state)             // account_descr$_ account:^Account
             && cb.store_bits_bool(account.last_trans_hash_)    // last_trans_hash:bits256
             && cb.store_long_bool(account.last_trans_lt_, 64)  // last_trans_lt:uint64
-            && ns_.account_dict_->set_builder(account.addr, cb, vm::Dictionary::SetMode::Replace))) {
-        return fatal_error(std::string{"cannot modify existing account "} + account.addr.to_hex() +
+            && with_ns_lock([&] { return ns_.account_dict_->set_builder(account.addr, cb, vm::Dictionary::SetMode::Replace); }))) {
+        return deferred_fatal_error(std::string{"cannot modify existing account "} + account.addr.to_hex() +
                            " in ShardAccounts");
       }
     }
@@ -5043,19 +5058,18 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
 
   block::gen::HASH_UPDATE::Record hash_upd;
   if (!tlb::type_unpack_cell(std::move(acc_blk.state_update), block::gen::t_HASH_UPDATE_Account, hash_upd)) {
-    return reject_query("cannot extract (HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex());
+    return deferred_reject_query("cannot extract (HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex());
   }
   block::tlb::ShardAccount::Record old_state, new_state;
-  if (!(old_state.unpack(ps_.account_dict_->lookup(account.addr)) &&
-        new_state.unpack(ns_.account_dict_->lookup(account.addr)))) {
-    return reject_query("cannot extract Account from the ShardAccount of "s + account.addr.to_hex());
+  if (with_ns_lock([&] { return !(old_state.unpack(ps_.account_dict_->lookup(account.addr)) && new_state.unpack(ns_.account_dict_->lookup(account.addr))); })) {
+    return deferred_reject_query("cannot extract Account from the ShardAccount of "s + account.addr.to_hex());
   }
   if (hash_upd.old_hash != old_state.account->get_hash().bits()) {
-    return reject_query("(HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex() +
+    return deferred_reject_query("(HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex() +
                         " has incorrect old hash");
   }
   if (hash_upd.new_hash != new_state.account->get_hash().bits()) {
-    return reject_query("(HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex() +
+    return deferred_reject_query("(HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex() +
                         " has incorrect new hash");
   }
 
@@ -5071,11 +5085,20 @@ bool ContestValidateQuery::check_transactions() {
   LOG(INFO) << "checking all transactions";
   ns_.account_dict_ =
       std::make_unique<vm::AugmentedDictionary>(ps_.account_dict_->get_root(), 256, block::tlb::aug_ShardAccounts);
-  bool ok = account_blocks_dict_->check_for_each_extra(
-      [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
-        CHECK(key_len == 256);
-        return check_account_transactions(key, std::move(value));
-      });
+
+  std::vector<std::future<bool>> futures;
+  const auto callback = [this, &futures](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
+    CHECK(key_len == 256);
+    futures.emplace_back(thread_pool_.push([this, key = StdSmcAddress(key), value = std::move(value)] (int) {
+      return check_account_transactions(std::move(key), std::move(value));
+    }));
+    return true;
+  };
+
+  bool ok = account_blocks_dict_->check_for_each_extra(callback);
+  for (auto& f : futures) {
+    ok &= f.get();
+  }
 
   return ok;
 }
