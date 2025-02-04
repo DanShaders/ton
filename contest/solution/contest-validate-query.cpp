@@ -198,7 +198,6 @@ void ContestValidateQuery::finish_query() {
  * This function performs various checks on the validation parameters and the block candidate.
  * Then the function also sends requests to the ValidatorManager to fetch blocks and shard stated.
  */
-/// Вызывается перед каждым блоком. Сколько блоков - столько вызовов
 void ContestValidateQuery::start_up() {
   td::tl_policies::ref_cnt::PolicyHolder policy_disable_ts_cnt;
   LOG(INFO) << "validate query for " << id_.to_str() << " started";
@@ -501,7 +500,6 @@ bool ContestValidateQuery::extract_collated_data() {
  *
  * @param res The result of the masterchain state retrieval.
  */
-/// 1 вызов на блок
 void ContestValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
   td::tl_policies::ref_cnt::PolicyHolder policy_disable_ts_cnt;
   LOG(INFO) << "in ContestValidateQuery::after_get_mc_state() for " << mc_blkid_.to_str();
@@ -527,7 +525,6 @@ void ContestValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
  * @param idx The index of the previous block (0 or 1).
  * @param res The result of the shard state retrieval.
  */
-/// 1 вызов на блок
 void ContestValidateQuery::after_get_shard_state(int idx, td::Result<Ref<ShardState>> res) {
   td::tl_policies::ref_cnt::PolicyHolder policy_disable_ts_cnt;
   LOG(INFO) << "in ContestValidateQuery::after_get_shard_state(" << idx << ")";
@@ -543,7 +540,6 @@ void ContestValidateQuery::after_get_shard_state(int idx, td::Result<Ref<ShardSt
   CHECK(prev_states_[idx]->get_shard() == ShardIdFull(prev_blocks_[idx]));
   CHECK(prev_states_[idx]->root_cell().not_null());
 
-  /// Вызывается один раз в after_get_shard_state или after_get_mc_state
   if (!pending) {
     if (!try_validate()) {
       fatal_error("cannot validate new block");
@@ -1171,7 +1167,6 @@ bool ContestValidateQuery::request_neighbor_queues() {
  * @param res The obtained outbound queue.
  */
 
-/// 1250 вызово на 250 блоков. Всегда по 5
 void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQueue>> res) {
   td::tl_policies::ref_cnt::PolicyHolder policy_disable_ts_cnt;
   --pending;
@@ -4468,7 +4463,6 @@ std::unique_ptr<block::Account> ContestValidateQuery::make_account_from(td::Cons
     if (!ptr->init_new(now_)) {
       return nullptr;
     }
-  /// В этом месте распаковываются account cells
   } else if (!ptr->unpack(std::move(account), now_, false)) {
     return nullptr;
   }
@@ -4514,37 +4508,8 @@ std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBi
  * @returns True if the transaction is valid, false otherwise.
  */
 
-/// 49 раз для valid-202.bin
 bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::LogicalTime lt, Ref<vm::Cell> trans_root,
                                                  bool is_first, bool is_last) {
-#if !defined(NDEBUG) && 1
-  {
-    static size_t count = 0;
-    ++count;
-    ::OutputDebugStringA(std::format(R"([trans_dict.check_for_each_extra] {}
-  workchain:  {}
-  account:    {}
-  sells:      {}
-  trans hash: {}
-  trans lt:   {}
-)", 
-      count, account.workchain, account.addr.to_hex(),
-      account.storage_stat.get_cells(),
-      trans_root->get_hash().to_hex(), lt
-    ).c_str());
-
-    /// С этого момента начинаются тяжелые операции
-    /// Почему???
-    if (count == 8) {
-      /// У аккаунта 183493904C0F45A99178406C7370F12FBCC5A43FBEAC9DF23B8004C2BABFFCEA
-      /// account.storage_stat содержит 62665 cells.
-      /// Что там???
-      /// Когда оно создается и заполняется???
-      int i = 1;
-    }
-  }
-#endif
-
   LOG(DEBUG) << "checking transaction " << lt << " of account " << account.addr.to_hex();
   const StdSmcAddress& addr = account.addr;
   block::gen::Transaction::Record trans;
@@ -4922,14 +4887,6 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     }
   }
 
-#if !defined(NDEBUG) && 1
-  std::string hex = addr.to_hex();
-  if (hex == "853C18EE846F60DB0AE52171FC93027D8BAB5671D00189331C4958DDB21C3959") {
-    int i = 1;
-  }
-#endif
-
-  /// Здесь заполняется 63000 счеек в trs.new_storage_stat
   if (trs->compute_phase->success && !trs->prepare_action_phase(action_phase_cfg_)) {
     return reject_query(PSTRING() << "cannot re-create action phase of transaction " << lt << " for smart contract "
                                   << addr.to_hex());
@@ -4969,7 +4926,6 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
                   << ", special_gas_limit=" << compute_phase_cfg_.special_gas_limit << ")");
   }
 
-  /// Здесь state переходит в аккаунт, накапливается, но сам аккаунт также должен участвовать в фильтрации новых!
   auto trans_root2 = trs->commit(account);
   if (trans_root2.is_null()) {
     return reject_query(PSTRING() << "the re-created transaction " << lt << " for smart contract " << addr.to_hex()
@@ -5052,31 +5008,6 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
     return reject_query("cannot unpack old state of account "s + acc_addr.to_hex());
   }
 
-#if !defined(NDEBUG) && 1
-  {
-    static size_t count = 0;
-    ++count;
-    if (count % 1 == 0) {
-      ::OutputDebugStringA(std::format("[ContestValidateQuery::check_account_transactions] {}\n", count).c_str());
-    }
-
-    if (count == 8) {
-      int i = 1;
-    }
-
-    const std::string acc = acc_addr.to_hex();
-
-    static std::set<std::string> accountsUniq;
-    static std::vector<std::string> accounts;
-
-    accountsUniq.insert(acc);
-    accounts.push_back(acc);
-
-    ::OutputDebugStringA(std::format("[ContestValidateQuery::check_account_transactions: TOTAL acc] {}/{}\n",
-                                     accountsUniq.size(), accounts.size()).c_str());
-  }
-#endif
-
   auto& account = *account_p;
   CHECK(account.addr == acc_addr);
   vm::AugmentedDictionary trans_dict{vm::DictNonEmpty(), std::move(acc_blk.transactions), 64,
@@ -5087,21 +5018,9 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
 
   vm::CacheTransactions::clear();
 
-  /// В результате этой строки state_usage_tree разрастается до 63663 на valid-202.bin
   if (!trans_dict.check_for_each_extra([this, &account, min_trans_lt, max_trans_lt](Ref<vm::CellSlice> value,
                                                                                     Ref<vm::CellSlice> extra,
                                                                                     td::ConstBitPtr key, int key_len) {
-        /// 10508 транзакций
-        /// 15 транзакций на блоке 202
-#if !defined(NDEBUG) && 0
-        {
-          static size_t count = 0;
-          ++count;
-          ::OutputDebugStringA(std::format("[trans_dict.check_for_each_extra] {}\n", count).c_str());
-        }
-#endif
-
-        /// Начиная с 8-й транзакции хеши считаются по 63000 раз, а в другие разы - менее 1000
         CHECK(key_len == 64);
         ton::LogicalTime lt = key.get_uint(64);
         extra.clear();
@@ -5182,7 +5101,6 @@ bool ContestValidateQuery::check_transactions() {
       std::make_unique<vm::AugmentedDictionary>(ps_.account_dict_->get_root(), 256, block::tlb::aug_ShardAccounts);
   bool ok = account_blocks_dict_->check_for_each_extra(
       [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
-        /// Всего 22 вызова на тяжелом блоке valid-202.bin
         CHECK(key_len == 256);
         return check_account_transactions(key, std::move(value));
       });

@@ -72,7 +72,6 @@ private:
 };
 }
 
-/// 7,594,000
 std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
   const size_t storage_size = info.get_storage_size();
 
@@ -94,10 +93,8 @@ void DataCell::destroy_storage(char* storage) {
   }
 }
 
-/// 36,000
 td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, td::Span<Ref<Cell>> refs,
                                            bool special) {
-  /// Возможно, что эти действия лишние? Нужно копирование? Или перевод в другой формат??
   std::array<Ref<Cell>, max_refs> copied_refs;
   CHECK(refs.size() <= copied_refs.size());
   for (size_t i = 0; i < refs.size(); i++) {
@@ -158,8 +155,6 @@ class ABSL_ATTRIBUTE_FUNC_ALIGN(16) HasherSha256Isal {
 };
 #endif
 
-/// [PERF] 18.44%
-/// 7,594,000
 td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, td::MutableSpan<Ref<Cell>> refs,
                                            bool special) {
   for (auto& ref : refs) {
@@ -268,7 +263,6 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
       return td::Status::Error("Unknown special cell type");
   }
 
-  /// 8 байт
   Info info;
   if (td::unlikely(bits > max_bits)) {
     return td::Status::Error("Too many bits");
@@ -292,7 +286,6 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
   info.hash_count_ = hash_count & 7;
   info.virtualization_ = virtualization & 7;
 
-  /// [PERF] 5.53%
   auto data_cell = create_empty_data_cell(info);
   auto* storage = data_cell->get_storage();
 
@@ -320,7 +313,6 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
   auto total_hash_count = level_mask.get_hashes_count();
   auto hash_i_offset = total_hash_count - hash_count;
 
-  /// Делаем вычисление за одну операцию, это быстрее и для SHA256_CTX, и digest::SHA256
   static ABSL_CACHELINE_ALIGNED TD_THREAD_LOCAL uint8_t buffer[1024] = {};
   for (td::uint32 level_i = 0, hash_i = 0, level = level_mask.get_level(); level_i <= level; level_i++) {
     if (!level_mask.is_significant(level_i)) {
@@ -376,7 +368,6 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
       buffer_size += sizeof(Hash);
     }
 
-    /// Хешер для процессоров Intel
 #ifdef TON_EXPERIMENT_ISAL_CRYPTO
     static ABSL_ATTRIBUTE_FUNC_ALIGN(16) TD_THREAD_LOCAL HasherSha256Isal hasherIsal;
     if (hasherIsal.is_ok()) {
@@ -393,9 +384,8 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     } else
 #endif
 
-    /// В зависимости от размера блока данных выбираем hasher:
-    /// SHA256_CTX намного быстрее для малых данных чем digest::SHA256
-    /// И под Win32 и под Linux.
+    /// Depending on the size of the data block, we select a hasher:
+    /// SHA256_CTX is much faster for small data than digest::SHA256
     if (buffer_size < 512) {
       static ABSL_ATTRIBUTE_FUNC_ALIGN(16) TD_THREAD_LOCAL SHA256_CTX ctx;
       SHA256_Init(&ctx);
@@ -414,16 +404,7 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
   return Ref<DataCell>(data_cell.release(), Ref<DataCell>::acquire_t{});
 }
 
-/// 24,100,000 на всех блоках! Почему так много??? - потому, что создается 7.5М объектов DataCell и у каждого 3 level hash
 const DataCell::Hash& DataCell::do_get_hash(td::uint32 level) const {
-#if !defined(NDEBUG) && 0
-  {
-    static size_t count = 0;
-    ++count;
-    if (count % 1000 == 0)
-    ::OutputDebugStringA(std::format("[DataCell::do_get_hash] {}\n", count).c_str());
-  }
-#endif
   auto hash_i = get_level_mask().apply(level).get_hash_i();
   if (special_type() == SpecialType::PrunnedBranch) {
     auto this_hash_i = get_level_mask().get_hash_i();

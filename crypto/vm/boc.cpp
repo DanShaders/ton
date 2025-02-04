@@ -46,28 +46,6 @@ td::Status CellSerializationInfo::init(td::Slice data, int ref_byte_size) {
 }
 
 td::Status CellSerializationInfo::init(td::uint8 d1, td::uint8 d2, int ref_byte_size) {
-
-#if !defined(NDEBUG) && 0
-  {
-    static std::map<std::string, int> keys;
-    std::string key = std::format("{} {} {}", d1, d1, ref_byte_size);
-    int& val = keys[key];
-
-    if (val == 0) {
-      ::OutputDebugStringA(std::format("[CellSerializationInfo::init] {} {} {}\n", d1, d1, ref_byte_size).c_str());
-    }
-    ++val;
-
-    static size_t count = 0;
-    ++count;
-    ::OutputDebugStringA(std::format("[CellSerializationInfo::init] {}\n", count).c_str());
-
-    if (count == 10840) {
-      int i = 1;
-    }
-  }
-#endif
-
   refs_cnt = d1 & 7;
   level_mask = Cell::LevelMask(d1 >> 5);
   special = (d1 & 8) != 0;
@@ -215,18 +193,7 @@ td::Status BagOfCells::import_cells() {
 }
 
 // Changes in this function may require corresponding changes in crypto/vm/large-boc-serializer.cpp
-/// 1,120,000
 td::Result<int> BagOfCells::import_cell(td::Ref<vm::Cell> cell, int depth) {
-
-#if !defined(NDEBUG) && 0
-  {
-    static size_t count = 0;
-    ++count;
-    if (count % 10000 == 0)
-      ::OutputDebugStringA(("[BagOfCells::import_cell] " + std::to_string(count) + "\n").c_str());
-  }
-#endif
-
   if (depth > max_depth) {
     return td::Status::Error("error while importing a cell into a bag of cells: cell depth too large");
   }
@@ -784,7 +751,6 @@ td::Result<td::Slice> BagOfCells::get_cell_slice(int idx, td::Slice data) {
   return data.substr(offs, td::narrow_cast<size_t>(offs_end - offs));
 }
 
-/// [PERF] 21.69%
 td::Result<td::Ref<vm::DataCell>> BagOfCells::deserialize_cell(int idx, td::Slice cells_slice,
                                                                td::Span<td::Ref<DataCell>> cells_span,
                                                                std::vector<td::uint8>* cell_should_cache) {
@@ -914,9 +880,6 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
       return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << idx << " "
                                         << r_cell.error());
     }
-
-    /// Здесь сохраняется текущая DataCell
-
     cell_list.push_back(r_cell.move_as_ok());
     DCHECK(cell_list.back().not_null());
   }
@@ -1172,14 +1135,6 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
     return td::Status::Error("cell is null");
   }
   if (kill_dup) {
-    /// \remark Контейнер seen нужен только для того, чтобы определять, дупликат или нет
-    /// Если его закомментировать, ни что не заругается больше!
-    //auto ins = seen.emplace(cell->get_hash(), CellInfo{});
-
-    //if (!ins.second) {
-    //  return ins.first->second;
-    //}
-
     auto ins = deduplication_strategy->emplace(cell->get_hash(), CellInfo{});
 
     if (!ins.second) {

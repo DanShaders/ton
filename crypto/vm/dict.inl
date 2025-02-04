@@ -2224,19 +2224,9 @@ inline bool DictionaryFixed::combine_with(DictionaryFixed& dict2) {
                       });
 }
 
-/// 112,000 на всех блоках
 inline bool DictionaryFixed::dict_check_for_each(Ref<Cell> dict, td::BitPtr key_buffer, int n, int total_key_len,
                                           const DictionaryFixed::foreach_func_t& foreach_func,
                                           bool invert_first, bool shuffle) const {
-
-#if !defined(NDEBUG) && 1
-  {
-    static size_t count = 0;
-    ++count;
-    if (count % 1000 == 0)
-      ::OutputDebugStringA(("[DictionaryFixed::dict_check_for_each] " + std::to_string(count) + "\n").c_str());
-  }
-#endif
 
   if (dict.is_null()) {
     return true;
@@ -2269,7 +2259,6 @@ inline bool DictionaryFixed::dict_check_for_each(Ref<Cell> dict, td::BitPtr key_
   return dict_check_for_each(std::move(c2), key_buffer, n - l - 1, total_key_len, foreach_func, false, shuffle);
 }
 
-/// 78 на тяжелом блоке
 inline bool DictionaryFixed::check_for_each(const foreach_func_t& foreach_func, bool invert_first, bool shuffle) {
   force_validate();
   if (is_empty()) {
@@ -3158,18 +3147,6 @@ inline bool AugmentedDictionary::set_ref(td::ConstBitPtr key, int key_len, Ref<C
 }
 
 inline bool AugmentedDictionary::set_builder(td::ConstBitPtr key, int key_len, const CellBuilder& value, SetMode mode) {
-
-#if !defined(NDEBUG) && 1
-  {
-    static size_t count = 0;
-    ++count;
-    if (count % 1000 == 0) {
-      ::OutputDebugStringA(std::format("[AugmentedDictionary::set_builder] {}\n", count).c_str());
-    }
-  }
-#endif
-
-  /// 13000 таких вызовов на всей коллекции
   return set(key, key_len, load_cell_slice(value.finalize_copy()));
 }
 
@@ -3179,7 +3156,6 @@ inline bool AugmentedDictionary::check_for_each_extra(const foreach_extra_func_t
   const auto& augm = aug;
   foreach_func_t foreach_func = [&foreach_extra_func, &augm](Ref<vm::CellSlice> value_extra, td::ConstBitPtr key,
                                                              int key_len) {
-    // 236 вызовов на тяжелом блоке
     auto extra = augm.extract_extra(value_extra.write());
     return extra.not_null() && foreach_extra_func(std::move(value_extra), std::move(extra), key, key_len);
   };
