@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.9 FATAL_ERROR)
 
 add_library(lite-client-common STATIC lite-client-common.cpp lite-client-common.h ext-client.cpp ext-client.h
   query-utils.hpp query-utils.cpp)

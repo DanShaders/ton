@@ -21,7 +21,7 @@
 #include "vm/cells/CellUsageTree.h"
 
 namespace vm {
-class UsageCell : public Cell {
+class UsageCell final : public Cell {
  private:
   struct PrivateTag {};
 
@@ -37,7 +37,7 @@ class UsageCell : public Cell {
   }
 
   // load interface
-  td::Result<LoadedCell> load_cell() const override {
+  td::Result<LoadedCell> load_cell() const final {
     TRY_RESULT(loaded_cell, cell_->load_cell());
     if (tree_node_.on_load(loaded_cell.data_cell)) {
       CHECK(loaded_cell.tree_node.empty());
@@ -45,7 +45,7 @@ class UsageCell : public Cell {
     }
     return std::move(loaded_cell);
   }
-  Ref<Cell> virtualize(VirtualizationParameters virt) const override {
+  Ref<Cell> virtualize(VirtualizationParameters virt) const final {
     auto virtualized_cell = cell_->virtualize(virt);
     if (tree_node_.empty()) {
       return virtualized_cell;
@@ -56,28 +56,28 @@ class UsageCell : public Cell {
     return create(std::move(virtualized_cell), tree_node_);
   }
 
-  td::uint32 get_virtualization() const override {
+  td::uint32 get_virtualization() const final {
     return cell_->get_virtualization();
   }
 
-  CellUsageTree::NodePtr get_tree_node() const override {
+  CellUsageTree::NodePtr get_tree_node() const final {
     return tree_node_;
   }
 
-  bool is_loaded() const override {
+  bool is_loaded() const final {
     return cell_->is_loaded();
   }
 
   // hash and level
-  LevelMask get_level_mask() const override {
+  LevelMask get_level_mask() const final {
     return cell_->get_level_mask();
   }
 
  protected:
-  const Hash do_get_hash(td::uint32 level) const override {
+  const Hash do_get_hash(td::uint32 level) const final {
     return cell_->get_hash(level);
   }
-  td::uint16 do_get_depth(td::uint32 level) const override {
+  td::uint16 do_get_depth(td::uint32 level) const final {
     return cell_->get_depth(level);
   }
 

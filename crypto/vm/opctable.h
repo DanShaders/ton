@@ -23,6 +23,8 @@
 #include <vector>
 #include <map>
 
+#include <absl/container/btree_map.h>
+
 namespace vm {
 
 typedef std::function<int(const CellSlice&, unsigned, int)> compute_instr_len_func_t;
@@ -88,15 +90,20 @@ dump_arg_instr_func_t dump_2c_add(unsigned add, std::string prefix, std::string 
 
 }  // namespace instr
 
-class OpcodeTable : public DispatchTable {
-  std::map<unsigned, const OpcodeInstr*> instructions;
-  std::vector<std::pair<unsigned, const OpcodeInstr*>> instruction_list;
+class OpcodeTable final : public DispatchTable {
+  struct Instruction {
+    unsigned first;
+    const OpcodeInstr* second;
+  };
+
+  absl::btree_map<unsigned, const OpcodeInstr*> instructions;
+  std::vector<Instruction> instruction_list;
   std::string name;
   Codepage codepage;
   bool final;
 
  public:
-  OpcodeTable(std::string _name, Codepage cp) : name(_name), codepage(cp), final(false) {
+  OpcodeTable(std::string _name, Codepage cp) : name(std::move(_name)), codepage(cp), final(false) {
   }
   OpcodeTable(const OpcodeTable&) = delete;
   OpcodeTable(OpcodeTable&&) = delete;
@@ -194,13 +201,16 @@ class OpcodeInstrExt : public OpcodeInstr {
 class OpcodeInstrWithVersion : public OpcodeInstr {
  public:
   OpcodeInstrWithVersion() = delete;
-  OpcodeInstrWithVersion(OpcodeInstr* instr, int required_version) :
-      OpcodeInstr(instr->get_opcode_min(), instr->get_opcode_max()), instr(instr), required_version(required_version) {
+  OpcodeInstrWithVersion(OpcodeInstr* instr, int required_version)
+      : OpcodeInstr(instr->get_opcode_min(), instr->get_opcode_max())
+      , instr(instr)
+      , required_version(required_version) {
   }
   ~OpcodeInstrWithVersion() override = default;
   int dispatch(VmState* st, CellSlice& cs, unsigned opcode, unsigned bits) const override;
   std::string dump(CellSlice& cs, unsigned opcode, unsigned bits) const override;
   int instr_len(const CellSlice& cs, unsigned opcode, unsigned bits) const override;
+
  private:
   OpcodeInstr* instr;
   int required_version;

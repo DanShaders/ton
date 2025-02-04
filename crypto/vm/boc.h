@@ -31,6 +31,8 @@
 #include "td/utils/Timer.h"
 #include "td/utils/port/FileFd.h"
 
+#include "absl/container/btree_map.h"
+
 namespace vm {
 using td::Ref;
 
@@ -117,7 +119,7 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+  absl::btree_map<vm::Cell::Hash, CellInfo> seen;
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)
@@ -169,11 +171,10 @@ class ProofStorageStat {
  public:
   void add_cell(const Ref<DataCell>& cell);
   td::uint64 estimate_proof_size() const;
+
  private:
-  enum CellStatus {
-    c_none = 0, c_prunned = 1, c_loaded = 2
-  };
-  std::map<vm::Cell::Hash, CellStatus> cells_;
+  enum CellStatus { c_none = 0, c_prunned = 1, c_loaded = 2 };
+  absl::btree_map<vm::Cell::Hash, CellStatus> cells_;
   td::uint64 proof_size_ = 0;
 };
 

@@ -804,7 +804,7 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
   clear();
   long long size_est = info.parse_serialized_header(data);
   //LOG(INFO) << "estimated size " << size_est << ", true size " << data.size();
-  if (size_est == 0) {
+  if (size_est == 0) [[unlikely]] {
     return td::Status::Error(PSLICE() << "cannot deserialize bag-of-cells: invalid header, error " << size_est);
   }
   if (size_est < 0) {
@@ -819,13 +819,13 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
     return -size_est;
   }
   //LOG(INFO) << "estimated size " << size_est << ", true size " << data.size();
-  if (info.root_count > max_roots) {
+  if (info.root_count > max_roots) [[unlikely]] {
     return td::Status::Error("Bag-of-cells has more root cells than expected");
   }
   if (info.has_crc32c) {
     unsigned crc_computed = td::crc32c(td::Slice{data.ubegin(), data.uend() - 4});
     unsigned crc_stored = td::as<unsigned>(data.uend() - 4);
-    if (crc_computed != crc_stored) {
+    if (crc_computed != crc_stored) [[unlikely]] {
       return td::Status::Error(PSLICE() << "bag-of-cells CRC32C mismatch: expected " << td::format::as_hex(crc_computed)
                                         << ", found " << td::format::as_hex(crc_stored));
     }
@@ -844,7 +844,7 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
     if (info.has_roots) {
       idx = (int)info.read_ref(roots_ptr + i * info.ref_byte_size);
     }
-    if (idx < 0 || idx >= info.cell_count) {
+    if (idx < 0 || idx >= info.cell_count) [[unlikely]] {
       return td::Status::Error(PSLICE() << "bag-of-cells invalid root index " << idx);
     }
     roots[i].idx = info.cell_count - idx - 1;
@@ -868,7 +868,7 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
     for (int i = 0; i < info.cell_count; i++) {
       CellSerializationInfo cell_info;
       auto status = cell_info.init(cells_slice, info.ref_byte_size);
-      if (status.is_error()) {
+      if (status.is_error()) [[unlikely]] {
         return td::Status::Error(PSLICE()
                                  << "invalid bag-of-cells failed to deserialize cell #" << i << " " << status.error());
       }
@@ -900,7 +900,7 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
     for (int idx = 0; idx < cell_count; idx++) {
       auto should_cache = cell_should_cache[idx] > 1;
       auto stored_should_cache = get_cache_entry(idx);
-      if (should_cache != stored_should_cache) {
+      if (should_cache != stored_should_cache) [[unlikely]] {
         return td::Status::Error(PSLICE() << "invalid bag-of-cells cell #" << idx << " has wrong cache flag "
                                           << stored_should_cache);
       }
@@ -1094,13 +1094,13 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(const Ce
                                                                         unsigned skip_count_root) {
   if (!(skip_count_root & 1)) {
     ++cells;
-    if (cells > limit_cells) {
+    if (cells > limit_cells) [[unlikely]] {
       return td::Status::Error("too many cells");
     }
   }
   if (!(skip_count_root & 2)) {
     bits += cs.size();
-    if (bits > limit_bits) {
+    if (bits > limit_bits) [[unlikely]] {
       return td::Status::Error("too many bits");
     }
   }
@@ -1120,13 +1120,13 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlic
                                                                         unsigned skip_count_root) {
   if (!(skip_count_root & 1)) {
     ++cells;
-    if (cells > limit_cells) {
+    if (cells > limit_cells) [[unlikely]] {
       return td::Status::Error("too many cells");
     }
   }
   if (!(skip_count_root & 2)) {
     bits += cs.size();
-    if (bits > limit_bits) {
+    if (bits > limit_bits) [[unlikely]] {
       return td::Status::Error("too many bits");
     }
   }
@@ -1144,7 +1144,7 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlic
 
 td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::Cell> cell, bool kill_dup,
                                                                         unsigned skip_count_root) {
-  if (cell.is_null()) {
+  if (cell.is_null()) [[unlikely]] {
     return td::Status::Error("cell is null");
   }
   if (kill_dup) {
@@ -1153,8 +1153,7 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
       return ins.first->second;
     }
   }
-  vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
-  return add_used_storage(std::move(cs), kill_dup, skip_count_root);
+  return add_used_storage({vm::NoVm{}, std::move(cell)}, kill_dup, skip_count_root);
 }
 
 void NewCellStorageStat::add_cell(Ref<Cell> cell) {

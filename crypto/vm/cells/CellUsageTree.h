@@ -24,6 +24,8 @@
 #include "td/utils/logging.h"
 #include <functional>
 
+#include <absl/container/inlined_vector.h>
+
 namespace vm {
 
 class DataCell;
@@ -75,7 +77,7 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
     std::array<td::uint32, CellTraits::max_refs> children{};
   };
   bool use_mark_{false};
-  std::vector<Node> nodes_{2};
+  absl::InlinedVector<Node, 2> nodes_{2};
   std::function<void(const td::Ref<vm::DataCell>&)> cell_load_callback_;
 
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);

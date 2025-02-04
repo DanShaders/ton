@@ -48,7 +48,7 @@ DispatchTable* OpcodeTable::finalize() {
     if (range.first > upto) {
       instruction_list.emplace_back(upto, new OpcodeInstrDummy{upto, range.first});
     }
-    instruction_list.emplace_back(x);
+    instruction_list.emplace_back(x.first, x.second);
     upto = range.second;
   }
 
@@ -382,8 +382,8 @@ dump_arg_instr_func_t dump_2sr(std::string prefix, std::string suffix) {
 dump_arg_instr_func_t dump_2sr_adj(unsigned adj, std::string prefix, std::string suffix) {
   return [adj, prefix, suffix](CellSlice&, unsigned args) -> std::string {
     std::ostringstream os;
-    os << prefix << 's' << (int)((args >> 4) & 15) - (int)((adj >> 4) & 15) << ",s" << (int)(args & 15) - (int)(adj & 15)
-       << suffix;
+    os << prefix << 's' << (int)((args >> 4) & 15) - (int)((adj >> 4) & 15) << ",s"
+       << (int)(args & 15) - (int)(adj & 15) << suffix;
     return os.str();
   };
 }
