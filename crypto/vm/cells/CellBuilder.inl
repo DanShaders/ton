@@ -37,15 +37,11 @@ using td::RefAny;
  */
 
 inline CellBuilder::~CellBuilder() {
-#if !defined(NDEBUG) || defined(TON_USE_CELLBUILDER_TS_COUNTER)
   get_thread_safe_counter().add(-1);
-#endif
 }
 
 inline CellBuilder::CellBuilder() : bits(0), refs_cnt(0) {
-#if !defined(NDEBUG) || defined(TON_USE_CELLBUILDER_TS_COUNTER)
   get_thread_safe_counter().add(+1);
-#endif
 }
 
 inline Ref<DataCell> CellBuilder::finalize_copy(bool special) const {

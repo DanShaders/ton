@@ -253,14 +253,10 @@ inline CellHash as_cell_hash(const Ref<DataCell>& cell) {
 }
 
 inline DataCell::DataCell(Info info) : info_(std::move(info)) {
-#if !defined(NDEBUG) || defined(TON_USE_DATACELL_TS_COUNTER)
   get_thread_safe_counter().add(1);
-#endif
 }
 inline DataCell::~DataCell() {
-#if !defined(NDEBUG) || defined(TON_USE_DATACELL_TS_COUNTER)
   get_thread_safe_counter().add(-1);
-#endif
 }
 
 }  // namespace vm
