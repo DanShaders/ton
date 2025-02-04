@@ -101,7 +101,10 @@ class NewCellStorageStat {
 
  private:
   const CellUsageTree* usage_tree_;
-  std::set<vm::Cell::Hash> seen_;
+
+  absl::flat_hash_set<vm::Cell::Hash> seen_;
+  //std::set<vm::Cell::Hash> seen_;
+
   Stat stat_;
   std::set<vm::Cell::Hash> proof_seen_;
   Stat proof_stat_;
@@ -117,7 +120,10 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+
+  absl::flat_hash_map<vm::Cell::Hash, CellInfo> seen;
+  //std::map<vm::Cell::Hash, CellInfo> seen;
+
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)

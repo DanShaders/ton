@@ -69,6 +69,13 @@ struct CellHash {
     return res;
   }
 
+  uint32_t as_uint32() const {
+    static_assert(CellTraits::hash_bytes >= 4);
+    uint32_t ret;
+    std::memcpy(&ret, hash_.data(), sizeof(ret));
+    return ret;
+  }
+
  private:
   std::array<td::uint8, CellTraits::hash_bytes> hash_;
 };
@@ -84,7 +91,8 @@ struct hash<vm::CellHash> {
   typedef vm::CellHash argument_type;
   typedef std::size_t result_type;
   result_type operator()(argument_type const& s) const noexcept {
-    return cell_hash_slice_hash(s.as_slice());
+    return std::hash<uint32_t>{}(s.as_uint32());
+    //return cell_hash_slice_hash(s.as_slice());
   }
 };
 }  // namespace std

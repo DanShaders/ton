@@ -1,0 +1,18 @@
+FROM ubuntu:22.04 AS builder
+RUN apt-get update && \
+        DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential cmake clang openssl libssl-dev zlib1g-dev gperf wget git ninja-build libsodium-dev libmicrohttpd-dev liblz4-dev pkg-config autoconf automake libtool libjemalloc-dev lsb-release software-properties-common gnupg vim bc libclang-common-14-dev libunwind-dev
+
+ENV CCACHE_DISABLE=1
+
+ENV CC=/usr/bin/clang-14
+ENV CXX=/usr/bin/clang++-14
+ENV CCACHE_DISABLE=1
+
+WORKDIR /
+RUN mkdir ton
+WORKDIR /ton
+
+COPY ./ ./
+
+RUN ./build_pgo.sh
+

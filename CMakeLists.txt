@@ -14,6 +14,9 @@ add_library(git STATIC ${POST_CONFIGURE_FILE})
 target_include_directories(git PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_dependencies(git check_git)
 
+SET(PGO_PROFILE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/pgo")
+#message(FATAL_ERROR "profile = ${PGO_PROFILE_PATH}")
+
 # Prevent in-source build
 get_filename_component(TON_REAL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" REALPATH)
 get_filename_component(TON_REAL_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}" REALPATH)
@@ -347,8 +350,9 @@ add_cxx_compiler_flag("-Wno-redundant-move")
 
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -isystem /usr/include/c++/v1")
 if (CLANG)
-  #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
+  add_cxx_compiler_flag("-fprofile-use=${PGO_PROFILE_PATH}")
 endif()
+
 if (TON_USE_ASAN)
   if (CLANG)
     add_cxx_compiler_flag("-stdlib=libc++")
