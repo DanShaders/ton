@@ -2473,6 +2473,13 @@ int Transaction::try_action_send_msg(const vm::CellSlice& cs0, ActionPhase& ap, 
   unsigned max_merkle_depth = 0;
   auto add_used_storage = [&](const auto& x, unsigned skip_root_count) -> td::Status {
     if (x.not_null()) {
+      TRY_RESULT(res, sstat.add_used_storage(*x.get(), true, skip_root_count));
+      max_merkle_depth = std::max(max_merkle_depth, res.max_merkle_depth);
+    }
+    return td::Status::OK();
+  };
+  auto add_used_storage_cell = [&](const auto& x, unsigned skip_root_count) -> td::Status {
+    if (x.not_null()) {
       TRY_RESULT(res, sstat.add_used_storage(x, true, skip_root_count));
       max_merkle_depth = std::max(max_merkle_depth, res.max_merkle_depth);
     }
@@ -2481,7 +2488,7 @@ int Transaction::try_action_send_msg(const vm::CellSlice& cs0, ActionPhase& ap, 
   add_used_storage(msg.init, 3);  // message init
   add_used_storage(msg.body, 3);  // message body (the root cell itself is not counted)
   if (!ext_msg) {
-    add_used_storage(info.value->prefetch_ref(), 0);
+    add_used_storage_cell(info.value->prefetch_ref(), 0);
   }
   auto collect_fine = [&] {
     if (cfg.action_fine_enabled && !account.is_special) {
@@ -3538,7 +3545,7 @@ Ref<vm::Cell> Transaction::commit(Account& acc) {
   acc.last_trans_end_lt_ = end_lt;
   acc.last_trans_hash_ = root->get_hash().bits();
   acc.last_paid = last_paid;
-  acc.storage_stat = new_storage_stat;
+  acc.storage_stat = std::move(new_storage_stat);
   acc.storage = new_storage;
   acc.balance = std::move(balance);
   acc.due_payment = std::move(due_payment);

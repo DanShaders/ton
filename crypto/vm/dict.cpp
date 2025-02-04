@@ -262,8 +262,28 @@ LabelParser::LabelParser(Ref<CellSlice> cs, int max_label_len, int auto_validate
   }
 }
 
-LabelParser::LabelParser(Ref<Cell> cell, int max_label_len, int auto_validate) : remainder(), l_offs(0), l_same(0) {
-  Ref<CellSlice> cs = load_cell_slice_ref(std::move(cell));
+LabelParser::LabelParser(const Ref<Cell>& cell, int max_label_len, int auto_validate)
+    : remainder(), l_offs(0), l_same(0) {
+  Ref<CellSlice> cs = load_cell_slice_ref(cell);
+  if (!parse_label(cs.unique_write(), max_label_len)) {
+    l_offs = 0;
+  } else {
+    s_bits = (l_same ? 0 : l_bits);
+    remainder = std::move(cs);
+  }
+  if (auto_validate) {
+    if (auto_validate > 2) {
+      validate_ext(max_label_len);
+    } else if (auto_validate == 2) {
+      validate_simple(max_label_len);
+    } else {
+      validate();
+    }
+  }
+}
+
+LabelParser::LabelParser(Ref<Cell>&& cell, int max_label_len, int auto_validate) : remainder(), l_offs(0), l_same(0) {
+  Ref<CellSlice> cs = load_cell_slice_ref_move(std::move(cell));
   if (!parse_label(cs.unique_write(), max_label_len)) {
     l_offs = 0;
   } else {

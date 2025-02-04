@@ -751,7 +751,7 @@ td::Result<Ref<vm::Cell>> get_block_transaction_try(Ref<vm::Cell> block_root, to
 
 bool get_transaction_in_msg(Ref<vm::Cell> trans_ref, Ref<vm::Cell>& in_msg);
 bool is_transaction_in_msg(Ref<vm::Cell> trans_ref, Ref<vm::Cell> msg);
-bool is_transaction_out_msg(Ref<vm::Cell> trans_ref, Ref<vm::Cell> msg);
+bool is_transaction_out_msg(Ref<vm::Cell> trans_ref, const Ref<vm::Cell>& msg);
 bool get_transaction_id(Ref<vm::Cell> trans_ref, ton::StdSmcAddress& account_addr, ton::LogicalTime& lt);
 bool get_transaction_owner(Ref<vm::Cell> trans_ref, ton::StdSmcAddress& addr);
 

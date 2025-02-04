@@ -45,8 +45,9 @@ class CellBuilder : public td::CntObject {
   }
 
  public:
-  CellBuilder();
-  virtual ~CellBuilder() override;
+  CellBuilder() : bits(0), refs_cnt(0) {
+  }
+  ~CellBuilder() override = default;
 
   static Ref<Cell> create_pruned_branch(Ref<Cell> cell, td::uint32 new_level, td::uint32 virt_level = Cell::max_level);
   static Ref<DataCell> do_create_pruned_branch(Ref<Cell> cell, td::uint32 new_level,
@@ -185,9 +186,6 @@ class CellBuilder : public td::CntObject {
   CellSlice as_cellslice() &&;
   Ref<CellSlice> as_cellslice_ref() const &;
   Ref<CellSlice> as_cellslice_ref() &&;
-  static td::int64 get_total_cell_builders() {
-    return get_thread_safe_counter().sum();
-  }
   int get_serialized_size() const {
     return ((bits + 23) >> 3);
   }

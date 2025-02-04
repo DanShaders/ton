@@ -37,7 +37,7 @@ class MerkleProofImpl {
     if (!is_prunned_) {
       CHECK(usage_tree_);
       dfs_usage_tree(cell, usage_tree_->root_id());
-      is_prunned_ = [this](const Ref<Cell> &cell) { return visited_cells_.count(cell->get_hash()) == 0; };
+      is_prunned_ = [this](const Ref<Cell> &cell) { return !visited_cells_.contains(cell->get_hash()); };
     }
     try {
       return dfs(cell, cell->get_level());
@@ -99,11 +99,11 @@ class MerkleProofImpl {
 }  // namespace detail
 
 Ref<Cell> MerkleProof::generate_raw(Ref<Cell> cell, IsPrunnedFunction is_prunned) {
-  return detail::MerkleProofImpl(is_prunned).create_from(cell);
+  return detail::MerkleProofImpl(is_prunned).create_from(std::move(cell));
 }
 
 Ref<Cell> MerkleProof::generate_raw(Ref<Cell> cell, CellUsageTree *usage_tree) {
-  return detail::MerkleProofImpl(usage_tree).create_from(cell);
+  return detail::MerkleProofImpl(usage_tree).create_from(std::move(cell));
 }
 
 Ref<Cell> MerkleProof::virtualize_raw(Ref<Cell> cell, Cell::VirtualizationParameters virt) {

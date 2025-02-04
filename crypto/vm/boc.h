@@ -31,6 +31,9 @@
 #include "td/utils/Timer.h"
 #include "td/utils/port/FileFd.h"
 
+#define EMH_ITER_SAFE 1
+#include "third-party/emhash/hash_table7.hpp"
+
 namespace vm {
 using td::Ref;
 
@@ -117,7 +120,7 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+  emhash7::HashMap<vm::Cell::Hash, CellInfo> seen;
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)
@@ -135,16 +138,14 @@ struct CellStorageStat {
     limit_cells = std::numeric_limits<unsigned long long>::max();
     limit_bits = std::numeric_limits<unsigned long long>::max();
   }
-  td::Result<CellInfo> compute_used_storage(Ref<vm::CellSlice> cs_ref, bool kill_dup = true,
-                                            unsigned skip_count_root = 0);
   td::Result<CellInfo> compute_used_storage(const CellSlice& cs, bool kill_dup = true, unsigned skip_count_root = 0);
   td::Result<CellInfo> compute_used_storage(CellSlice&& cs, bool kill_dup = true, unsigned skip_count_root = 0);
-  td::Result<CellInfo> compute_used_storage(Ref<vm::Cell> cell, bool kill_dup = true, unsigned skip_count_root = 0);
+  td::Result<CellInfo> compute_used_storage(const Ref<vm::Cell>& cell, bool kill_dup = true,
+                                            unsigned skip_count_root = 0);
 
-  td::Result<CellInfo> add_used_storage(Ref<vm::CellSlice> cs_ref, bool kill_dup = true, unsigned skip_count_root = 0);
   td::Result<CellInfo> add_used_storage(const CellSlice& cs, bool kill_dup = true, unsigned skip_count_root = 0);
   td::Result<CellInfo> add_used_storage(CellSlice&& cs, bool kill_dup = true, unsigned skip_count_root = 0);
-  td::Result<CellInfo> add_used_storage(Ref<vm::Cell> cell, bool kill_dup = true, unsigned skip_count_root = 0);
+  td::Result<CellInfo> add_used_storage(const Ref<vm::Cell>& cell, bool kill_dup = true, unsigned skip_count_root = 0);
 
   unsigned long long limit_cells = std::numeric_limits<unsigned long long>::max();
   unsigned long long limit_bits = std::numeric_limits<unsigned long long>::max();
@@ -197,8 +198,7 @@ struct CellSerializationInfo {
   td::Status init(td::Slice data, int ref_byte_size);
   td::Status init(td::uint8 d1, td::uint8 d2, int ref_byte_size);
   td::Result<int> get_bits(td::Slice cell) const;
-
-  td::Result<Ref<DataCell>> create_data_cell(td::Slice data, td::Span<Ref<Cell>> refs) const;
+  td::Result<Ref<DataCell>> create_data_cell(td::Slice data, td::MutableSpan<Ref<Cell>> refs) const;
 };
 
 class BagOfCellsLogger {

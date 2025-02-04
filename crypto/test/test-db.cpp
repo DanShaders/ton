@@ -179,7 +179,7 @@ class BenchSha256 : public BenchSha {
   }
 
   void run(int n) override {
-    int res = 0;
+    td::int64 res = 0;
     for (int i = 0; i < n; i++) {
       digest::SHA256 hasher;
       hasher.feed(str_);
@@ -199,7 +199,7 @@ class BenchSha256Reuse : public BenchSha {
   }
 
   void run(int n) override {
-    int res = 0;
+    td::int64 res = 0;
     digest::SHA256 hasher;
     for (int i = 0; i < n; i++) {
       hasher.reset();
@@ -228,7 +228,7 @@ class BenchSha256Low : public BenchSha {
 #pragma warning(disable : 4996)  // Disable deprecated warning for MSVC
 #endif
   void run(int n) override {
-    int res = 0;
+    td::int64 res = 0;
     SHA256_CTX ctx;
     for (int i = 0; i < n; i++) {
       SHA256_Init(&ctx);
@@ -255,7 +255,7 @@ class BenchSha256Tdlib : public BenchSha {
   }
 
   void run(int n) override {
-    int res = 0;
+    td::int64 res = 0;
     static TD_THREAD_LOCAL td::Sha256State *ctx;
     for (int i = 0; i < n; i++) {
       td::init_thread_local<td::Sha256State>(ctx);
@@ -923,7 +923,7 @@ TEST(TonDb, BocMultipleRoots) {
 };
 
 TEST(TonDb, InMemoryDynamicBocSimple) {
-  auto counter = [] { return td::NamedThreadSafeCounter::get_default().get_counter("DataCell").sum(); };
+  auto counter = [] { return vm::DataCell::get_total_data_cells(); };
   auto before = counter();
   SCOPE_EXIT {
     LOG_CHECK(before == counter()) << before << " vs " << counter();
@@ -1003,7 +1003,7 @@ struct BocOptions {
 template <class F>
 void with_all_boc_options(F &&f, size_t tests_n = 500) {
   LOG(INFO) << "Test dynamic boc";
-  auto counter = [] { return td::NamedThreadSafeCounter::get_default().get_counter("DataCell").sum(); };
+  auto counter = [] { return vm::DataCell::get_total_data_cells(); };
   auto run = [&](BocOptions options) {
     LOG(INFO) << "\t" << (options.o_in_memory ? "in memory" : "on disk") << (options.async_executor ? " async" : "");
     if (options.o_in_memory) {
@@ -1033,7 +1033,7 @@ void with_all_boc_options(F &&f, size_t tests_n = 500) {
 }
 
 void test_dynamic_boc(BocOptions options) {
-  auto counter = [] { return td::NamedThreadSafeCounter::get_default().get_counter("DataCell").sum(); };
+  auto counter = [] { return vm::DataCell::get_total_data_cells(); };
   auto before = counter();
   SCOPE_EXIT {
     LOG_CHECK((options.o_in_memory && options.o_in_memory->use_arena) || before == counter())
@@ -1101,7 +1101,7 @@ void test_dynamic_boc2(BocOptions options) {
   auto dboc = create_dboc(0);
   dboc->set_loader(std::make_unique<CellLoader>(kv));
 
-  auto counter = [] { return td::NamedThreadSafeCounter::get_default().get_counter("DataCell").sum(); };
+  auto counter = [] { return vm::DataCell::get_total_data_cells(); };
   auto before = counter();
   SCOPE_EXIT{
       // LOG_CHECK((options.o_in_memory && options.o_in_memory->use_arena) || before == counter())

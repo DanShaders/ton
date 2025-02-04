@@ -2186,7 +2186,7 @@ bool is_transaction_in_msg(Ref<vm::Cell> trans_ref, Ref<vm::Cell> msg) {
          (imsg.is_null() || imsg->get_hash() == msg->get_hash());
 }
 
-bool is_transaction_out_msg(Ref<vm::Cell> trans_ref, Ref<vm::Cell> msg) {
+bool is_transaction_out_msg(Ref<vm::Cell> trans_ref, const Ref<vm::Cell>& msg) {
   block::gen::Transaction::Record trans;
   vm::CellSlice cs;
   unsigned long long created_lt;

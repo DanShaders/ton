@@ -19,19 +19,44 @@
 #pragma once
 #include "vm/cells/Cell.h"
 #include "vm/cells/CellUsageTree.h"
+#include "vm/cells/ArenaAllocator.h"
 
 namespace vm {
-class UsageCell : public Cell {
+
+class UsageCell final : public Cell {
  private:
   struct PrivateTag {};
 
+  struct ArenaAllocator : public ArenaAllocatorBase {
+    template <class... ArgsT>
+    UsageCell* alloc(ArgsT&&... args) {
+      std::pair<char*, int*> res = fast_alloc(sizeof(UsageCell));
+      UsageCell* obj = new (res.first) UsageCell(std::forward<ArgsT>(args)...);
+      obj->arena_counter_ = res.second;
+      return obj;
+    }
+  };
+
+  friend struct ArenaAllocator;
+
  public:
+  static thread_local bool use_arena;
   UsageCell(Ref<Cell> cell, CellUsageTree::NodePtr tree_node, PrivateTag)
       : cell_(std::move(cell)), tree_node_(std::move(tree_node)) {
+  }
+  ~UsageCell() override {
+    if (arena_counter_) {
+      --*arena_counter_;
+    }
   }
   static Ref<Cell> create(Ref<Cell> cell, CellUsageTree::NodePtr tree_node) {
     if (tree_node.empty()) {
       return cell;
+    }
+    if (use_arena) {
+      thread_local ArenaAllocator alloc;
+      UsageCell* ptr = alloc.alloc(std::move(cell), std::move(tree_node), PrivateTag{});
+      return Ref<UsageCell>{ptr, Ref<UsageCell>::acquire_usagecell_t{}};
     }
     return Ref<UsageCell>{true, std::move(cell), std::move(tree_node), PrivateTag{}};
   }
@@ -84,5 +109,9 @@ class UsageCell : public Cell {
  private:
   Ref<Cell> cell_;
   CellUsageTree::NodePtr tree_node_;
+  int* arena_counter_ = nullptr;
 };
+
+inline thread_local bool UsageCell::use_arena = true;
+
 }  // namespace vm

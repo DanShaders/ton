@@ -69,23 +69,25 @@ struct CellInfo {
     bool operator()(const CellInfo &info, const CellInfo &other_info) const { return info.key() == other_info.key();}
     bool operator()(const CellInfo &info, td::Slice hash) const { return info.key().as_slice() == hash;}
     bool operator()(td::Slice hash, const CellInfo &info) const { return info.key().as_slice() == hash;}
-
+    bool operator()(const CellInfo &info, const CellHash &hash) const {
+      return info.key() == hash;
+    }
+    bool operator()(const CellHash &hash, const CellInfo &info) const {
+      return info.key() == hash;
+    }
   };
   struct Hash {
     using is_transparent = void;  // Pred to use
     using transparent_key_equal = Eq;
     size_t operator()(td::Slice hash) const { return cell_hash_slice_hash(hash); }
-    size_t operator()(const CellInfo &info) const { return cell_hash_slice_hash(info.key().as_slice());}
+    size_t operator()(const CellInfo &info) const {
+      return info.key().hash();
+    }
+    size_t operator()(const CellHash &hash) const {
+      return hash.hash();
+    }
   };
 };
-
-bool operator<(const CellInfo &a, td::Slice b) {
-  return a.key().as_slice() < b;
-}
-
-bool operator<(td::Slice a, const CellInfo &b) {
-  return a < b.key().as_slice();
-}
 
 class DynamicBagOfCellsDbImpl : public DynamicBagOfCellsDb, private ExtCellCreator {
  public:
@@ -132,14 +134,12 @@ class DynamicBagOfCellsDbImpl : public DynamicBagOfCellsDb, private ExtCellCreat
           Ref<Cell> cell = res.cell();
           executor->execute_sync([hash, db, res = std::move(res),
                                   ext_cell_creator = std::move(ext_cell_creator)]() mutable {
-            db->hash_table_.apply(hash.as_slice(), [&](CellInfo &info) {
-              db->update_cell_info_loaded(info, hash.as_slice(), std::move(res));
-            });
+            db->hash_table_.apply(
+                hash, [&](CellInfo &info) { db->update_cell_info_loaded(info, hash.as_slice(), std::move(res)); });
             for (auto &ext_cell : ext_cell_creator.get_created_cells()) {
               auto ext_cell_hash = ext_cell->get_hash();
-              db->hash_table_.apply(ext_cell_hash.as_slice(), [&](CellInfo &info) {
-                db->update_cell_info_created_ext(info, std::move(ext_cell));
-              });
+              db->hash_table_.apply(
+                  ext_cell_hash, [&](CellInfo &info) { db->update_cell_info_created_ext(info, std::move(ext_cell)); });
             }
           });
           promise->set_result(std::move(cell));
@@ -153,7 +153,7 @@ class DynamicBagOfCellsDbImpl : public DynamicBagOfCellsDb, private ExtCellCreat
                              [&](CellInfo &info) { update_cell_info_lazy(info, level_mask, hash, depth); });
   }
   CellInfo &get_cell_info(const Ref<Cell> &cell) {
-    return hash_table_.apply(cell->get_hash().as_slice(), [&](CellInfo &info) { update_cell_info(info, cell); });
+    return hash_table_.apply(cell->get_hash(), [&](CellInfo &info) { update_cell_info(info, cell); });
   }
 
   void inc(const Ref<Cell> &cell) override {
@@ -610,14 +610,6 @@ class DynamicBagOfCellsDbImpl : public DynamicBagOfCellsDb, private ExtCellCreat
         return key() < other.key();
       }
 
-      friend bool operator<(const CellInfo2 &a, td::Slice b) {
-        return a.key().as_slice() < b;
-      }
-
-      friend bool operator<(td::Slice a, const CellInfo2 &b) {
-        return a < b.key().as_slice();
-      }
-
       struct Eq {
         using is_transparent = void;  // Pred to use
         bool operator()(const CellInfo2 &info, const CellInfo2 &other_info) const {
@@ -629,6 +621,12 @@ class DynamicBagOfCellsDbImpl : public DynamicBagOfCellsDb, private ExtCellCreat
         bool operator()(td::Slice hash, const CellInfo2 &info) const {
           return info.key().as_slice() == hash;
         }
+        bool operator()(const CellHash &hash, const CellInfo2 &info) const {
+          return info.key() == hash;
+        }
+        bool operator()(const CellInfo2 &info, const CellHash &hash) const {
+          return info.key() == hash;
+        }
       };
       struct Hash {
         using is_transparent = void;  // Pred to use
@@ -637,7 +635,10 @@ class DynamicBagOfCellsDbImpl : public DynamicBagOfCellsDb, private ExtCellCreat
           return cell_hash_slice_hash(hash);
         }
         size_t operator()(const CellInfo2 &info) const {
-          return cell_hash_slice_hash(info.key().as_slice());
+          return info.key().hash();
+        }
+        size_t operator()(const CellHash &hash) const {
+          return hash.hash();
         }
       };
     };
@@ -679,13 +680,13 @@ class DynamicBagOfCellsDbImpl : public DynamicBagOfCellsDb, private ExtCellCreat
 
   void dfs_new_cells_in_db_async(const td::Ref<vm::Cell> &cell, PrepareCommitAsyncState::CellInfo2 *parent = nullptr) {
     bool exists = true;
-    pca_state_->cells_.apply(cell->get_hash().as_slice(), [&](PrepareCommitAsyncState::CellInfo2 &info) {
+    pca_state_->cells_.apply(cell->get_hash(), [&](PrepareCommitAsyncState::CellInfo2 &info) {
       if (info.info == nullptr) {
         exists = false;
         info.info = &get_cell_info(cell);
       }
     });
-    auto info = pca_state_->cells_.get_if_exists(cell->get_hash().as_slice());
+    auto info = pca_state_->cells_.get_if_exists(cell->get_hash());
     if (parent) {
       info->parents.push_back(parent);
       ++parent->remaining_children;

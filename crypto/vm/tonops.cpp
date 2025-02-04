@@ -496,7 +496,7 @@ void register_prng_ops(OpcodeTable& cp0) {
 int exec_compute_hash(VmState* st, int mode) {
   VM_LOG(st) << "execute HASH" << (mode & 1 ? 'S' : 'C') << 'U';
   Stack& stack = st->get_stack();
-  std::array<unsigned char, 32> hash;
+  std::array<td::uint64, Cell::hash_bytes / sizeof(td::uint64)> hash;
   if (!(mode & 1)) {
     auto cell = stack.pop_cell();
     hash = cell->get_hash().as_array();
@@ -508,7 +508,7 @@ int exec_compute_hash(VmState* st, int mode) {
     hash = cb.finalize()->get_hash().as_array();
   }
   td::RefInt256 res{true};
-  CHECK(res.write().import_bytes(hash.data(), hash.size(), false));
+  CHECK(res.write().import_bytes(reinterpret_cast<const td::uint8*>(hash.data()), Cell::hash_bytes, false));
   stack.push_int(std::move(res));
   return 0;
 }

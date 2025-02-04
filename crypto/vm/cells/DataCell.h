@@ -18,6 +18,7 @@
 */
 #pragma once
 #include "vm/cells/Cell.h"
+#include "vm/cells/ArenaAllocator.h"
 
 #include "td/utils/Span.h"
 
@@ -27,11 +28,16 @@ namespace vm {
 
 class DataCell : public Cell {
  public:
-  // NB: cells created with use_arena=true are never freed
   static thread_local bool use_arena;
 
   DataCell(const DataCell& other) = delete;
-  ~DataCell() override;
+  ~DataCell() override {
+    if (TD_LIKELY(arena_counter_))
+      --*arena_counter_;
+#ifdef TD_COUNT_DATA_CELLS
+    get_thread_safe_counter().add(-1);
+#endif
+  }
 
   static void store_depth(td::uint8* dest, td::uint16 depth) {
     td::bitstring::bits_store_long(dest, depth, depth_bits);
@@ -69,7 +75,8 @@ class DataCell : public Cell {
       }
       return res;
     }
-    size_t get_hashes_offset() const {
+    constexpr size_t get_hashes_offset() const {
+      // Note: this must be aligned to hash_bytes
       return 0;
     }
     size_t get_refs_offset() const {
@@ -117,13 +124,15 @@ class DataCell : public Cell {
   };
 
   Info info_;
-  virtual char* get_storage() = 0;
-  virtual const char* get_storage() const = 0;
-  // TODO: we may also save three different pointers
+  char* storage_;
 
   void destroy_storage(char* storage);
 
-  explicit DataCell(Info info);
+  explicit DataCell(Info info) : info_(std::move(info)) {
+#ifdef TD_COUNT_DATA_CELLS
+    get_thread_safe_counter().add(1);
+#endif
+  }
 
  public:
   td::Result<LoadedCell> load_cell() const override {
@@ -142,7 +151,7 @@ class DataCell : public Cell {
     return info_.bits_;
   }
   const unsigned char* get_data() const {
-    return info_.get_data(get_storage());
+    return info_.get_data(storage_);
   }
   Ref<Cell> get_ref(unsigned idx) const {
     if (idx >= get_refs_cnt()) {
@@ -153,14 +162,14 @@ class DataCell : public Cell {
 
   Cell* get_ref_raw_ptr(unsigned idx) const {
     DCHECK(idx < get_refs_cnt());
-    return info_.get_refs(get_storage())[idx];
+    return info_.get_refs(storage_)[idx];
   }
 
   Ref<Cell> reset_ref_unsafe(unsigned idx, Ref<Cell> ref, bool check_hash = true) {
     CHECK(idx < get_refs_cnt());
-    auto refs = info_.get_refs(get_storage());
+    auto refs = info_.get_refs(storage_);
     CHECK(!check_hash || refs[idx]->get_hash() == ref->get_hash());
-    auto res = Ref<Cell>(refs[idx], Ref<Cell>::acquire_t{});  // call destructor
+    auto res = Ref<Cell>(refs[idx], Ref<Cell>::acquire_datacell_t{});  // call destructor
     refs[idx] = ref.release();
     return res;
   }
@@ -192,9 +201,11 @@ class DataCell : public Cell {
   int serialize(unsigned char* buff, int buff_size, bool with_hashes = false) const;
   std::string serialize() const;
   std::string to_hex() const;
+#ifdef TD_COUNT_DATA_CELLS
   static td::int64 get_total_data_cells() {
     return get_thread_safe_counter().sum();
   }
+#endif
 
   template <class StorerT>
   void store(StorerT& storer) const {
@@ -207,11 +218,13 @@ class DataCell : public Cell {
   static constexpr auto max_storage_size = max_refs * sizeof(void*) + (max_level + 1) * hash_bytes + max_bytes;
 
  private:
+#ifdef TD_COUNT_DATA_CELLS
   static td::NamedThreadSafeCounter::CounterRef get_thread_safe_counter() {
     static auto res = td::NamedThreadSafeCounter::get_default().get_counter("DataCell");
     return res;
   }
-  static std::unique_ptr<DataCell> create_empty_data_cell(Info info);
+#endif
+  static DataCell* create_empty_data_cell(Info info);
 
   const Hash do_get_hash(td::uint32 level) const override;
   td::uint16 do_get_depth(td::uint32 level) const override;
@@ -220,6 +233,20 @@ class DataCell : public Cell {
   static td::Result<Ref<DataCell>> create(td::ConstBitPtr data, unsigned bits, td::Span<Ref<Cell>> refs, bool special);
   static td::Result<Ref<DataCell>> create(td::ConstBitPtr data, unsigned bits, td::MutableSpan<Ref<Cell>> refs,
                                           bool special);
+
+ private:
+  template <class CellT>
+  struct ArenaAllocator : public ArenaAllocatorBase {
+    template <class T, class... ArgsT>
+    CellT* alloc(ArgsT&&... args) {
+      std::pair<char*, int*> res = fast_alloc(sizeof(T));
+      T* obj = new (res.first) T(std::forward<ArgsT>(args)...);
+      obj->arena_counter_ = res.second;
+      return obj;
+    }
+  };
+  friend struct ArenaAllocator<DataCell>;
+  int* arena_counter_ = nullptr;
 };
 
 std::ostream& operator<<(std::ostream& os, const DataCell& c);

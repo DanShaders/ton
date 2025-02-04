@@ -1418,9 +1418,9 @@ int exec_cell_hash_i(VmState* st, unsigned args, bool var) {
     VM_LOG(st) << "execute CHASHI " << i;
   }
   auto cell = stack.pop_cell();
-  std::array<unsigned char, 32> hash = cell->get_hash(i).as_array();
+  auto hash = cell->get_hash(i).as_array();
   td::RefInt256 res{true};
-  CHECK(res.write().import_bytes(hash.data(), hash.size(), false));
+  CHECK(res.write().import_bytes(reinterpret_cast<const td::uint8*>(hash.data()), Cell::hash_bytes, false));
   stack.push_int(std::move(res));
   return 0;
 }

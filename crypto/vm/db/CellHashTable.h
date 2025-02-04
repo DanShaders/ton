@@ -20,15 +20,15 @@
 
 #include "td/utils/Slice.h"
 #include "td/utils/HashSet.h"
+#include "vm/cells/CellHash.h"
 #include <set>
 
 namespace vm {
 template <class InfoT>
 class CellHashTable {
- public:
-  template <class F>
-  InfoT &apply(td::Slice hash, F &&f) {
-    auto it = set_.find(hash);
+ private:
+  template <class F, class It>
+  InfoT &apply_impl(It it, F &&f) {
     if (it != set_.end()) {
       auto &res = const_cast<InfoT &>(*it);
       f(res);
@@ -38,6 +38,18 @@ class CellHashTable {
     f(info);
     auto &res = const_cast<InfoT &>(*(set_.insert(std::move(info)).first));
     return res;
+  }
+
+ public:
+  template <class F>
+  InfoT &apply(td::Slice hash, F &&f) {
+    auto it = set_.find(hash);
+    return apply_impl(std::move(it), std::move(f));
+  }
+  template <class F>
+  InfoT &apply(const CellHash &hash, F &&f) {
+    auto it = set_.find(hash);
+    return apply_impl(std::move(it), std::move(f));
   }
 
   template <class F>
@@ -65,6 +77,13 @@ class CellHashTable {
     return set_.size();
   }
   InfoT* get_if_exists(td::Slice hash) {
+    auto it = set_.find(hash);
+    if (it != set_.end()) {
+      return &const_cast<InfoT &>(*it);
+    }
+    return nullptr;
+  }
+  InfoT *get_if_exists(const CellHash &hash) {
     auto it = set_.find(hash);
     if (it != set_.end()) {
       return &const_cast<InfoT &>(*it);

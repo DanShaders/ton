@@ -10,6 +10,7 @@
 #include "block/block-parse.h"
 #include "block/block-auto.h"
 #include "block/output-queue-merger.h"
+#include "vm/cells/ArenaAllocator.h"
 #include "vm/cells/MerkleProof.h"
 #include "vm/cells/MerkleUpdate.h"
 #include "common/errorlog.h"
@@ -55,6 +56,7 @@ ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice 
     , main_promise(std::move(promise))
     , shard_pfx_(shard_.shard)
     , shard_pfx_len_(ton::shard_prefix_length(shard_)) {
+  vm::safe_to_dealloc_arena_at_thread_exit = true;
 }
 
 /**
@@ -979,7 +981,7 @@ bool ContestValidateQuery::compute_prev_state() {
     }
   }
   state_usage_tree_ = std::make_shared<vm::CellUsageTree>();
-  prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr());
+  prev_state_root_ = vm::UsageCell::create(std::move(prev_state_root_), state_usage_tree_->root_ptr());
   return true;
 }
 
@@ -2585,7 +2587,7 @@ bool ContestValidateQuery::precheck_one_message_queue_update(td::ConstBitPtr out
         return reject_query("OutMsgDescr for "s + out_msg_id.to_hex(352) +
                             " is a msg_export_tr_req referring to an invalid reimport InMsgDescr");
       }
-      if (in_msg_env->get_hash().as_bitslice() != q_msg_env->get_hash().bits()) {
+      if (in_msg_env->get_hash() != q_msg_env->get_hash()) {
         return reject_query("OutMsgDescr corresponding to dequeued message with key "s + out_msg_id.to_hex(352) +
                             " is a msg_export_tr_req referring to a reimport InMsgDescr that contains a MsgEnvelope "
                             "distinct from that originally kept in the old queue");

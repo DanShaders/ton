@@ -88,7 +88,7 @@ td::Result<int> CellSerializationInfo::get_bits(td::Slice cell) const {
 
 // TODO: check usage when result is empty
 td::Result<Ref<DataCell>> CellSerializationInfo::create_data_cell(td::Slice cell_slice,
-                                                                  td::Span<Ref<Cell>> refs) const {
+                                                                  td::MutableSpan<Ref<Cell>> refs) const {
   CellBuilder cb;
   TRY_RESULT(bits, get_bits(cell_slice));
   cb.store_bits(cell_slice.ubegin() + data_offset, bits);
@@ -246,15 +246,15 @@ td::Result<int> BagOfCells::import_cell(td::Ref<vm::Cell> cell, int depth) {
     ++int_refs;
   }
   DCHECK(cell_list_.size() == static_cast<std::size_t>(cell_count));
-  auto dc = cs.move_as_loaded_cell().data_cell;
+  auto dc = std::move(cs.move_as_loaded_cell().data_cell);
   auto res = cells.emplace(dc->get_hash(), cell_count);
   DCHECK(res.second);
-  cell_list_.emplace_back(dc, dc->size_refs(), refs);
+  data_bytes += dc->get_serialized_size();
+  cell_list_.emplace_back(std::move(dc), dc->size_refs(), refs);
   CellInfo& dc_info = cell_list_.back();
-  dc_info.hcnt = static_cast<unsigned char>(dc->get_level_mask().get_hashes_count());
+  dc_info.hcnt = static_cast<unsigned char>(dc_info.dc_ref->get_level_mask().get_hashes_count());
   dc_info.wt = static_cast<unsigned char>(std::min(0xffU, sum_child_wt));
   dc_info.new_idx = -1;
-  data_bytes += dc->get_serialized_size();
   return cell_count++;
 }
 
@@ -1049,14 +1049,6 @@ td::Status std_boc_serialize_to_file(Ref<Cell> root, td::FileFd& fd, int mode,
  * 
  */
 
-td::Result<CellStorageStat::CellInfo> CellStorageStat::compute_used_storage(Ref<vm::CellSlice> cs_ref, bool kill_dup,
-                                                                            unsigned skip_count_root) {
-  clear();
-  TRY_RESULT(res, add_used_storage(std::move(cs_ref), kill_dup, skip_count_root));
-  clear_seen();
-  return res;
-}
-
 td::Result<CellStorageStat::CellInfo> CellStorageStat::compute_used_storage(const CellSlice& cs, bool kill_dup,
                                                                             unsigned skip_count_root) {
   clear();
@@ -1073,21 +1065,12 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::compute_used_storage(Cell
   return res;
 }
 
-td::Result<CellStorageStat::CellInfo> CellStorageStat::compute_used_storage(Ref<vm::Cell> cell, bool kill_dup,
+td::Result<CellStorageStat::CellInfo> CellStorageStat::compute_used_storage(const Ref<vm::Cell>& cell, bool kill_dup,
                                                                             unsigned skip_count_root) {
   clear();
   TRY_RESULT(res, add_used_storage(std::move(cell), kill_dup, skip_count_root));
   clear_seen();
   return res;
-}
-
-td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::CellSlice> cs_ref, bool kill_dup,
-                                                                        unsigned skip_count_root) {
-  if (cs_ref->is_unique()) {
-    return add_used_storage(std::move(cs_ref.unique_write()), kill_dup, skip_count_root);
-  } else {
-    return add_used_storage(*cs_ref, kill_dup, skip_count_root);
-  }
 }
 
 td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(const CellSlice& cs, bool kill_dup,
@@ -1120,13 +1103,13 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlic
                                                                         unsigned skip_count_root) {
   if (!(skip_count_root & 1)) {
     ++cells;
-    if (cells > limit_cells) {
+    if (TD_UNLIKELY(cells > limit_cells)) {
       return td::Status::Error("too many cells");
     }
   }
   if (!(skip_count_root & 2)) {
     bits += cs.size();
-    if (bits > limit_bits) {
+    if (TD_UNLIKELY(bits > limit_bits)) {
       return td::Status::Error("too many bits");
     }
   }
@@ -1142,7 +1125,7 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlic
   return res;
 }
 
-td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::Cell> cell, bool kill_dup,
+td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(const Ref<vm::Cell>& cell, bool kill_dup,
                                                                         unsigned skip_count_root) {
   if (cell.is_null()) {
     return td::Status::Error("cell is null");
@@ -1274,7 +1257,7 @@ void ProofStorageStat::add_cell(const Ref<DataCell>& cell) {
   status = c_loaded;
   proof_size_ += estimate_serialized_size(cell);
   for (unsigned i = 0; i < cell->size_refs(); ++i) {
-    auto& child_status = cells_[cell->get_ref(i)->get_hash()];
+    auto& child_status = cells_[cell->get_ref_raw_ptr(i)->get_hash()];
     if (child_status == c_none) {
       child_status = c_prunned;
       proof_size_ += estimate_prunned_size();

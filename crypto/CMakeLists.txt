@@ -65,6 +65,7 @@ set(TON_CRYPTO_CORE_SOURCE
   vm/cells/MerkleUpdate.cpp
 
   vm/dict.h
+  vm/cells/ArenaAllocator.h
   vm/cells/Cell.h
   vm/cells/CellBuilder.h
   vm/cells/CellHash.h
@@ -291,66 +292,89 @@ set(BIGINT_TEST_SOURCE
 
 set(USE_EMSCRIPTEN ${USE_EMSCRIPTEN} PARENT_SCOPE)
 
-add_library(ton_crypto_core STATIC ${TON_CRYPTO_CORE_SOURCE})
-target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
-target_link_libraries(ton_crypto_core PUBLIC ${OPENSSL_CRYPTO_LIBRARY} tdutils tddb_utils)
-if (NOT WIN32)
-  target_link_libraries(ton_crypto_core PUBLIC dl z)
-endif()
-target_include_directories(ton_crypto_core SYSTEM PUBLIC $<BUILD_INTERFACE:${OPENSSL_INCLUDE_DIR}>)
-
-add_library(ton_crypto STATIC ${TON_CRYPTO_SOURCE})
-target_include_directories(ton_crypto PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
-target_link_libraries(ton_crypto PUBLIC ${OPENSSL_CRYPTO_LIBRARY} ton_crypto_core ton_block)
-if (USE_EMSCRIPTEN)
-  target_link_options(ton_crypto PRIVATE -fexceptions)
-  target_compile_options(ton_crypto PRIVATE -fexceptions)
-endif()
-if (NOT WIN32)
-  find_library(DL dl)
-  if (DL)
-    target_link_libraries(ton_crypto PUBLIC dl z)
-  else()
-    target_link_libraries(ton_crypto PUBLIC z)
+function(define_crypto_libraries SUFFIX)
+  add_library(ton_crypto_core${SUFFIX} STATIC ${TON_CRYPTO_CORE_SOURCE})
+  target_include_directories(ton_crypto_core${SUFFIX} PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
+  target_link_libraries(ton_crypto_core${SUFFIX} PUBLIC ${OPENSSL_CRYPTO_LIBRARY} tdutils tddb_utils)
+  if (NOT WIN32)
+    target_link_libraries(ton_crypto_core${SUFFIX} PUBLIC dl z)
   endif()
-endif()
-target_include_directories(ton_crypto SYSTEM PUBLIC $<BUILD_INTERFACE:${OPENSSL_INCLUDE_DIR}>)
+  target_include_directories(ton_crypto_core${SUFFIX} SYSTEM PUBLIC $<BUILD_INTERFACE:${OPENSSL_INCLUDE_DIR}>)
+  if (NOT ${SUFFIX} STREQUAL "")
+    target_compile_definitions(ton_crypto_core${SUFFIX} PUBLIC TD_COUNT_DATA_CELLS=1)
+  endif()
 
-add_dependencies(ton_crypto blst)
-add_dependencies(ton_crypto_core secp256k1)
+  add_library(ton_block${SUFFIX} STATIC ${BLOCK_SOURCE})
+  target_include_directories(ton_block${SUFFIX} PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/block>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
+  target_link_libraries(ton_block${SUFFIX} PUBLIC ton_crypto_core${SUFFIX} tdactor tl_api)
+  if (USE_EMSCRIPTEN)
+    target_link_options(ton_block${SUFFIX} PRIVATE -fexceptions)
+    target_compile_options(ton_block${SUFFIX} PRIVATE -fexceptions)
+  endif()
 
-target_include_directories(ton_crypto PRIVATE ${BLST_INCLUDE_DIR})
-target_link_libraries(ton_crypto PRIVATE ${BLST_LIB})
+  add_library(ton_crypto${SUFFIX} STATIC ${TON_CRYPTO_SOURCE})
+  target_include_directories(ton_crypto${SUFFIX} PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
+  target_link_libraries(ton_crypto${SUFFIX} PUBLIC ${OPENSSL_CRYPTO_LIBRARY} ton_crypto_core${SUFFIX} ton_block${SUFFIX})
+  if (USE_EMSCRIPTEN)
+    target_link_options(ton_crypto${SUFFIX} PRIVATE -fexceptions)
+    target_compile_options(ton_crypto${SUFFIX} PRIVATE -fexceptions)
+  endif()
+  if (NOT WIN32)
+    find_library(DL dl)
+    if (DL)
+      target_link_libraries(ton_crypto${SUFFIX} PUBLIC dl z)
+    else()
+      target_link_libraries(ton_crypto${SUFFIX} PUBLIC z)
+    endif()
+  endif()
+  target_include_directories(ton_crypto${SUFFIX} SYSTEM PUBLIC $<BUILD_INTERFACE:${OPENSSL_INCLUDE_DIR}>)
 
-target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIR}>)
+  add_dependencies(ton_crypto${SUFFIX} blst)
+  add_dependencies(ton_crypto_core${SUFFIX} secp256k1)
 
-if (MSVC)
-  find_package(Sodium REQUIRED)
-  target_compile_definitions(ton_crypto PUBLIC SODIUM_STATIC)
-  target_link_libraries(ton_crypto_core PUBLIC ${SECP256K1_LIBRARY})
-  target_link_libraries(ton_crypto PUBLIC ${SECP256K1_LIBRARY})
-elseif (EMSCRIPTEN)
-  target_link_libraries(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_LIBRARY}>)
-  target_link_libraries(ton_crypto PUBLIC $<BUILD_INTERFACE:${SECP256K1_LIBRARY}>)
-else()
-  if (NOT SODIUM_FOUND)
+  target_include_directories(ton_crypto${SUFFIX} PRIVATE ${BLST_INCLUDE_DIR})
+  target_link_libraries(ton_crypto${SUFFIX} PRIVATE ${BLST_LIB})
+
+  target_include_directories(ton_crypto_core${SUFFIX} PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIR}>)
+
+  if (MSVC)
     find_package(Sodium REQUIRED)
+    target_compile_definitions(ton_crypto${SUFFIX} PUBLIC SODIUM_STATIC)
+    target_link_libraries(ton_crypto_core${SUFFIX} PUBLIC ${SECP256K1_LIBRARY})
+    target_link_libraries(ton_crypto${SUFFIX} PUBLIC ${SECP256K1_LIBRARY})
+  elseif (EMSCRIPTEN)
+    target_link_libraries(ton_crypto_core${SUFFIX} PUBLIC $<BUILD_INTERFACE:${SECP256K1_LIBRARY}>)
+    target_link_libraries(ton_crypto${SUFFIX} PUBLIC $<BUILD_INTERFACE:${SECP256K1_LIBRARY}>)
   else()
-    message(STATUS "Using Sodium ${SODIUM_LIBRARY_RELEASE}")
+    if (NOT SODIUM_FOUND)
+      find_package(Sodium REQUIRED)
+    else()
+      message(STATUS "Using Sodium ${SODIUM_LIBRARY_RELEASE}")
+    endif()
+    target_compile_definitions(ton_crypto${SUFFIX} PUBLIC SODIUM_STATIC)
+    target_link_libraries(ton_crypto_core${SUFFIX} PUBLIC ${SECP256K1_LIBRARY})
+    target_link_libraries(ton_crypto${SUFFIX} PUBLIC ${SECP256K1_LIBRARY})
   endif()
-  target_compile_definitions(ton_crypto PUBLIC SODIUM_STATIC)
-  target_link_libraries(ton_crypto_core PUBLIC ${SECP256K1_LIBRARY})
-  target_link_libraries(ton_crypto PUBLIC ${SECP256K1_LIBRARY})
-endif()
 
-target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SODIUM_INCLUDE_DIR}>)
-target_link_libraries(ton_crypto PUBLIC ${SODIUM_LIBRARY_RELEASE})
+  target_include_directories(ton_crypto_core${SUFFIX} PUBLIC $<BUILD_INTERFACE:${SODIUM_INCLUDE_DIR}>)
+  target_link_libraries(ton_crypto${SUFFIX} PUBLIC ${SODIUM_LIBRARY_RELEASE})
 
-add_library(ton_db STATIC ${TON_DB_SOURCE})
-target_include_directories(ton_db PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
-target_link_libraries(ton_db PUBLIC tdutils tddb ton_crypto)
+  add_library(ton_db${SUFFIX} STATIC ${TON_DB_SOURCE})
+  target_include_directories(ton_db${SUFFIX} PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
+  target_link_libraries(ton_db${SUFFIX} PUBLIC tdutils tddb ton_crypto${SUFFIX})
+endfunction()
+
+define_crypto_libraries("")
+define_crypto_libraries("_count_datacells")
 
 add_executable(test-ed25519-crypto test/test-ed25519-crypto.cpp)
 target_include_directories(test-ed25519-crypto PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
@@ -358,7 +382,7 @@ target_link_libraries(test-ed25519-crypto PUBLIC ton_crypto)
 
 add_library(fift-lib STATIC ${FIFT_SOURCE})
 target_include_directories(fift-lib PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
-target_link_libraries(fift-lib PUBLIC ton_crypto)
+target_link_libraries(fift-lib PUBLIC ton_crypto_count_datacells)
 
 if (USE_EMSCRIPTEN)
   target_link_options(fift-lib PRIVATE -fexceptions)
@@ -375,15 +399,6 @@ endif()
 add_library(src_parser ${PARSER_SOURCE})
 target_include_directories(src_parser PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 target_link_libraries(src_parser PUBLIC ton_crypto_core)
-
-add_library(ton_block STATIC ${BLOCK_SOURCE})
-target_include_directories(ton_block PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/block> $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)
-target_link_libraries(ton_block PUBLIC ton_crypto_core tdactor tl_api)
-if (USE_EMSCRIPTEN)
-  target_link_options(ton_block PRIVATE -fexceptions)
-  target_compile_options(ton_block PRIVATE -fexceptions)
-endif()
 
 add_executable(func func/func-main.cpp ${FUNC_LIB_SOURCE})
 target_include_directories(func PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)

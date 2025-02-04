@@ -53,7 +53,7 @@ class MemoryLog : public LogInterface {
 
     uint32 start_pos = real_pos & (buffer_size - 1);
     uint32 end_pos = start_pos + total_size;
-    if (likely(end_pos <= buffer_size)) {
+    if (TD_LIKELY(end_pos <= buffer_size)) {
       std::memcpy(&buffer_[start_pos + MAGIC_SIZE], slice.data(), slice_size);
       std::memcpy(&buffer_[start_pos + MAGIC_SIZE + slice_size], "                     ", pad_size);
     } else {

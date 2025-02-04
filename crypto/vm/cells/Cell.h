@@ -110,7 +110,7 @@ struct CellHashF {
   using transparent_key_equal = CellEqF;
   template <class T>
   size_t operator()(const T& value) const {
-    return cell_hash_slice_hash(as_cell_hash(value).as_slice());
+    return as_cell_hash(value).hash();
   }
 };
 using CellHashSet = td::HashSet<td::Ref<Cell>, CellHashF, CellEqF>;

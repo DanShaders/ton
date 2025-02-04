@@ -178,12 +178,13 @@ Ref<Cell> MerkleUpdate::apply_raw(Ref<Cell> from, Ref<Cell> update_from, Ref<Cel
                << ", applied to value with hash = " << from->get_hash(from_level).to_hex();
     return {};
   }
-  return detail::MerkleUpdateApply().apply(from, std::move(update_from), std::move(update_to), from_level, to_level);
+  return detail::MerkleUpdateApply().apply(std::move(from), std::move(update_from), std::move(update_to), from_level,
+                                           to_level);
 }
 
 std::pair<Ref<Cell>, Ref<Cell>> MerkleUpdate::generate_raw(Ref<Cell> from, Ref<Cell> to, CellUsageTree *usage_tree) {
   // create Merkle update cell->new_cell
-  auto update_to = MerkleProof::generate_raw(to, [tree = usage_tree](const Ref<Cell> &cell) {
+  auto update_to = MerkleProof::generate_raw(std::move(to), [tree = usage_tree](const Ref<Cell> &cell) {
     auto loaded_cell = cell->load_cell().move_as_ok();  // FIXME
     if (loaded_cell.data_cell->size_refs() == 0) {
       return false;
@@ -191,7 +192,7 @@ std::pair<Ref<Cell>, Ref<Cell>> MerkleUpdate::generate_raw(Ref<Cell> from, Ref<C
     return !loaded_cell.tree_node.empty() && loaded_cell.tree_node.mark_path(tree);
   });
   usage_tree->set_use_mark_for_is_loaded(true);
-  auto update_from = MerkleProof::generate_raw(from, usage_tree);
+  auto update_from = MerkleProof::generate_raw(std::move(from), usage_tree);
 
   return {std::move(update_from), std::move(update_to)};
 }

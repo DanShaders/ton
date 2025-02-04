@@ -139,7 +139,7 @@ td::Result<int> LargeBocSerializer::import_cell(Hash hash, int depth) {
     sum_child_wt += cell_list[ref]->second.wt;
     ++int_refs;
   }
-  auto dc = cs.move_as_loaded_cell().data_cell;
+  auto dc = std::move(cs.move_as_loaded_cell().data_cell);
   auto res = cells.emplace(hash, CellInfo(cell_count, refs));
   DCHECK(res.second);
   cell_list.push_back(&*res.first);

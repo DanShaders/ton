@@ -46,7 +46,7 @@ class RefcntCellStorer {
     store(refcnt_, storer);
     store(*cell_, storer);
     for (unsigned i = 0; i < cell_->size_refs(); i++) {
-      auto cell = cell_->get_ref(i);
+      auto cell = cell_->get_ref_raw_ptr(i);
       auto level_mask = cell->get_level_mask();
       auto level = level_mask.get_level();
       td::uint8 x = static_cast<td::uint8>(level_mask.get_mask());
@@ -70,7 +70,7 @@ class RefcntCellStorer {
 
  private:
   td::int32 refcnt_;
-  td::Ref<DataCell> cell_;
+  const td::Ref<DataCell> &cell_;
   bool as_boc_;
 };
 
@@ -130,7 +130,7 @@ class RefcntCellParser {
       if (!data.empty()) {
         return td::Status::Error("Too much data");
       }
-      TRY_RESULT(data_cell, info.create_data_cell(cell_data, td::Span<Ref<Cell>>(refs, info.refs_cnt)));
+      TRY_RESULT(data_cell, info.create_data_cell(cell_data, td::MutableSpan<Ref<Cell>>(refs, info.refs_cnt)));
       cell = std::move(data_cell);
       return td::Status::OK();
     }();

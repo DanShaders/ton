@@ -24,53 +24,20 @@
 
 #include "vm/cells/CellWithStorage.h"
 
+#include "tdutils/td/utils/port/stacktrace.h"
+
+#include "vm/cells/ArenaAllocator.h"
+
 namespace vm {
-thread_local bool DataCell::use_arena = false;
+thread_local bool DataCell::use_arena = true;
 
-namespace {
-template <class CellT>
-struct ArenaAllocator {
-  template <class T, class... ArgsT>
-  std::unique_ptr<CellT> make_unique(ArgsT&&... args) {
-    auto* ptr = fast_alloc(sizeof(T));
-    T* obj = new (ptr) T(std::forward<ArgsT>(args)...);
-    return std::unique_ptr<T>(obj);
-  }
-private:
-  td::MutableSlice alloc_batch() {
-    size_t batch_size = 1 << 20;
-    auto batch = std::make_unique<char[]>(batch_size);
-    return td::MutableSlice(batch.release(), batch_size);
-  }
-  char* fast_alloc(size_t size) {
-    thread_local td::MutableSlice batch;
-    auto aligned_size = (size + 7) / 8 * 8;
-    if (batch.size() < size) {
-      batch = alloc_batch();
-    }
-    auto res = batch.begin();
-    batch.remove_prefix(aligned_size);
-    return res;
-  }
-};
-}
-std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
+DataCell* DataCell::create_empty_data_cell(Info info) {
   if (use_arena) {
-    ArenaAllocator<DataCell> allocator;
+    thread_local ArenaAllocator<DataCell> allocator;
     auto res = detail::CellWithArrayStorage<DataCell>::create(allocator, info.get_storage_size(), info);
-    // this is dangerous
-    Ref<DataCell>(res.get()).release();
     return res;
   }
-
-  return detail::CellWithUniquePtrStorage<DataCell>::create(info.get_storage_size(), info);
-}
-
-DataCell::DataCell(Info info) : info_(std::move(info)) {
-  get_thread_safe_counter().add(1);
-}
-DataCell::~DataCell() {
-  get_thread_safe_counter().add(-1);
+  return detail::CellWithArrayStorage<DataCell>::create(info.get_storage_size(), info);
 }
 
 void DataCell::destroy_storage(char* storage) {
@@ -100,18 +67,18 @@ DataCell::SpecialType DataCell::special_type() const {
 td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, td::MutableSpan<Ref<Cell>> refs,
                                            bool special) {
   for (auto& ref : refs) {
-    if (ref.is_null()) {
+    if (TD_UNLIKELY(ref.is_null())) {
       return td::Status::Error("Has null cell reference");
     }
   }
 
   SpecialType type = SpecialType::Ordinary;
   if (special) {
-    if (bits < 8) {
+    if (TD_UNLIKELY(bits < 8)) {
       return td::Status::Error("Not enough data for a special cell");
     }
     type = static_cast<SpecialType>(td::bitstring::bits_load_ulong(data, 8));
-    if (type == SpecialType::Ordinary) {
+    if (TD_UNLIKELY(type == SpecialType::Ordinary)) {
       return td::Status::Error("Special cell has Ordinary type");
     }
   }
@@ -128,18 +95,18 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     }
 
     case SpecialType::PrunnedBranch: {
-      if (refs.size() != 0) {
+      if (TD_UNLIKELY(refs.size() != 0)) {
         return td::Status::Error("PrunnedBranch special cell has a cell reference");
       }
-      if (bits < 16) {
+      if (TD_UNLIKELY(bits < 16)) {
         return td::Status::Error("Not enough data for a PrunnedBranch special cell");
       }
       level_mask = LevelMask((td::bitstring::bits_load_ulong(data + 8, 8)) & 0xff);
       auto level = level_mask.get_level();
-      if (level > max_level || level == 0) {
+      if (TD_UNLIKELY(level > max_level || level == 0)) {
         return td::Status::Error("Prunned Branch has an invalid level");
       }
-      if (bits != (2 + level_mask.apply(level - 1).get_hashes_count() * (hash_bytes + depth_bytes)) * 8) {
+      if (TD_UNLIKELY(bits != (2 + level_mask.apply(level - 1).get_hashes_count() * (hash_bytes + depth_bytes)) * 8)) {
         return td::Status::Error("Not enouch data for a PrunnedBranch special cell");
       }
       // depth will be checked later!
@@ -147,26 +114,27 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     }
 
     case SpecialType::Library: {
-      if (bits != 8 + hash_bytes * 8) {
+      if (TD_UNLIKELY(bits != 8 + hash_bytes * 8)) {
         return td::Status::Error("Not enouch data for a Library special cell");
       }
-      if (!refs.empty()) {
+      if (TD_UNLIKELY(!refs.empty())) {
         return td::Status::Error("Library special cell has a cell reference");
       }
       break;
     }
 
     case SpecialType::MerkleProof: {
-      if (bits != 8 + (hash_bytes + depth_bytes) * 8) {
+      if (TD_UNLIKELY(bits != 8 + (hash_bytes + depth_bytes) * 8)) {
         return td::Status::Error("Not enouch data for a MerkleProof special cell");
       }
-      if (refs.size() != 1) {
+      if (TD_UNLIKELY(refs.size() != 1)) {
         return td::Status::Error("Wrong references count for a MerkleProof special cell");
       }
-      if (td::bitstring::bits_memcmp(data + 8, refs[0]->get_hash(0).as_bitslice().get_ptr(), hash_bits) != 0) {
+      if (TD_UNLIKELY(td::bitstring::bits_memcmp(data + 8, refs[0]->get_hash(0).as_bitslice().get_ptr(), hash_bits) !=
+                      0)) {
         return td::Status::Error("Hash mismatch in a MerkleProof special cell");
       }
-      if (td::bitstring::bits_load_ulong(data + 8 + hash_bits, depth_bytes * 8) != refs[0]->get_depth(0)) {
+      if (TD_UNLIKELY(td::bitstring::bits_load_ulong(data + 8 + hash_bits, depth_bytes * 8) != refs[0]->get_depth(0))) {
         return td::Status::Error("Depth mismatch in a MerkleProof special cell");
       }
       level_mask = refs[0]->get_level_mask().shift_right();
@@ -175,24 +143,26 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     }
 
     case SpecialType::MerkleUpdate: {
-      if (bits != 8 + (hash_bytes + depth_bytes) * 8 * 2) {
+      if (TD_UNLIKELY(bits != 8 + (hash_bytes + depth_bytes) * 8 * 2)) {
         return td::Status::Error("Not enouch data for a MerkleUpdate special cell");
       }
-      if (refs.size() != 2) {
+      if (TD_UNLIKELY(refs.size() != 2)) {
         return td::Status::Error("Wrong references count for a MerkleUpdate special cell");
       }
-      if (td::bitstring::bits_memcmp(data + 8, refs[0]->get_hash(0).as_bitslice().get_ptr(), hash_bits) != 0) {
+      if (TD_UNLIKELY(td::bitstring::bits_memcmp(data + 8, refs[0]->get_hash(0).as_bitslice().get_ptr(), hash_bits) !=
+                      0)) {
         return td::Status::Error("First hash mismatch in a MerkleProof special cell");
       }
-      if (td::bitstring::bits_memcmp(data + 8 + hash_bits, refs[1]->get_hash(0).as_bitslice().get_ptr(), hash_bits) !=
-          0) {
+      if (TD_UNLIKELY(td::bitstring::bits_memcmp(data + 8 + hash_bits, refs[1]->get_hash(0).as_bitslice().get_ptr(),
+                                                 hash_bits) != 0)) {
         return td::Status::Error("Second hash mismatch in a MerkleProof special cell");
       }
-      if (td::bitstring::bits_load_ulong(data + 8 + 2 * hash_bits, depth_bytes * 8) != refs[0]->get_depth(0)) {
+      if (TD_UNLIKELY(td::bitstring::bits_load_ulong(data + 8 + 2 * hash_bits, depth_bytes * 8) !=
+                      refs[0]->get_depth(0))) {
         return td::Status::Error("First depth mismatch in a MerkleProof special cell");
       }
-      if (td::bitstring::bits_load_ulong(data + 8 + 2 * hash_bits + depth_bytes * 8, depth_bytes * 8) !=
-          refs[1]->get_depth(0)) {
+      if (TD_UNLIKELY(td::bitstring::bits_load_ulong(data + 8 + 2 * hash_bits + depth_bytes * 8, depth_bytes * 8) !=
+                      refs[1]->get_depth(0))) {
         return td::Status::Error("Second depth mismatch in a MerkleProof special cell");
       }
 
@@ -206,13 +176,13 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
   }
 
   Info info;
-  if (td::unlikely(bits > max_bits)) {
+  if (TD_UNLIKELY(bits > max_bits)) {
     return td::Status::Error("Too many bits");
   }
-  if (td::unlikely(refs.size() > max_refs)) {
+  if (TD_UNLIKELY(refs.size() > max_refs)) {
     return td::Status::Error("Too many cell references");
   }
-  if (td::unlikely(virtualization > max_virtualization)) {
+  if (TD_UNLIKELY(virtualization > max_virtualization)) {
     return td::Status::Error("Too big virtualization");
   }
 
@@ -228,8 +198,8 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
   info.hash_count_ = hash_count & 7;
   info.virtualization_ = virtualization & 7;
 
-  auto data_cell = create_empty_data_cell(info);
-  auto* storage = data_cell->get_storage();
+  DataCell* data_cell = create_empty_data_cell(info);
+  auto* storage = data_cell->storage_;
 
   // init data
   auto* data_ptr = info.get_data(storage);
@@ -265,6 +235,7 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
       continue;
     }
     unsigned char tmp[2];
+
     tmp[0] = info.d1(level_mask.apply(level_i));
     tmp[1] = info.d2();
 
@@ -321,7 +292,9 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     DCHECK(extracted_size == hash_bytes);
   }
 
-  return Ref<DataCell>(data_cell.release(), Ref<DataCell>::acquire_t{});
+  if (TD_LIKELY(data_cell->arena_counter_))
+    return Ref<DataCell>(data_cell, Ref<DataCell>::acquire_datacell_t{});
+  return Ref<DataCell>(data_cell, Ref<DataCell>::acquire_t{});
 }
 
 const DataCell::Hash DataCell::do_get_hash(td::uint32 level) const {
@@ -329,11 +302,14 @@ const DataCell::Hash DataCell::do_get_hash(td::uint32 level) const {
   if (special_type() == SpecialType::PrunnedBranch) {
     auto this_hash_i = get_level_mask().get_hash_i();
     if (hash_i != this_hash_i) {
-      return reinterpret_cast<const Hash*>(info_.get_data(get_storage()) + 2)[hash_i];
+      Hash hash;
+      const unsigned char* ptr = info_.get_data(storage_) + 2 + hash_i * sizeof(Hash);
+      std::memcpy(hash.as_slice().data(), ptr, sizeof(Hash));
+      return hash;
     }
     hash_i = 0;
   }
-  return info_.get_hashes(get_storage())[hash_i];
+  return info_.get_hashes(storage_)[hash_i];
 }
 
 td::uint16 DataCell::do_get_depth(td::uint32 level) const {
@@ -341,11 +317,11 @@ td::uint16 DataCell::do_get_depth(td::uint32 level) const {
   if (special_type() == SpecialType::PrunnedBranch) {
     auto this_hash_i = get_level_mask().get_hash_i();
     if (hash_i != this_hash_i) {
-      return load_depth(info_.get_data(get_storage()) + 2 + hash_bytes * this_hash_i + hash_i * depth_bytes);
+      return load_depth(info_.get_data(storage_) + 2 + hash_bytes * this_hash_i + hash_i * depth_bytes);
     }
     hash_i = 0;
   }
-  return info_.get_depth(get_storage())[hash_i];
+  return info_.get_depth(storage_)[hash_i];
 }
 
 int DataCell::serialize(unsigned char* buff, int buff_size, bool with_hashes) const {

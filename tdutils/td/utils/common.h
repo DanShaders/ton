@@ -83,23 +83,19 @@
 #define TD_LSAN_IGNORE(x) (void)(x)
 #endif
 
+#if TD_CLANG || TD_GCC || TD_INTEL
+#define TD_LIKELY(x) __builtin_expect(bool(x), 1)
+#else
+#define TD_LIKELY(x) x
+#endif
+
+#if TD_CLANG || TD_GCC || TD_INTEL
+#define TD_UNLIKELY(x) __builtin_expect(bool(x), 0)
+#else
+#define TD_UNLIKELY(x) x
+#endif
+
 namespace td {
-
-inline bool likely(bool x) {
-#if TD_CLANG || TD_GCC || TD_INTEL
-  return __builtin_expect(x, 1);
-#else
-  return x;
-#endif
-}
-
-inline bool unlikely(bool x) {
-#if TD_CLANG || TD_GCC || TD_INTEL
-  return __builtin_expect(x, 0);
-#else
-  return x;
-#endif
-}
 
 // replace std::max and std::min to not have to include <algorithm> everywhere
 // as a side bonus, accept parameters by value, so constexpr variables aren't required to be instantiated

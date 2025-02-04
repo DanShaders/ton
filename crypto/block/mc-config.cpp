@@ -1031,7 +1031,7 @@ bool ShardConfig::get_shard_hash_raw_from(vm::Dictionary& dict, vm::CellSlice& c
   unsigned long long z = id.shard, m = std::numeric_limits<unsigned long long>::max();
   int len = id.pfx_len();
   while (true) {
-    cs.load(vm::NoVmOrd(), leaf ? root : std::move(root));
+    cs.load(vm::NoVmOrd(), root);
     int t = (int)cs.fetch_ulong(1);
     if (t < 0) {
       return false;  // throw DictError ?

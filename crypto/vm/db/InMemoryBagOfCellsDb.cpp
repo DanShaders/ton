@@ -159,10 +159,9 @@ class ArenaPrunnedCellCreator : public ExtCellCreator {
 
   struct Allocator {
     template <class T, class... ArgsT>
-    std::unique_ptr<PrunnedCell<Counter>> make_unique(ArgsT &&...args) {
+    PrunnedCell<Counter> *alloc(ArgsT &&...args) {
       auto *ptr = arena_.alloc(sizeof(T));
-      T *obj = new (ptr) T(std::forward<ArgsT>(args)...);
-      return std::unique_ptr<T>(obj);
+      return new (ptr) T(std::forward<ArgsT>(args)...);
     }
   };
   td::Result<Ref<Cell>> ext_cell(Cell::LevelMask level_mask, td::Slice hash, td::Slice depth) override {
@@ -238,7 +237,7 @@ struct CellInfoHashTableDense {
   std::vector<CellInfo> dense_ht_values_;
   td::HashSet<CellInfo, CellHashF, CellEqF> new_ht_;
   size_t dense_choose_bucket(const CellHash &hash) const {
-    return cell_hash_slice_hash(hash.as_slice()) % dense_ht_buckets_;
+    return hash.hash() % dense_ht_buckets_;
   }
   const CellInfo *dense_find(CellHash hash) const {
     auto bucket_i = dense_choose_bucket(hash);
@@ -381,7 +380,7 @@ class CellStorage {
     return buckets_.at(i);
   }
   const CellBucket &get_bucket(const CellHash &hash) const {
-    return get_bucket(hash.as_array()[0]);
+    return get_bucket(hash.as_array()[0] & 0xff);
   }
 
   mutable UniqueAccess local_access_;
@@ -725,8 +724,8 @@ class CellStorage {
     DynamicBagOfCellsDb::Stats stats;
     bucket.infos_.for_each([&](auto &it) {
       int cell_ref_cnt = it.cell->get_refcnt();
-      CHECK(it.db_refcnt + 1 + use_arena >= cell_ref_cnt);
-      auto extra_refcnt = it.db_refcnt + 1 + use_arena - cell_ref_cnt;
+      CHECK(it.db_refcnt + 1 >= cell_ref_cnt);
+      auto extra_refcnt = it.db_refcnt + 1 - cell_ref_cnt;
       if (extra_refcnt != 0) {
         bucket.roots_.push_back(it.cell);
         stats.roots_total_count++;
@@ -955,7 +954,7 @@ std::unique_ptr<DynamicBagOfCellsDb> DynamicBagOfCellsDb::create_in_memory(td::K
         [&](auto task_id) {
           td::int64 local_cell_count = 0;
           td::int64 local_desc_count = 0;
-          CHECK(!DataCell::use_arena);
+          CHECK(DataCell::use_arena);
           DataCell::use_arena = use_arena;
           kv->for_each_in_range(keys.at(task_id), keys.at(task_id + 1), [&](td::Slice key, td::Slice value) {
               if (td::begins_with(key, "desc") && key.size() != 32) {
@@ -974,7 +973,7 @@ std::unique_ptr<DynamicBagOfCellsDb> DynamicBagOfCellsDb::create_in_memory(td::K
               local_cell_count++;
               return td::Status::OK();
             }).ensure();
-          DataCell::use_arena = false;
+          DataCell::use_arena = true;
           cell_count += local_cell_count;
           desc_count += local_desc_count;
         },

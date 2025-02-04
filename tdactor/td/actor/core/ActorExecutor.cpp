@@ -144,7 +144,7 @@ void ActorExecutor::finish() noexcept {
 
   CHECK(actor_locker_.own_lock());
 
-  if (td::unlikely(actor_execute_context_.has_flags())) {
+  if (TD_UNLIKELY(actor_execute_context_.has_flags())) {
     flush_context_flags();
   }
 

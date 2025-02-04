@@ -31,10 +31,10 @@ namespace vm {
 struct CellHash {
  public:
   td::Slice as_slice() const {
-    return td::Slice(hash_.data(), hash_.size());
+    return td::Slice(reinterpret_cast<const td::uint8*>(hash_.data()), CellTraits::hash_bytes);
   }
   td::MutableSlice as_slice() {
-    return td::MutableSlice(hash_.data(), hash_.size());
+    return td::MutableSlice(reinterpret_cast<td::uint8*>(hash_.data()), CellTraits::hash_bytes);
   }
   bool operator==(const CellHash& other) const {
     return hash_ == other.hash_;
@@ -46,31 +46,36 @@ struct CellHash {
     return hash_ != other.hash_;
   }
   std::string to_hex() const {
-    return td::ConstBitPtr{hash_.data()}.to_hex(hash_.size() * 8);
+    return td::ConstBitPtr{reinterpret_cast<const td::uint8*>(hash_.data())}.to_hex(CellTraits::hash_bits);
   }
   friend td::StringBuilder& operator<<(td::StringBuilder& sb, const CellHash& hash);
   td::ConstBitPtr bits() const {
-    return td::ConstBitPtr{hash_.data()};
+    return td::ConstBitPtr{reinterpret_cast<const td::uint8*>(hash_.data())};
   }
   td::BitPtr bits() {
-    return td::BitPtr{hash_.data()};
+    return td::BitPtr{reinterpret_cast<td::uint8*>(hash_.data())};
   }
   td::BitSlice as_bitslice() const {
-    return td::BitSlice{hash_.data(), (unsigned int)hash_.size() * 8};
+    return td::BitSlice{reinterpret_cast<const td::uint8*>(hash_.data()), (unsigned int)CellTraits::hash_bits};
   }
-  const std::array<td::uint8, CellTraits::hash_bytes>& as_array() const {
+  const std::array<td::uint64, CellTraits::hash_bytes / 8>& as_array() const {
     return hash_;
   }
 
   static CellHash from_slice(td::Slice slice) {
     CellHash res;
-    CHECK(slice.size() == res.hash_.size());
-    td::MutableSlice(res.hash_.data(), res.hash_.size()).copy_from(slice);
+    CHECK(slice.size() == CellTraits::hash_bytes);
+    td::MutableSlice(reinterpret_cast<td::uint8*>(res.hash_.data()), CellTraits::hash_bytes).copy_from(slice);
     return res;
   }
 
+  td::uint64 hash() const {
+    return hash_[1];
+  }
+
  private:
-  std::array<td::uint8, CellTraits::hash_bytes> hash_;
+  std::array<td::uint64, CellTraits::hash_bytes / 8> hash_;
+  static_assert(sizeof(hash_) == CellTraits::hash_bytes);
 };
 }  // namespace vm
 
@@ -82,9 +87,10 @@ namespace std {
 template <>
 struct hash<vm::CellHash> {
   typedef vm::CellHash argument_type;
-  typedef std::size_t result_type;
+  typedef td::uint64 result_type;
+  static_assert(sizeof(size_t) == sizeof(result_type));
   result_type operator()(argument_type const& s) const noexcept {
-    return cell_hash_slice_hash(s.as_slice());
+    return s.hash();
   }
 };
 }  // namespace std

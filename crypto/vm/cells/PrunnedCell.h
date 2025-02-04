@@ -19,6 +19,7 @@
 #pragma once
 #include "vm/cells/CellWithStorage.h"
 #include "vm/cells/Cell.h"
+#include "vm/cells/DataCell.h"
 
 namespace vm {
 struct PrunnedCellInfo {
@@ -49,10 +50,10 @@ class PrunnedCell : public Cell {
       return td::Status::Error("Level is too big");
     }
     Info info(level_mask);
-    auto prunned_cell =
-        detail::CellWithArrayStorage<PrunnedCell<ExtraT>>::create(allocator, info.get_storage_size(), info, std::move(extra));
+    auto* prunned_cell = detail::CellWithArrayStorage<PrunnedCell<ExtraT>>::create(allocator, info.get_storage_size(),
+                                                                                   info, std::move(extra));
     TRY_STATUS(prunned_cell->init(prunned_cell_info));
-    return Ref<PrunnedCell<ExtraT>>(prunned_cell.release(), typename Ref<PrunnedCell<ExtraT>>::acquire_t{});
+    return Ref<PrunnedCell<ExtraT>>(prunned_cell, typename Ref<PrunnedCell<ExtraT>>::acquire_t{});
   }
 
   LevelMask get_level_mask() const override {
@@ -68,7 +69,8 @@ class PrunnedCell : public Cell {
     }
     unsigned char level_mask_ : 3;
     unsigned char hash_count_ : 3;
-    size_t get_hashes_offset() const {
+    constexpr size_t get_hashes_offset() const {
+      // Note: this must be aligned to hash_bytes
       return 0;
     }
     size_t get_depth_offset() const {
@@ -93,14 +95,14 @@ class PrunnedCell : public Cell {
 
   Info info_;
   ExtraT extra_;
-  virtual char* get_storage() = 0;
-  virtual const char* get_storage() const = 0;
+  char* storage_;
+
   void destroy_storage(char* storage) {
     // noop
   }
 
   td::Status init(const PrunnedCellInfo& prunned_cell_info) {
-    auto storage = get_storage();
+    char* storage = storage_;
     auto& new_hash = prunned_cell_info.hash;
     auto* hash = info_.get_hashes(storage);
     size_t n = prunned_cell_info.level_mask.get_hashes_count();
@@ -135,11 +137,11 @@ class PrunnedCell : public Cell {
 
  private:
   const Hash do_get_hash(td::uint32 level) const override {
-    return info_.get_hashes(get_storage())[get_level_mask().apply(level).get_hash_i()];
+    return info_.get_hashes(storage_)[get_level_mask().apply(level).get_hash_i()];
   }
 
   td::uint16 do_get_depth(td::uint32 level) const override {
-    return info_.get_depth(get_storage())[get_level_mask().apply(level).get_hash_i()];
+    return info_.get_depth(storage_)[get_level_mask().apply(level).get_hash_i()];
   }
 
   td::Result<LoadedCell> load_cell() const override {

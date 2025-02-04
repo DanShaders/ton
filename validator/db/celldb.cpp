@@ -457,12 +457,13 @@ void CellDbIn::gc_cont2(BlockHandle handle) {
           timer_write_batch.reset();
 
           td::PerfWarningTimer timer_free_cells{"gccell_free_cells", 0.05};
-          auto before = td::ref_get_delete_count();
+          // TODO: introduce preprocessor macro enabling/disabling ref_get_delete_count
+          // auto before = td::ref_get_delete_count();
           cell = {};
-          auto after = td::ref_get_delete_count();
-          if (timer_free_cells.elapsed() > 0.04) {
-            LOG(ERROR) << "deleted " << after - before << " cells";
-          }
+          // auto after = td::ref_get_delete_count();
+          // if (timer_free_cells.elapsed() > 0.04) {
+          //   LOG(ERROR) << "deleted " << after - before << " cells";
+          // }
           timer_free_cells.reset();
 
           td::PerfWarningTimer timer_finish{"gccell_finish", 0.05};

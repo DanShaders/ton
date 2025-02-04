@@ -235,7 +235,7 @@ struct ActorTypeStatImpl {
 
       auto segment_difference = current_segment_time - last_update_segment_time;
 
-      if (unlikely(segment_difference != 0)) {
+      if (TD_UNLIKELY(segment_difference != 0)) {
         update_current_segment(current_segment_time, segment_difference);
       }
 

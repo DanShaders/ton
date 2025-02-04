@@ -64,7 +64,7 @@ class StringBuilder {
   }
 
   StringBuilder &operator<<(char c) {
-    if (unlikely(!reserve())) {
+    if (TD_UNLIKELY(!reserve())) {
       return on_error();
     }
     *current_ptr_++ = c;

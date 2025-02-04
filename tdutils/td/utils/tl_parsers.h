@@ -75,7 +75,7 @@ class TlParser {
   }
 
   void check_len(const size_t len) {
-    if (unlikely(left_len < len)) {
+    if (TD_UNLIKELY(left_len < len)) {
       set_error("Not enough data to read");
     } else {
       left_len -= len;

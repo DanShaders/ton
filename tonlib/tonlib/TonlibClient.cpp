@@ -1013,8 +1013,8 @@ class Query {
             }
           }
           vm::CellStorageStat sstat;                  // for message size
-          sstat.add_used_storage(msg.init, true, 3);  // message init
-          sstat.add_used_storage(msg.body, true, 3);  // message body (the root cell itself is not counted)
+          sstat.add_used_storage(*msg.init.get(), true, 3);  // message init
+          sstat.add_used_storage(*msg.body.get(), true, 3);  // message body (the root cell itself is not counted)
           res += msg_prices[is_masterchain || dest_is_masterchain]->compute_fwd_fees(sstat.cells, sstat.bits);
           break;
         }

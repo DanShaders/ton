@@ -207,7 +207,7 @@ bool is_empty_cell(Ref<vm::Cell> cell) {
 }
 
 bool add_public_library(hash_t lib_addr, hash_t smc_addr, Ref<vm::Cell> lib_root) {
-  if (lib_root.is_null() || lib_root->get_hash().as_array() != lib_addr.as_array()) {
+  if (lib_root.is_null() || lib_root->get_hash().as_slice() != lib_addr.as_slice()) {
     return false;
   }
   auto ins = public_libraries.emplace(lib_addr, lib_root);
@@ -255,7 +255,7 @@ td::RefInt256 create_smartcontract(td::RefInt256 smc_addr, Ref<vm::Cell> code, R
   Ref<vm::DataCell> state_init = cb.finalize();
   hash_t addr;
   if (smc_addr.is_null()) {
-    addr = state_init->get_hash().as_array();
+    addr = state_init->get_hash().bits();
     smc_addr = td::RefInt256{true};
     PDO(smc_addr.write().import_bits(addr.data(), 0, 256, false));
   } else if (mode == 1) {
@@ -388,7 +388,7 @@ bool store_public_libraries(vm::CellBuilder& cb) {
   vm::CellBuilder empty_cb;
   for (const auto& lib_pair : public_libraries) {
     const PublicLibDescr pl = lib_pair.second;
-    PDO(pl.root->get_hash().as_array() == lib_pair.first.as_array());
+    PDO(pl.root->get_hash().as_slice() == lib_pair.first.as_slice());
     vm::Dictionary publishers{256};
     for (const auto& publisher : pl.publishers) {
       PDO(publishers.set_builder(publisher.cbits(), 256, empty_cb, vm::Dictionary::SetMode::Add));

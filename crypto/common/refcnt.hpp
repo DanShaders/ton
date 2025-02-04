@@ -51,6 +51,16 @@ class CntObject {
   }
 
  public:
+  enum {
+    non_arena = 0,
+    arena_datacell = 1,
+    arena_cellslice = 2,
+    arena_usagecell = 3,
+    arena_virtualcell = 4,
+  };
+  // TODO: this should be private
+  int type_ = non_arena;
+
   struct WriteError {};
   CntObject() : cnt_(1) {
   }
@@ -65,10 +75,12 @@ class CntObject {
     return *this;
   }
   virtual ~CntObject() {
+#ifndef NDEBUG
     auto cnt = cnt_.load(std::memory_order_relaxed);
     (void)cnt;
     //TODO: assert(cnt == 0) will fail if object is allocated on stack
     assert(cnt == 0 || cnt == 1);
+#endif
   }
   virtual CntObject* make_copy() const {
     throw WriteError();
@@ -213,6 +225,26 @@ class Ref {
   }
   struct acquire_t {};
   Ref(T* ptr, acquire_t) : ptr(ptr) {
+  }
+  struct acquire_datacell_t {};
+  Ref(T* ptr, acquire_datacell_t) : ptr(ptr) {
+    if (ptr)
+      ptr->type_ = CntObject::arena_datacell;
+  }
+  struct acquire_cellslice_t {};
+  Ref(T* ptr, acquire_cellslice_t) : ptr(ptr) {
+    if (ptr)
+      ptr->type_ = CntObject::arena_cellslice;
+  }
+  struct acquire_usagecell_t {};
+  Ref(T* ptr, acquire_usagecell_t) : ptr(ptr) {
+    if (ptr)
+      ptr->type_ = CntObject::arena_usagecell;
+  }
+  struct acquire_virtualcell_t {};
+  Ref(T* ptr, acquire_virtualcell_t) : ptr(ptr) {
+    if (ptr)
+      ptr->type_ = CntObject::arena_virtualcell;
   }
 
   template <class S>
@@ -425,7 +457,7 @@ typename RefValue<T>::Type& Ref<T>::write() {
 
 template <class T>
 typename RefValue<T>::Type& Ref<T>::unique_write() const {
-  if (!ptr || !ptr->is_unique()) {
+  if (TD_UNLIKELY(!ptr || !ptr->is_unique())) {
     throw CntObject::WriteError();
   }
   return RefValue<T>::make_ref(ptr);
@@ -472,6 +504,5 @@ template <class T>
 void swap(Ref<T>& r1, Ref<T>& r2) {
   r1.swap(r2);
 }
-int64 ref_get_delete_count();
 
 }  // namespace td

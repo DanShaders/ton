@@ -465,7 +465,7 @@ add_executable(test-ed25519 test/test-td-main.cpp ${ED25519_TEST_SOURCE})
 target_link_libraries(test-ed25519 PRIVATE ton_crypto)
 
 add_executable(test-vm test/test-td-main.cpp ${TONVM_TEST_SOURCE})
-target_link_libraries(test-vm PRIVATE ton_crypto fift-lib)
+target_link_libraries(test-vm PRIVATE ton_crypto_count_datacells fift-lib)
 
 add_executable(test-smartcont test/test-td-main.cpp ${SMARTCONT_TEST_SOURCE})
 target_link_libraries(test-smartcont PRIVATE smc-envelope fift-lib ton_db)
@@ -478,7 +478,7 @@ if (WINGETOPT_FOUND)
 endif()
 
 add_executable(test-cells test/test-td-main.cpp ${CELLS_TEST_SOURCE})
-target_link_libraries(test-cells PRIVATE ton_crypto)
+target_link_libraries(test-cells PUBLIC ton_crypto_count_datacells)
 
 add_executable(test-fift test/test-td-main.cpp ${FIFT_TEST_SOURCE})
 target_link_libraries(test-fift PRIVATE fift-lib)
@@ -511,7 +511,7 @@ endif()
 #BEGIN internal
 if (NOT TON_ONLY_TONLIB)
 add_executable(test-db test/test-td-main.cpp ${TONDB_TEST_SOURCE})
-target_link_libraries(test-db PRIVATE ton_db memprof tdfec)
+target_link_libraries(test-db PRIVATE ton_db_count_datacells memprof tdfec)
 
 add_executable(test-storage test/test-td-main.cpp ${STORAGE_TEST_SOURCE})
 target_link_libraries(test-storage PRIVATE storage ton_db memprof tl_api tl-utils fec rldp2)

@@ -67,7 +67,7 @@ void do_init_thread_local(P &raw_ptr, ArgsT &&... args) {
 
 template <class T, class P, class... ArgsT>
 bool init_thread_local(P &raw_ptr, ArgsT &&... args) {
-  if (likely(raw_ptr != nullptr)) {
+  if (TD_LIKELY(raw_ptr != nullptr)) {
     return false;
   }
   detail::do_init_thread_local<T>(raw_ptr, std::forward<ArgsT>(args)...);

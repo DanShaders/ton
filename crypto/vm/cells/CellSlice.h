@@ -40,16 +40,24 @@ class CellSlice : public td::CntObject {
   mutable const unsigned char* ptr{nullptr};
   mutable unsigned long long z;
   mutable unsigned zd;
+  int* arena_counter = nullptr;
 
  public:
+  struct ArenaAllocator;
+  friend struct ArenaAllocator;
+  static thread_local bool use_arena;
   static constexpr long long fetch_long_eof = (static_cast<unsigned long long>(-1LL) << 63);
   static constexpr unsigned long long fetch_ulong_eof = (unsigned long long)-1LL;
   enum { default_recursive_print_limit = 100 };
   struct CellReadError {};
+  ~CellSlice() override {
+    if (arena_counter)
+      --*arena_counter;
+  }
 
-  CellSlice(NoVm, Ref<Cell> cell_ref);
-  CellSlice(NoVmOrd, Ref<Cell> cell_ref);
-  CellSlice(NoVmSpec, Ref<Cell> cell_ref);
+  CellSlice(NoVm, const Ref<Cell>& cell_ref);
+  CellSlice(NoVmOrd, const Ref<Cell>& cell_ref);
+  CellSlice(NoVmSpec, const Ref<Cell>& cell_ref);
   CellSlice(Ref<DataCell> dc_ref);
   CellSlice(VirtualCell::LoadedCell loaded_cell);
   /*
@@ -57,7 +65,7 @@ class CellSlice : public td::CntObject {
   CellSlice(const CellSlice& cs, unsigned _bits_en, unsigned _refs_en);
   CellSlice(const CellSlice& cs, unsigned _bits_en, unsigned _refs_en, unsigned _bits_st, unsigned _refs_st);
   CellSlice(const CellSlice&);
-  CellSlice& operator=(const CellSlice& other) = default;
+  CellSlice& operator=(const CellSlice& other);
   CellSlice();
   Cell::LoadedCell move_as_loaded_cell();
   td::CntObject* make_copy() const override {
@@ -65,12 +73,12 @@ class CellSlice : public td::CntObject {
   }
   void clear();
   bool load(VirtualCell::LoadedCell loaded_cell);
-  bool load(NoVm, Ref<Cell> cell_ref);
-  bool load(NoVmOrd, Ref<Cell> cell_ref);
-  bool load(NoVmSpec, Ref<Cell> cell_ref);
+  bool load(NoVm, const Ref<Cell>& cell_ref);
+  bool load(NoVmOrd, const Ref<Cell>& cell_ref);
+  bool load(NoVmSpec, const Ref<Cell>& cell_ref);
   bool load(Ref<DataCell> dc_ref);
-  bool load(Ref<Cell> cell);
-  bool load_ord(Ref<Cell> cell);
+  bool load(const Ref<Cell>& cell);
+  bool load_ord(const Ref<Cell>& cell);
   unsigned size() const {
     return bits_en - bits_st;
   }
@@ -331,8 +339,10 @@ Ref<CellSlice>& operator>>(Ref<CellSlice>& cs_ref, const T& val) {
 // Flag whether loaded cell is actually special will be stored into can_be_special
 CellSlice load_cell_slice(const Ref<Cell>& cell);
 Ref<CellSlice> load_cell_slice_ref(const Ref<Cell>& cell);
+Ref<CellSlice> load_cell_slice_ref_move(Ref<Cell>&& cell);
 CellSlice load_cell_slice_special(const Ref<Cell>& cell, bool& is_special);
-Ref<CellSlice> load_cell_slice_ref_special(const Ref<Cell>& cell, bool& is_special);
+CellSlice load_cell_slice_special(Ref<Cell>&& cell, bool& is_special);
+Ref<CellSlice> load_cell_slice_ref_special(Ref<Cell>&& cell, bool& is_special);
 void print_load_cell(std::ostream& os, Ref<Cell> cell, int indent = 0);
 
 }  // namespace vm

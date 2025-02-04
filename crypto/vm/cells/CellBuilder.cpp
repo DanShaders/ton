@@ -37,14 +37,6 @@ using td::RefAny;
  * 
  */
 
-CellBuilder::~CellBuilder() {
-  get_thread_safe_counter().add(-1);
-}
-
-CellBuilder::CellBuilder() : bits(0), refs_cnt(0) {
-  get_thread_safe_counter().add(+1);
-}
-
 Ref<DataCell> CellBuilder::finalize_copy(bool special) const {
   auto* vm_state_interface = VmStateInterface::get();
   if (vm_state_interface) {
@@ -59,7 +51,7 @@ Ref<DataCell> CellBuilder::finalize_copy(bool special) const {
   CHECK(cell.not_null());
   if (vm_state_interface) {
     vm_state_interface->register_new_cell(cell);
-    if (cell.is_null()) {
+    if (TD_UNLIKELY(cell.is_null())) {
       LOG(DEBUG) << "cannot register new data cell";
       throw CellWriteError{};
     }
@@ -91,7 +83,7 @@ Ref<DataCell> CellBuilder::finalize(bool special) {
   vm_state_interface->register_cell_create();
   auto cell = finalize_novm(special);
   vm_state_interface->register_new_cell(cell);
-  if (cell.is_null()) {
+  if (TD_UNLIKELY(cell.is_null())) {
     LOG(DEBUG) << "cannot register new data cell";
     throw CellWriteError{};
   }

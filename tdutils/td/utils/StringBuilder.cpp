@@ -47,7 +47,7 @@ StringBuilder::StringBuilder(MutableSlice slice, bool use_buffer)
 
 StringBuilder &StringBuilder::operator<<(Slice slice) {
   size_t size = slice.size();
-  if (unlikely(!reserve(size))) {
+  if (TD_UNLIKELY(!reserve(size))) {
     if (end_ptr_ < current_ptr_) {
       return on_error();
     }
@@ -141,7 +141,7 @@ bool StringBuilder::reserve_inner(size_t size) {
 }
 
 StringBuilder &StringBuilder::operator<<(int x) {
-  if (unlikely(!reserve())) {
+  if (TD_UNLIKELY(!reserve())) {
     return on_error();
   }
   current_ptr_ = print_int(current_ptr_, x);
@@ -149,7 +149,7 @@ StringBuilder &StringBuilder::operator<<(int x) {
 }
 
 StringBuilder &StringBuilder::operator<<(unsigned int x) {
-  if (unlikely(!reserve())) {
+  if (TD_UNLIKELY(!reserve())) {
     return on_error();
   }
   current_ptr_ = print_uint(current_ptr_, x);
@@ -157,7 +157,7 @@ StringBuilder &StringBuilder::operator<<(unsigned int x) {
 }
 
 StringBuilder &StringBuilder::operator<<(long int x) {
-  if (unlikely(!reserve())) {
+  if (TD_UNLIKELY(!reserve())) {
     return on_error();
   }
   current_ptr_ = print_int(current_ptr_, x);
@@ -165,7 +165,7 @@ StringBuilder &StringBuilder::operator<<(long int x) {
 }
 
 StringBuilder &StringBuilder::operator<<(long unsigned int x) {
-  if (unlikely(!reserve())) {
+  if (TD_UNLIKELY(!reserve())) {
     return on_error();
   }
   current_ptr_ = print_uint(current_ptr_, x);
@@ -173,7 +173,7 @@ StringBuilder &StringBuilder::operator<<(long unsigned int x) {
 }
 
 StringBuilder &StringBuilder::operator<<(long long int x) {
-  if (unlikely(!reserve())) {
+  if (TD_UNLIKELY(!reserve())) {
     return on_error();
   }
   current_ptr_ = print_int(current_ptr_, x);
@@ -181,7 +181,7 @@ StringBuilder &StringBuilder::operator<<(long long int x) {
 }
 
 StringBuilder &StringBuilder::operator<<(long long unsigned int x) {
-  if (unlikely(!reserve())) {
+  if (TD_UNLIKELY(!reserve())) {
     return on_error();
   }
   current_ptr_ = print_uint(current_ptr_, x);
@@ -189,7 +189,7 @@ StringBuilder &StringBuilder::operator<<(long long unsigned int x) {
 }
 
 StringBuilder &StringBuilder::operator<<(FixedDouble x) {
-  if (unlikely(!reserve(std::numeric_limits<double>::max_exponent10 + x.precision + 4))) {
+  if (TD_UNLIKELY(!reserve(std::numeric_limits<double>::max_exponent10 + x.precision + 4))) {
     return on_error();
   }
 
@@ -206,7 +206,7 @@ StringBuilder &StringBuilder::operator<<(FixedDouble x) {
 
   int len = narrow_cast<int>(static_cast<std::streamoff>(ss->tellp()));
   auto left = end_ptr_ + RESERVED_SIZE - current_ptr_;
-  if (unlikely(len >= left)) {
+  if (TD_UNLIKELY(len >= left)) {
     error_flag_ = true;
     len = left ? narrow_cast<int>(left - 1) : 0;
   }
@@ -216,7 +216,7 @@ StringBuilder &StringBuilder::operator<<(FixedDouble x) {
 }
 
 StringBuilder &StringBuilder::operator<<(const void *ptr) {
-  if (unlikely(!reserve())) {
+  if (TD_UNLIKELY(!reserve())) {
     return on_error();
   }
   current_ptr_ += std::snprintf(current_ptr_, RESERVED_SIZE, "%p", ptr);
