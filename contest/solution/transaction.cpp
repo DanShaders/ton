@@ -556,11 +556,11 @@ struct CellStorageStat {
 	};
 
 	bool add_used_storage(td::Ref<vm::Cell> cell) {
-		if(!seen.emplace(cell->get_hash())) return true;
 		std::vector<td::Ref<vm::Cell>> cells {std::move(cell)};
 		while(!cells.empty()) {
 			cell = std::move(cells.back());
 			cells.pop_back();
+			if(!seen.emplace(cell->get_hash())) continue;
 
 			const MyDataCell *dc;
 			vm::Cell::LoadedCell lc;
@@ -585,7 +585,7 @@ struct CellStorageStat {
 				--nrefs;
 				td::Ref<vm::Cell> cr(refs[nrefs]->virtualize(lc.virt));
 				if(cr.is_null()) return false;
-				if(seen.emplace(cr->get_hash())) cells.emplace_back(std::move(cr));
+				cells.emplace_back(std::move(cr));
 			} while(nrefs);
 		}
 		return true;
