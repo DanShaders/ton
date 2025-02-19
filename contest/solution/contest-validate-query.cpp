@@ -5191,8 +5191,10 @@ bool ContestValidateQuery::check_transactions_async() {
   std::vector<td::Status> results(worker_threads.size());
   for(auto &thread : worker_threads) {
     thread->queue([this, idx=thread->idx, &finished_threads, &cv, &results, &mtx] {
+      try {
       int i = 0;
       TransactionBlockChecker checker{this};
+      checker.account_expected_defer_all_messages_ = account_expected_defer_all_messages_;
       bool ok = account_blocks_dict_->check_for_each_extra(
           [&i, this, idx, &checker](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
             if (i++ % worker_threads.size() == idx) {
@@ -5220,10 +5222,25 @@ bool ContestValidateQuery::check_transactions_async() {
         fees_burned_ += checker.fees_burned_;
         total_gas_used_ += checker.total_gas_used_;
         total_special_gas_used_ += checker.total_special_gas_used_;
-        
         finished_threads++;
+        cv.notify_all();
       }
-      cv.notify_all();
+      } catch (vm::VmError& error) {
+        std::unique_lock<std::mutex> lock(mtx);
+        results.push_back(error.as_status());
+        finished_threads++;
+        cv.notify_all();
+      } catch (vm::VmVirtError& error) {
+        std::unique_lock<std::mutex> lock(mtx);
+        results.push_back(error.as_status());
+        finished_threads++;
+        cv.notify_all();
+      } catch (vm::VmNoGas& error) {
+        std::unique_lock<std::mutex> lock(mtx);
+        results.push_back(error.as_status());
+        finished_threads++;
+        cv.notify_all();
+      }
     });
   }
   std::unique_lock<std::mutex> lock(mtx);
