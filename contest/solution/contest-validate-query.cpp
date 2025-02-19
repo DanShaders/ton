@@ -2391,7 +2391,7 @@ bool ContestValidateQuery::check_account_dispatch_queue_update(td::Bits256 addr,
 	}
 	if (!new_dict.is_empty()) {
 		td::BitArray<64> new_min_lt;
-		// new_dict.get_minmax_key(new_min_lt).not_null()
+		new_dict.get_minmax_key(new_min_lt);
 		if(new_min_lt.to_ulong() <= max_removed_lt)
 			return reject_query(PSTRING() << "invalid AccountDispatchQuery update for " << addr.to_hex()
 											<< ": max removed lt is " << max_removed_lt << ", but lt=" << new_min_lt.to_ulong()
@@ -2399,7 +2399,7 @@ bool ContestValidateQuery::check_account_dispatch_queue_update(td::Bits256 addr,
 	}
 	if (!old_dict.is_empty()) {
 		td::BitArray<64> old_max_lt;
-		// old_dict.get_minmax_key(old_max_lt, true).not_null()
+		old_dict.get_minmax_key(old_max_lt, true);
 		if(old_max_lt.to_ulong() >= min_added_lt) {
 			return reject_query(PSTRING() << "invalid AccountDispatchQuery update for " << addr.to_hex()
 																		<< ": min added lt is " << min_added_lt << ", but lt=" << old_max_lt.to_ulong()
