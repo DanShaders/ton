@@ -494,13 +494,13 @@ bool ContestValidateQuery::init_parse() {
   // run some hand-written checks from block::tlb::
   // (automatic tests from block::gen:: have been already run for the entire block)
   if (!block::tlb::t_InMsgDescr.validate_upto(10000000, *inmsg_cs)) {
-    return reject_query("InMsgDescr of the new block failed to pass handwritten validity tests");
+    return false;
   }
   if (!block::tlb::t_OutMsgDescr.validate_upto(10000000, *outmsg_cs)) {
-    return reject_query("OutMsgDescr of the new block failed to pass handwritten validity tests");
+    return false;
   }
   if (!block::tlb::t_ShardAccountBlocks.validate_ref(10000000, extra.account_blocks)) {
-    return reject_query("ShardAccountBlocks of the new block failed to pass handwritten validity tests");
+    return false;
   }
   in_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(inmsg_cs), 256, block::tlb::aug_InMsgDescr);
   out_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(outmsg_cs), 256, block::tlb::aug_OutMsgDescr);
@@ -508,15 +508,15 @@ bool ContestValidateQuery::init_parse() {
       vm::load_cell_slice_ref(std::move(extra.account_blocks)), 256, block::tlb::aug_ShardAccountBlocks);
   LOG(DEBUG) << "validating InMsgDescr";
   if (!in_msg_dict_->validate_all()) {
-    return reject_query("InMsgDescr dictionary is invalid");
+    return false;
   }
   LOG(DEBUG) << "validating OutMsgDescr";
   if (!out_msg_dict_->validate_all()) {
-    return reject_query("OutMsgDescr dictionary is invalid");
+    return false;
   }
   LOG(DEBUG) << "validating ShardAccountBlocks";
   if (!account_blocks_dict_->validate_all()) {
-    return reject_query("ShardAccountBlocks dictionary is invalid");
+    return false;
   }
   value_flow_root_ = std::move(blk.value_flow);
   return true;
@@ -4979,7 +4979,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   }
   // now compare the re-created transaction with the one we have
   if (trans_root2->get_hash() != trans_root->get_hash()) {
-    if (verbosity >= 3 * 0) {
+    if (verbosity >= 3) {
       std::cerr << "original transaction " << lt << " of " << addr.to_hex() << ": ";
       block::gen::t_Transaction.print_ref(std::cerr, trans_root);
       std::cerr << "re-created transaction " << lt << " of " << addr.to_hex() << ": ";
