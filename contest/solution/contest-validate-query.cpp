@@ -4461,8 +4461,8 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
 	// account.addr == acc_addr
 	vm::AugmentedDictionary trans_dict{vm::DictNonEmpty(), std::move(acc_blk.transactions), 64, block::tlb::aug_AccountTransactions};
 	td::BitArray<64> min_trans, max_trans;
-	// trans_dict.get_minmax_key(min_trans).not_null()
-	// trans_dict.get_minmax_key(max_trans, true).not_null());
+	trans_dict.get_minmax_key(min_trans);
+	trans_dict.get_minmax_key(max_trans, true);
 	ton::LogicalTime min_trans_lt = min_trans.to_ulong(), max_trans_lt = max_trans.to_ulong();
 	if(!trans_dict.check_for_each_extra([this, &account, min_trans_lt, max_trans_lt](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, [[maybe_unused]] int key_len) {
 				ton::LogicalTime lt = key.get_uint(64);
