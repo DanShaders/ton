@@ -46,39 +46,48 @@ struct CellSliceInfo {
 	}
 };
 
+char* NEXT_STORAGE = nullptr;
+
 struct CellWithStorage : public vm::DataCell {
 	using vm::DataCell::Info;
-	constexpr static int STORAGE_SIZE = 228;
-	inline static char* BIG_STORAGE = nullptr;
-	inline static char* NEXT_STORAGE = nullptr;
-	inline static size_t BIG_STORAGE_SIZE = 0;
 
 	char* storage;
 	CellWithStorage(const Info &info, char* n_storage):
 		vm::DataCell(info), storage(NEXT_STORAGE) { NEXT_STORAGE = n_storage; }
 	CellWithStorage(const CellWithStorage& other):
 		vm::DataCell(other.info_), storage(other.storage) {}
-	~CellWithStorage() {}
+	~CellWithStorage() { std::cerr << "HERE\n"; }
 	const char* get_storage() const { return storage; }
 	char* get_storage() { return storage; }
 };
-inline static CellWithStorage* CELLS = nullptr;
-inline static CellWithStorage* NEXT_CELL = nullptr;
-inline static size_t CELLS_SIZE = 0;
+CellWithStorage* NEXT_CELL = nullptr;
+
+struct Pool {
+	constexpr static int STORAGE_SIZE = 232;
+	char* BIG_STORAGE = nullptr;
+	size_t BIG_STORAGE_SIZE = 0;
+	CellWithStorage* CELLS = nullptr;
+	size_t CELLS_SIZE = 0;
+};
+std::array<Pool, 8> POOLS;
+static int POOL_INDEX = 0;
+
 static void CLEAR_CELLS(const size_t cell_count) {
-	const size_t desired_size = CellWithStorage::STORAGE_SIZE * cell_count;
-	if(CellWithStorage::BIG_STORAGE_SIZE < desired_size) {
-		if(CellWithStorage::BIG_STORAGE) ::operator delete[] (CellWithStorage::BIG_STORAGE, std::align_val_t(8));
-		CellWithStorage::BIG_STORAGE = new(std::align_val_t(8)) char[desired_size];
-		CellWithStorage::BIG_STORAGE_SIZE = desired_size;
+	Pool &pool = POOLS[POOL_INDEX];
+	const size_t desired_size = Pool::STORAGE_SIZE * cell_count;
+	if(pool.BIG_STORAGE_SIZE < desired_size) {
+		if(pool.BIG_STORAGE) ::operator delete[] (pool.BIG_STORAGE, std::align_val_t(8));
+		pool.BIG_STORAGE = new(std::align_val_t(8)) char[desired_size];
+		pool.BIG_STORAGE_SIZE = desired_size;
 	}
-	CellWithStorage::NEXT_STORAGE = CellWithStorage::BIG_STORAGE;
-	if(CELLS_SIZE < cell_count) {
-		if(CELLS) free(CELLS);
-		CELLS = (CellWithStorage*) malloc(cell_count * sizeof(CellWithStorage));
-		CELLS_SIZE = cell_count;
+	NEXT_STORAGE = pool.BIG_STORAGE;
+	if(pool.CELLS_SIZE < cell_count) {
+		if(pool.CELLS) free(pool.CELLS);
+		pool.CELLS = (CellWithStorage*) malloc(cell_count * sizeof(CellWithStorage));
+		pool.CELLS_SIZE = cell_count;
 	}
-	NEXT_CELL = CELLS;
+	NEXT_CELL = pool.CELLS;
+	POOL_INDEX = (POOL_INDEX + 1) % (int) POOLS.size();
 }
 
 struct CellSerializationInfo {
@@ -145,7 +154,7 @@ struct CellSerializationInfo {
 		info.hash_count_ = hash_count & 0b111;
 		info.virtualization_ = 0;
 		// init data
-		vm::Cell::Hash* hashes_ptr = (vm::Cell::Hash*) CellWithStorage::NEXT_STORAGE;
+		vm::Cell::Hash* hashes_ptr = (vm::Cell::Hash*) NEXT_STORAGE;
 		const vm::Cell** refs_ptr = (const vm::Cell**) (hashes_ptr + hash_count);
 		uint16_t* depth_ptr = (uint16_t*) (refs_ptr + refs_cnt);
 		uint8_t* data_ptr = (uint8_t*) (depth_ptr + hash_count);
@@ -244,6 +253,6 @@ std::vector<td::Ref<vm::Cell>> deserialize(const td::Slice& data) {
 		++ r;
 	}
 	for(const auto &[c, r] : cell_list) if(r)
-		td::Ref<vm::Cell>::acquire_shared(c, r);
+		td::Ref<vm::Cell>::acquire_shared(c, r + (1<<16)); // we add a big number of refs just in case
 	return roots;
 }
