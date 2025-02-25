@@ -70,11 +70,13 @@ static void CLEAR_CELLS(const size_t cell_count) {
 	if(CellWithStorage::BIG_STORAGE_SIZE < desired_size) {
 		if(CellWithStorage::BIG_STORAGE) ::operator delete[] (CellWithStorage::BIG_STORAGE, std::align_val_t(8));
 		CellWithStorage::BIG_STORAGE = new(std::align_val_t(8)) char[desired_size];
+		CellWithStorage::BIG_STORAGE_SIZE = desired_size;
 	}
 	CellWithStorage::NEXT_STORAGE = CellWithStorage::BIG_STORAGE;
 	if(CELLS_SIZE < cell_count) {
 		if(CELLS) free(CELLS);
 		CELLS = (CellWithStorage*) malloc(cell_count * sizeof(CellWithStorage));
+		CELLS_SIZE = cell_count;
 	}
 	NEXT_CELL = CELLS;
 }
