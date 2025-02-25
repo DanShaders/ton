@@ -5,22 +5,34 @@
 namespace vm {
 
 struct HashSet {
+private:
+	struct alignas(8) Element {
+		vm::CellHash h;
+		int nxt;
+		Element(const vm::CellHash &h, int nxt): h(h), nxt(nxt) {}
+	};
 	std::vector<int> buckets;
-	std::vector<std::pair<vm::CellHash, int>> hs;
-
+	std::vector<Element> hs;
+	inline static uint64_t hash2int(const vm::CellHash &h) {
+		uint64_t i;
+		std::memcpy(&i, h.as_array().data(), sizeof(i));
+		return i;
+	}
+	
+	public:
 	bool emplace(const vm::CellHash &h) {
 		if(buckets.empty()) buckets.assign(128, -1);
-		const uint64_t b = (*(const uint64_t*) h.as_array().data()) & (buckets.size()-1);
-		for(int i = buckets[b]; i != -1; i = hs[i].second)
-			if(hs[i].first == h) return false;
+		const uint64_t b = hash2int(h) & (buckets.size()-1);
+		for(int i = buckets[b]; i != -1; i = hs[i].nxt)
+			if(hs[i].h == h) return false;
 		if(hs.size() >= buckets.size()) {
 			hs.emplace_back(h, -1);
 			buckets.assign(buckets.size()<<1, -1);
 			const int H = (int) hs.size();
 			const uint64_t m = buckets.size()-1;
 			for(int i = 0; i < H; ++i) {
-				const uint64_t b = (*(const uint64_t*) hs[i].first.as_array().data()) & m;
-				hs[i].second = buckets[b];
+				const uint64_t b = (*(const uint64_t*) hs[i].h.as_array().data()) & m;
+				hs[i].nxt = buckets[b];
 				buckets[b] = i;
 			}
 		} else {
@@ -32,9 +44,9 @@ struct HashSet {
 
 	bool count(const vm::CellHash &h) const {
 		if(buckets.empty()) return false;
-		const uint64_t b = (*(const uint64_t*) h.as_array().data()) & (buckets.size()-1);
-		for(int i = buckets[b]; i != -1; i = hs[i].second)
-			if(hs[i].first == h) return true;
+		const uint64_t b = hash2int(h) & (buckets.size()-1);
+		for(int i = buckets[b]; i != -1; i = hs[i].nxt)
+			if(hs[i].h == h) return true;
 		return false;
 	}
 
@@ -50,22 +62,36 @@ struct HashSet {
 
 template<typename T>
 struct HashMap {
+	static_assert((8 % alignof(T) == 0) || (alignof(T) % 8 == 0)); 
+private:
+	struct alignas(std::max(8, (int)alignof(T))) Element {
+		vm::CellHash h;
+		T v;
+		int nxt;
+		Element(const vm::CellHash &h, const T &v, int nxt): h(h), v(v), nxt(nxt) {}
+	};
 	std::vector<int> buckets;
-	std::vector<std::tuple<vm::CellHash, T, int>> hs;
+	std::vector<Element> hs;
+	inline static uint64_t hash2int(const vm::CellHash &h) {
+		uint64_t i;
+		std::memcpy(&i, h.as_array().data(), sizeof(i));
+		return i;
+	}
 
+public:
 	bool emplace(const vm::CellHash &h, const T &v) {
 		if(buckets.empty()) buckets.assign(128, -1);
-		const uint64_t b = (*(const uint64_t*) h.as_array().data()) & (buckets.size()-1);
-		for(int i = buckets[b]; i != -1; i = std::get<2>(hs[i]))
-			if(std::get<0>(hs[i]) == h) return false;
+		const uint64_t b = hash2int(h) & (buckets.size()-1);
+		for(int i = buckets[b]; i != -1; i = hs[i].nxt)
+			if(hs[i].h == h) return false;
 		if(hs.size() >= buckets.size()) {
 			hs.emplace_back(h, v, -1);
 			buckets.assign(buckets.size()<<1, -1);
 			const int H = (int) hs.size();
 			const uint64_t m = buckets.size()-1;
 			for(int i = 0; i < H; ++i) {
-				const uint64_t b = (*(const uint64_t*) std::get<0>(hs[i]).as_array().data()) & m;
-				std::get<2>(hs[i]) = buckets[b];
+				const uint64_t b = (*(const uint64_t*) (hs[i].h).as_array().data()) & m;
+				hs[i].nxt = buckets[b];
 				buckets[b] = i;
 			}
 		} else {
@@ -77,9 +103,9 @@ struct HashMap {
 
 	T* find(const vm::CellHash &h) {
 		if(buckets.empty()) return nullptr;
-		const uint64_t b = (*(const uint64_t*) h.as_array().data()) & (buckets.size()-1);
-		for(int i = buckets[b]; i != -1; i = std::get<2>(hs[i]))
-			if(std::get<0>(hs[i]) == h) return &std::get<1>(hs[i]);
+		const uint64_t b = hash2int(h) & (buckets.size()-1);
+		for(int i = buckets[b]; i != -1; i = hs[i].nxt)
+			if(hs[i].h == h) return &hs[i].v;
 		return nullptr;
 	}
 
