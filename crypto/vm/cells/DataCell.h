@@ -150,6 +150,9 @@ class DataCell : public Cell {
     }
     return Ref<Cell>(get_ref_raw_ptr(idx));
   }
+  Cell* const* get_refs() const {
+	return info_.get_refs(get_storage());
+  }
 
   Cell* get_ref_raw_ptr(unsigned idx) const {
     DCHECK(idx < get_refs_cnt());

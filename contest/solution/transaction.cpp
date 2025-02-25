@@ -551,10 +551,6 @@ struct CellStorageStat {
 		seen.clear();
 	}
 
-	struct MyDataCell : public vm::DataCell {
-		vm::Cell* const* get_refs() const { return info_.get_refs(get_storage()); }
-	};
-
 	bool add_used_storage(td::Ref<vm::Cell> cell) {
 		std::vector<td::Ref<vm::Cell>> cells {std::move(cell)};
 		while(!cells.empty()) {
@@ -562,13 +558,13 @@ struct CellStorageStat {
 			cells.pop_back();
 			if(!seen.emplace(cell->get_hash())) continue;
 
-			const MyDataCell *dc;
+			const vm::DataCell *dc;
 			vm::Cell::LoadedCell lc;
-			if(cell->is_datacell()) dc = (const MyDataCell*) cell.get();
+			if(cell->is_datacell()) dc = (const vm::DataCell*) cell.get();
 			else {
 				auto rlc = cell->load_cell();
 				lc = rlc.is_ok() ? rlc.move_as_ok() : vm::Cell::LoadedCell{};
-				dc = (const MyDataCell*) lc.data_cell.get();
+				dc = lc.data_cell.get();
 			}
 
 			uint32_t nrefs = dc->get_refs_cnt();

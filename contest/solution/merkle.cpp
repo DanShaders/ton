@@ -5,10 +5,6 @@
 #include "crypto/vm/cells/DataCell.h"
 #include "crypto/vm/hash-set.h"
 
-struct MyDataCell : public vm::DataCell {
-	vm::Cell* const* get_refs() const { return info_.get_refs(get_storage()); }
-};
-
 static std::vector<uint8_t> storage;
 struct Node {
 	union {
@@ -101,7 +97,7 @@ struct MerkleProofImpl {
 
 		auto rlc = cell->load_cell();
 		vm::Cell::LoadedCell  lc = rlc.is_ok() ? rlc.move_as_ok() : vm::Cell::LoadedCell{};
-		const MyDataCell *dc = (const MyDataCell*) lc.data_cell.get();
+		const vm::DataCell *dc = lc.data_cell.get();
 
 		const uint32_t nrefs = lc.data_cell->size_refs();
 		if(!nrefs) return;
@@ -160,7 +156,7 @@ struct MerkleProofImpl {
 
 		auto rlc = cell->load_cell();
 		vm::Cell::LoadedCell  lc = rlc.is_ok() ? rlc.move_as_ok() : vm::Cell::LoadedCell{};
-		const MyDataCell *dc = (const MyDataCell*) lc.data_cell.get();
+		const vm::DataCell *dc = lc.data_cell.get();
 		const uint32_t nrefs = lc.data_cell->size_refs();
 
 		if(!from && !lc.tree_node.empty() && lc.tree_node.mark_path(usage_tree_)) return prune();
