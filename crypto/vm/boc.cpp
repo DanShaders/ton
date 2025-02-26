@@ -1106,13 +1106,10 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(const Ce
   }
   CellInfo res;
   for (unsigned i = 0; i < cs.size_refs(); i++) {
-    TRY_RESULT(child, add_used_storage(cs.prefetch_ref(i), kill_dup));
+    TRY_RESULT(child, add_used_storage(cs.prefetch_ref(i, true), kill_dup));
     res.max_merkle_depth = std::max(res.max_merkle_depth, child.max_merkle_depth);
   }
-  if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
-      cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
-    ++res.max_merkle_depth;
-  }
+  res.max_merkle_depth = DataCell::child_merkle_depth(cs.special_type(), res.max_merkle_depth);
   return res;
 }
 
@@ -1132,13 +1129,10 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlic
   }
   CellInfo res;
   while (cs.size_refs()) {
-    TRY_RESULT(child, add_used_storage(cs.fetch_ref(), kill_dup));
+    TRY_RESULT(child, add_used_storage(cs.fetch_ref(true), kill_dup));
     res.max_merkle_depth = std::max(res.max_merkle_depth, child.max_merkle_depth);
   }
-  if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
-      cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
-    ++res.max_merkle_depth;
-  }
+  res.max_merkle_depth = DataCell::child_merkle_depth(cs.special_type(), res.max_merkle_depth);
   return res;
 }
 
@@ -1148,13 +1142,33 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
     return td::Status::Error("cell is null");
   }
   if (kill_dup) {
-    auto ins = seen.emplace(cell->get_hash(), CellInfo{});
+    auto ins = seen.emplace(cell->get_hash());
     if (!ins.second) {
-      return ins.first->second;
+      return CellInfo{};
     }
   }
-  vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
-  return add_used_storage(std::move(cs), kill_dup, skip_count_root);
+
+  TRY_RESULT(loaded, cell->load_cell());
+
+  if (!(skip_count_root & 1)) {
+    ++cells;
+    if (cells > limit_cells) {
+      return td::Status::Error("too many cells");
+    }
+  }
+  if (!(skip_count_root & 2)) {
+    bits += loaded.data_cell->get_bits();
+    if (bits > limit_bits) {
+      return td::Status::Error("too many bits");
+    }
+  }
+
+  CellInfo res;
+  for (unsigned ref_id = 0; ref_id < loaded.data_cell->size_refs(); ++ref_id) {
+    TRY_RESULT(child, add_used_storage(loaded.data_cell->get_virtualized_ref(ref_id, loaded.virt), kill_dup));
+    res.max_merkle_depth = std::max(res.max_merkle_depth, child.max_merkle_depth);
+  }
+  return res;
 }
 
 void NewCellStorageStat::add_cell(Ref<Cell> cell) {

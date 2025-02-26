@@ -287,12 +287,7 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     // calc depth
     td::uint16 depth = 0;
     for (int i = 0; i < info.refs_count_; i++) {
-      td::uint16 child_depth = 0;
-      if (type == SpecialType::MerkleProof || type == SpecialType::MerkleUpdate) {
-        child_depth = refs_ptr[i]->get_depth(level_i + 1);
-      } else {
-        child_depth = refs_ptr[i]->get_depth(level_i);
-      }
+      td::uint16 child_depth = refs_ptr[i]->get_depth(child_merkle_depth(type, level_i));
 
       // add depth into hash
       td::uint8 child_depth_buf[depth_bytes];
@@ -311,11 +306,7 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
 
     // children hash
     for (int i = 0; i < info.refs_count_; i++) {
-      if (type == SpecialType::MerkleProof || type == SpecialType::MerkleUpdate) {
-        hasher->feed(refs_ptr[i]->get_hash(level_i + 1).as_slice());
-      } else {
-        hasher->feed(refs_ptr[i]->get_hash(level_i).as_slice());
-      }
+      hasher->feed(refs_ptr[i]->get_hash(child_merkle_depth(type, level_i)).as_slice());
     }
     auto extracted_size = hasher->extract(hashes_ptr[dest_i].as_slice());
     DCHECK(extracted_size == hash_bytes);

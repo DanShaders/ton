@@ -84,14 +84,7 @@ class CellSlice : public td::CntObject {
     return cell->special_type();
   }
   int child_merkle_depth(int merkle_depth) const {
-    if (merkle_depth == Cell::VirtualizationParameters::max_level()) {
-      return merkle_depth;
-    }
-    if (cell->special_type() == Cell::SpecialType::MerkleProof ||
-        cell->special_type() == Cell::SpecialType::MerkleUpdate) {
-      merkle_depth++;
-    }
-    return merkle_depth;
+    return cell->child_merkle_depth(cell->special_type(), merkle_depth);
   }
   unsigned size_refs() const {
     return refs_en - refs_st;
@@ -180,8 +173,8 @@ class CellSlice : public td::CntObject {
   bool fetch_uint256_to(unsigned bits, td::RefInt256& res) {
     return (res = fetch_int256(bits, false)).not_null();
   }
-  Ref<Cell> prefetch_ref(unsigned offset = 0) const;
-  Ref<Cell> fetch_ref();
+  Ref<Cell> prefetch_ref(unsigned offset = 0, bool skip_usage_cell = false) const;
+  Ref<Cell> fetch_ref(bool skip_usage_cell = false);
   bool fetch_ref_to(Ref<Cell>& ref) {
     return (ref = fetch_ref()).not_null();
   }
@@ -287,10 +280,6 @@ class CellSlice : public td::CntObject {
   void init_bits_refs();
   void init_preload() const;
   void preload_at_least(unsigned req_bits) const;
-  Cell::VirtualizationParameters child_virt() const {
-    return Cell::VirtualizationParameters(static_cast<td::uint8>(child_merkle_depth(virt.get_level())),
-                                          virt.get_virtualization());
-  }
 };
 
 td::StringBuilder& operator<<(td::StringBuilder& sb, const CellSlice& cs);

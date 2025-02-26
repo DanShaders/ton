@@ -150,6 +150,12 @@ class DataCell : public Cell {
     }
     return Ref<Cell>(get_ref_raw_ptr(idx));
   }
+  Ref<Cell> get_virtualized_ref(unsigned idx, const VirtualizationParameters& virt) const {
+    if (idx >= get_refs_cnt()) {
+      return Ref<Cell>{};
+    }
+    return Ref<Cell>(get_ref_raw_ptr(idx))->virtualize(child_virt(virt));
+  }
 
   Cell* get_ref_raw_ptr(unsigned idx) const {
     DCHECK(idx < get_refs_cnt());
@@ -203,6 +209,16 @@ class DataCell : public Cell {
     storer.store_slice(td::Slice(get_data(), (get_bits() + 7) / 8));
   }
 
+  static int child_merkle_depth(SpecialType type, int merkle_depth) {
+    if (merkle_depth == VirtualizationParameters::max_level()) {
+      return merkle_depth;
+    }
+    if (type == SpecialType::MerkleProof || type == SpecialType::MerkleUpdate) {
+      merkle_depth++;
+    }
+    return merkle_depth;
+  }
+
  protected:
   static constexpr auto max_storage_size = max_refs * sizeof(void*) + (max_level + 1) * hash_bytes + max_bytes;
 
@@ -220,6 +236,11 @@ class DataCell : public Cell {
   static td::Result<Ref<DataCell>> create(td::ConstBitPtr data, unsigned bits, td::Span<Ref<Cell>> refs, bool special);
   static td::Result<Ref<DataCell>> create(td::ConstBitPtr data, unsigned bits, td::MutableSpan<Ref<Cell>> refs,
                                           bool special);
+
+  VirtualizationParameters child_virt(const VirtualizationParameters& virt) const {
+    return VirtualizationParameters(static_cast<td::uint8>(child_merkle_depth(special_type(), virt.get_level())),
+                                    virt.get_virtualization());
+  }
 };
 
 std::ostream& operator<<(std::ostream& os, const DataCell& c);
