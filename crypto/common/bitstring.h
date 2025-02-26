@@ -667,5 +667,28 @@ template <unsigned N>
 Ref<BitString> make_bitstring_ref(const BitArray<N>& value) {
   return value.make_bitstring_ref();
 }
-
 }  // namespace td
+
+template <class T>
+inline void hash_combine(std::size_t& seed, const T& v) {
+    std::hash<T> hasher;
+    seed ^= hasher(v) + 0x9e3779b9 + (seed<<6) + (seed>>2);
+}
+namespace std {
+template<>
+struct hash<pair<td::BitArray<256>, td::uint64>> {
+  size_t operator()(const pair<td::BitArray<256>, td::uint64>& value) const {
+    size_t hash = 0;
+    hash_combine(hash, value.first);
+    hash_combine(hash, value.second);
+    return hash;
+  }
+};
+
+template<>
+struct hash<td::BitArray<256>> {
+  size_t operator()(const td::BitArray<256>& value) const {
+    return hash<string>{}(value.to_hex());
+  }
+};
+}  // namespace std

@@ -329,6 +329,24 @@ bool ContestValidateQuery::unpack_block_candidate() {
   return extract_collated_data();
 }
 
+#ifdef USE_MULTIPLE_ACTORS
+/**
+ * Collects all account blocks from the dictionary into a vector.
+ *
+ * @returns Vector of pairs containing account addresses and their corresponding blocks
+ */
+void ContestValidateQuery::collect_account_blocks() {
+  account_blocks_dict_->check_for_each_extra(
+      [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
+        CHECK(key_len == 256);
+        td::BitArray<256> key_copy;
+        key_copy.bits().copy_from(key, 256);
+        account_blocks_.push_back(std::make_pair(key_copy, std::move(value)));
+        return true;
+      });
+}
+#endif
+
 /**
  * Initializes the validation by parsing and checking the block header.
  *
@@ -599,13 +617,13 @@ bool ContestValidateQuery::try_unpack_mc_state() {
     create_stats_enabled_ = config_->create_stats_enabled();
     if (config_->has_capabilities() && (config_->get_capabilities() & ~supported_capabilities())) {
       LOG(INFO) << "block generation capabilities " << config_->get_capabilities()
-                   << " have been enabled in global configuration, but we support only " << supported_capabilities()
-                   << " (upgrade validator software?)";
+                << " have been enabled in global configuration, but we support only " << supported_capabilities()
+                << " (upgrade validator software?)";
     }
     if (config_->get_global_version() > supported_version()) {
       LOG(INFO) << "block version " << config_->get_global_version()
-                   << " have been enabled in global configuration, but we support only " << supported_version()
-                   << " (upgrade validator software?)";
+                << " have been enabled in global configuration, but we support only " << supported_version()
+                << " (upgrade validator software?)";
     }
 
     old_shard_conf_ = std::make_unique<block::ShardConfig>(*config_);
@@ -1927,6 +1945,79 @@ bool ContestValidateQuery::postcheck_account_updates() {
  *
  * @returns True if the transaction passes pre-checks, false otherwise.
  */
+#ifdef USE_MULTIPLE_ACTORS
+bool ContestValidateQuery::precheck_one_transaction(td::ConstBitPtr acc_id, ton::LogicalTime trans_lt,
+                                                    Ref<vm::CellSlice> trans_csr, ton::Bits256& prev_trans_hash,
+                                                    ton::LogicalTime& prev_trans_lt, unsigned& prev_trans_lt_len,
+                                                    ton::Bits256& acc_state_hash, std::string& err_msg) {
+  LOG(DEBUG) << "checking Transaction " << trans_lt;
+  if (trans_csr.is_null() || trans_csr->size_ext() != 0x10000) {
+    err_msg = PSTRING() << "transaction " << trans_lt << " of " << acc_id.to_hex(256) << " is invalid";
+    return false;
+  }
+  auto trans_root = trans_csr->prefetch_ref();
+  block::gen::Transaction::Record trans;
+  block::gen::HASH_UPDATE::Record hash_upd;
+  if (!(tlb::unpack_cell(trans_root, trans) &&
+        tlb::type_unpack_cell(std::move(trans.state_update), block::gen::t_HASH_UPDATE_Account, hash_upd))) {
+    err_msg = PSTRING() << "cannot unpack transaction " << trans_lt << " of " << acc_id.to_hex(256);
+    return false;
+  }
+  if (trans.account_addr != acc_id || trans.lt != trans_lt) {
+    err_msg = PSTRING() << "transaction " << trans_lt << " of " << acc_id.to_hex(256) << " claims to be transaction "
+                        << trans.lt << " of " << trans.account_addr.to_hex();
+    return false;
+  }
+  if (trans.now != now_) {
+    err_msg = PSTRING() << "transaction " << trans_lt << " of " << acc_id.to_hex(256) << " claims that current time is "
+                        << trans.now << " while the block header indicates " << now_;
+    return false;
+  }
+  if (trans.prev_trans_hash != prev_trans_hash || trans.prev_trans_lt != prev_trans_lt) {
+    err_msg = PSTRING() << "transaction " << trans_lt << " of " << acc_id.to_hex(256)
+                        << " claims that the previous transaction was " << trans.prev_trans_lt << ":"
+                        << trans.prev_trans_hash.to_hex() << " while the correct value is " << prev_trans_lt << ":"
+                        << prev_trans_hash.to_hex();
+    return false;
+  }
+  if (trans_lt < prev_trans_lt + prev_trans_lt_len) {
+    err_msg = PSTRING() << "transaction " << trans_lt << " of " << acc_id.to_hex(256) << " starts at logical time "
+                        << trans_lt << ", earlier than the previous transaction " << prev_trans_lt << " .. "
+                        << prev_trans_lt + prev_trans_lt_len << " ends";
+    return false;
+  }
+  unsigned lt_len = trans.outmsg_cnt + 1;
+  if (trans_lt <= start_lt_ || trans_lt + lt_len > end_lt_) {
+    err_msg = PSTRING() << "transaction " << trans_lt << " .. " << trans_lt + lt_len << " of " << acc_id.to_hex(256)
+                        << " is not inside the logical time interval " << start_lt_ << " .. " << end_lt_
+                        << " of the encompassing new block";
+    return false;
+  }
+  if (hash_upd.old_hash != acc_state_hash) {
+    err_msg = PSTRING() << "transaction " << trans_lt << " of " << acc_id.to_hex(256)
+                        << " claims to start from account state with hash " << hash_upd.old_hash.to_hex()
+                        << " while the actual value is " << acc_state_hash.to_hex();
+    return false;
+  }
+  prev_trans_lt = trans_lt;
+  prev_trans_lt_len = lt_len;
+  prev_trans_hash = trans_root->get_hash().bits();
+  acc_state_hash = hash_upd.new_hash;
+  unsigned c = 0;
+  vm::Dictionary out_msgs{trans.r1.out_msgs, 15};
+  if (!out_msgs.check_for_each([&c](Ref<vm::CellSlice> value, td::ConstBitPtr key, int key_len) {
+        CHECK(key_len == 15);
+        return key.get_uint(15) == c++;
+      }) ||
+      c != (unsigned)trans.outmsg_cnt) {
+    err_msg = PSTRING() << "transaction " << trans_lt << " of " << acc_id.to_hex(256)
+                        << " has invalid indices in the out_msg dictionary (keys 0 .. " << trans.outmsg_cnt - 1
+                        << " expected)";
+    return false;
+  }
+  return true;
+}
+#else
 bool ContestValidateQuery::precheck_one_transaction(td::ConstBitPtr acc_id, ton::LogicalTime trans_lt,
                                                     Ref<vm::CellSlice> trans_csr, ton::Bits256& prev_trans_hash,
                                                     ton::LogicalTime& prev_trans_lt, unsigned& prev_trans_lt_len,
@@ -1991,6 +2082,7 @@ bool ContestValidateQuery::precheck_one_transaction(td::ConstBitPtr acc_id, ton:
   }
   return true;
 }
+#endif
 
 // NB: could be run in parallel for different accounts
 /**
@@ -2001,6 +2093,85 @@ bool ContestValidateQuery::precheck_one_transaction(td::ConstBitPtr acc_id, ton:
  *
  * @returns True if the AccountBlock passes pre-checks, false otherwise.
  */
+#ifdef USE_MULTIPLE_ACTORS
+bool ContestValidateQuery::precheck_one_account_block(td::ConstBitPtr acc_id, Ref<vm::CellSlice> acc_blk_root,
+                                                      std::string& err_msg) {
+  LOG(DEBUG) << "checking AccountBlock for " << acc_id.to_hex(256);
+  if (!acc_id.equals(shard_pfx_.bits(), shard_pfx_len_)) {
+    err_msg = "new block "s + id_.to_str() + " contains AccountBlock for account " + acc_id.to_hex(256) +
+              " not belonging to the block's shard " + shard_.to_str();
+    return false;
+  }
+  CHECK(acc_blk_root.not_null());
+  // acc_blk_root->print_rec(std::cerr);
+  // block::gen::t_AccountBlock.print(std::cerr, acc_blk_root);
+  block::gen::AccountBlock::Record acc_blk;
+  block::gen::HASH_UPDATE::Record hash_upd;
+  if (!(tlb::csr_unpack(acc_blk_root, acc_blk) &&
+        tlb::type_unpack_cell(std::move(acc_blk.state_update), block::gen::t_HASH_UPDATE_Account, hash_upd))) {
+    err_msg = "cannot extract (HASH_UPDATE Account) from the AccountBlock of "s + acc_id.to_hex(256);
+    return false;
+  }
+  if (acc_blk.account_addr != acc_id) {
+    err_msg = "AccountBlock of account "s + acc_id.to_hex(256) + " appears to belong to another account " +
+              acc_blk.account_addr.to_hex();
+    return false;
+  }
+  block::tlb::ShardAccount::Record old_state;
+  if (!old_state.unpack(ps_.account_dict_->lookup(acc_id, 256))) {
+    err_msg = "cannot extract Account from the ShardAccount of "s + acc_id.to_hex(256);
+    return false;
+  }
+  if (hash_upd.old_hash != old_state.account->get_hash().bits()) {
+    err_msg = "(HASH_UPDATE Account) from the AccountBlock of "s + acc_id.to_hex(256) + " has incorrect old hash";
+    return false;
+  }
+  if (!block::gen::t_AccountBlock.validate_upto(1000000, *acc_blk_root)) {
+    err_msg = "AccountBlock of "s + acc_id.to_hex(256) + " failed to pass automated validity checks";
+    return false;
+  }
+  if (!block::tlb::t_AccountBlock.validate_upto(1000000, *acc_blk_root)) {
+    err_msg = "AccountBlock of "s + acc_id.to_hex(256) + " failed to pass hand-written validity checks";
+    return false;
+  }
+  unsigned last_trans_lt_len = 1;
+  ton::Bits256 acc_state_hash = hash_upd.old_hash;
+  try {
+    vm::AugmentedDictionary trans_dict{vm::DictNonEmpty(), std::move(acc_blk.transactions), 64,
+                                       block::tlb::aug_AccountTransactions};
+    td::BitArray<64> min_trans, max_trans;
+    if (trans_dict.get_minmax_key(min_trans).is_null() || trans_dict.get_minmax_key(max_trans, true).is_null()) {
+      err_msg =
+          "cannot extract minimal and maximal keys from the transaction dictionary of account "s + acc_id.to_hex(256);
+      return false;
+    }
+    if (min_trans.to_ulong() <= start_lt_ || max_trans.to_ulong() >= end_lt_) {
+      err_msg = PSTRING() << "new block contains transactions " << min_trans.to_ulong() << " .. "
+                          << max_trans.to_ulong() << " outside of the block's lt range " << start_lt_ << " .. "
+                          << end_lt_;
+      return false;
+    }
+    if (!trans_dict.validate_check_extra(
+            [this, acc_id, &old_state, &last_trans_lt_len, &acc_state_hash, &err_msg](
+                Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) -> bool {
+              CHECK(key_len == 64);
+              return precheck_one_transaction(acc_id, key.get_uint(64), std::move(value), old_state.last_trans_hash,
+                                              old_state.last_trans_lt, last_trans_lt_len, acc_state_hash, err_msg);
+            })) {
+      err_msg = "invalid transaction dictionary in AccountBlock of "s + acc_id.to_hex(256);
+      return false;
+    }
+    if (acc_state_hash != hash_upd.new_hash) {
+      err_msg = "final state hash mismatch in (HASH_UPDATE Account) for account "s + acc_id.to_hex(256);
+      return false;
+    }
+  } catch (vm::VmError& err) {
+    err_msg = "invalid transaction dictionary in AccountBlock of "s + acc_id.to_hex(256) + " : " + err.get_msg();
+    return false;
+  }
+  return true;
+}
+#else
 bool ContestValidateQuery::precheck_one_account_block(td::ConstBitPtr acc_id, Ref<vm::CellSlice> acc_blk_root) {
   LOG(DEBUG) << "checking AccountBlock for " << acc_id.to_hex(256);
   if (!acc_id.equals(shard_pfx_.bits(), shard_pfx_len_)) {
@@ -2069,6 +2240,7 @@ bool ContestValidateQuery::precheck_one_account_block(td::ConstBitPtr acc_id, Re
   }
   return true;
 }
+#endif
 
 /**
  * Pre-validates all account blocks.
@@ -2078,6 +2250,14 @@ bool ContestValidateQuery::precheck_one_account_block(td::ConstBitPtr acc_id, Re
 bool ContestValidateQuery::precheck_account_transactions() {
   LOG(INFO) << "pre-checking all AccountBlocks, and all transactions of all accounts";
   try {
+#ifdef USE_MULTIPLE_ACTORS
+    parallel_process_with_actors<std::pair<td::BitArray<256>, Ref<vm::CellSlice>>>(
+        account_blocks_,
+        [this](const auto& item, std::string& err_msg) -> bool {
+          return precheck_one_account_block(std::move(item.first.bits()), std::move(item.second), err_msg);
+        },
+        [this](const std::string& err_msg) { reject_query(err_msg); });
+#else
     CHECK(account_blocks_dict_);
     if (!account_blocks_dict_->validate_check_extra(
             [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
@@ -2088,6 +2268,7 @@ bool ContestValidateQuery::precheck_account_transactions() {
             })) {
       return reject_query("invalid ShardAccountBlock dictionary in the new block "s + id_.to_str());
     }
+#endif
   } catch (vm::VmError& err) {
     return reject_query("invalid ShardAccountBlocks dictionary: "s + err.get_msg());
   }
@@ -3196,7 +3377,7 @@ bool ContestValidateQuery::check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> 
     }
     removed_dispatch_queue_messages_.erase(it);
     if (tag == block::gen::InMsg::msg_import_deferred_fin) {
-      msg_emitted_lt_.emplace_back(src_addr, lt, env.emitted_lt.value());
+      msg_emitted_lt_.emplace(src_addr, lt, env.emitted_lt.value());
     }
   }
 
@@ -4004,9 +4185,9 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
       }
       if (deliver_lt != import_lt) {
         LOG(INFO) << "msg_export_deq OutMsg entry with key " << key.to_hex(256)
-                     << " claims the dequeued message with next hop "
-                     << next_prefix.to_str() + " has been delivered in block with end_lt=" << import_lt
-                     << " while the correct value is " << deliver_lt;
+                  << " claims the dequeued message with next hop "
+                  << next_prefix.to_str() + " has been delivered in block with end_lt=" << import_lt
+                  << " while the correct value is " << deliver_lt;
       }
       break;
     }
@@ -4106,7 +4287,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
                                     << ", tag=" << tag);
     }
     auto emitted_lt = env.emitted_lt ? env.emitted_lt.value() : created_lt;
-    msg_emitted_lt_.emplace_back(src_addr, created_lt, emitted_lt);
+    msg_emitted_lt_.emplace(src_addr, created_lt, emitted_lt);
   }
 
   return true;
@@ -4485,6 +4666,526 @@ std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBi
  *
  * @returns True if the transaction is valid, false otherwise.
  */
+#ifdef USE_MULTIPLE_ACTORS
+bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::LogicalTime lt, Ref<vm::Cell> trans_root,
+                                                 bool is_first, bool is_last, std::string& err_msg) {
+  LOG(DEBUG) << "checking transaction " << lt << " of account " << account.addr.to_hex();
+  const StdSmcAddress& addr = account.addr;
+  block::gen::Transaction::Record trans;
+  block::gen::HASH_UPDATE::Record hash_upd;
+  CHECK(tlb::unpack_cell(trans_root, trans) &&
+        tlb::type_unpack_cell(std::move(trans.state_update), block::gen::t_HASH_UPDATE_Account, hash_upd));
+  auto in_msg_root = trans.r1.in_msg->prefetch_ref();
+  bool external{false}, ihr_delivered{false}, need_credit_phase{false};
+  // check input message
+  block::CurrencyCollection money_imported(0), money_exported(0);
+  bool is_special_tx = false;  // recover/mint transaction
+  auto td_cs = vm::load_cell_slice(trans.description);
+  int tag = block::gen::t_TransactionDescr.get_tag(td_cs);
+  CHECK(tag >= 0);  // we have already validated the serialization of all Transactions
+  td::optional<block::MsgMetadata> in_msg_metadata;
+  if (in_msg_root.not_null()) {
+    auto in_descr_cs = in_msg_dict_->lookup(in_msg_root->get_hash().as_bitslice());
+    if (in_descr_cs.is_null()) {
+      err_msg = PSTRING() << "inbound message with hash " << in_msg_root->get_hash().to_hex() << " of transaction "
+                          << lt << " of account " << addr.to_hex() << " does not have a corresponding InMsg record";
+      return false;
+    }
+    auto in_msg_tag = block::gen::t_InMsg.get_tag(*in_descr_cs);
+    if (in_msg_tag != block::gen::InMsg::msg_import_ext && in_msg_tag != block::gen::InMsg::msg_import_fin &&
+        in_msg_tag != block::gen::InMsg::msg_import_imm && in_msg_tag != block::gen::InMsg::msg_import_ihr &&
+        in_msg_tag != block::gen::InMsg::msg_import_deferred_fin) {
+      err_msg = PSTRING() << "inbound message with hash " << in_msg_root->get_hash().to_hex() << " of transaction "
+                          << lt << " of account " << addr.to_hex()
+                          << " has an invalid InMsg record (not one of msg_import_ext, msg_import_fin, "
+                             "msg_import_imm, msg_import_ihr or msg_import_deferred_fin)";
+      return false;
+    }
+    is_special_tx = is_special_in_msg(*in_descr_cs);
+    // once we know there is a InMsg with correct hash, we already know that it contains a message with this hash (by the verification of InMsg), so it is our message
+    // have still to check its destination address and imported value
+    // and that it refers to this transaction
+    Ref<vm::CellSlice> dest;
+    if (in_msg_tag == block::gen::InMsg::msg_import_ext) {
+      block::gen::CommonMsgInfo::Record_ext_in_msg_info info;
+      CHECK(tlb::unpack_cell_inexact(in_msg_root, info));
+      dest = std::move(info.dest);
+      external = true;
+    } else {
+      block::gen::CommonMsgInfo::Record_int_msg_info info;
+      CHECK(tlb::unpack_cell_inexact(in_msg_root, info));
+      if (info.created_lt >= lt) {
+        err_msg = PSTRING() << "transaction " << lt << " of " << addr.to_hex()
+                            << " processed inbound message created later at logical time " << info.created_lt;
+        return false;
+      }
+      LogicalTime emitted_lt = info.created_lt;  // See ContestValidateQuery::check_message_processing_order
+      if (in_msg_tag == block::gen::InMsg::msg_import_imm || in_msg_tag == block::gen::InMsg::msg_import_fin ||
+          in_msg_tag == block::gen::InMsg::msg_import_deferred_fin) {
+        block::tlb::MsgEnvelope::Record_std msg_env;
+        if (!block::tlb::unpack_cell(in_descr_cs->prefetch_ref(), msg_env)) {
+          err_msg = PSTRING() << "InMsg record for inbound message with hash " << in_msg_root->get_hash().to_hex()
+                              << " of transaction " << lt << " of account " << addr.to_hex()
+                              << " does not have a valid MsgEnvelope";
+          return false;
+        }
+        in_msg_metadata = std::move(msg_env.metadata);
+        if (msg_env.emitted_lt) {
+          emitted_lt = msg_env.emitted_lt.value();
+        }
+      }
+      if (info.created_lt != start_lt_ || !is_special_tx) {
+        msg_proc_lt_.emplace(addr, lt, emitted_lt);
+      }
+      dest = std::move(info.dest);
+      CHECK(money_imported.validate_unpack(info.value));
+      ihr_delivered = (in_msg_tag == block::gen::InMsg::msg_import_ihr);
+      if (!ihr_delivered) {
+        money_imported += block::tlb::t_Grams.as_integer(info.ihr_fee);
+      }
+      CHECK(money_imported.is_valid());
+    }
+    WorkchainId d_wc;
+    StdSmcAddress d_addr;
+    CHECK(block::tlb::t_MsgAddressInt.extract_std_address(dest, d_wc, d_addr));
+    if (d_wc != workchain() || d_addr != addr) {
+      err_msg = PSTRING() << "inbound message of transaction " << lt << " of account " << addr.to_hex()
+                          << " has a different destination address " << d_wc << ":" << d_addr.to_hex();
+      return false;
+    }
+    auto in_msg_trans = in_descr_cs->prefetch_ref(1);  // trans:^Transaction
+    CHECK(in_msg_trans.not_null());
+    if (in_msg_trans->get_hash() != trans_root->get_hash()) {
+      err_msg = PSTRING() << "InMsg record for inbound message with hash " << in_msg_root->get_hash().to_hex()
+                          << " of transaction " << lt << " of account " << addr.to_hex()
+                          << " refers to a different processing transaction";
+      return false;
+    }
+  }
+  // check output messages
+  td::optional<block::MsgMetadata> new_msg_metadata;
+  if (msg_metadata_enabled_) {
+    if (external || is_special_tx || tag != block::gen::TransactionDescr::trans_ord) {
+      new_msg_metadata = block::MsgMetadata{0, account.workchain, account.addr, (LogicalTime)trans.lt};
+    } else if (in_msg_metadata) {
+      new_msg_metadata = std::move(in_msg_metadata);
+      ++new_msg_metadata.value().depth;
+    }
+  }
+  vm::Dictionary out_dict{trans.r1.out_msgs, 15};
+  for (int i = 0; i < trans.outmsg_cnt; i++) {
+    auto out_msg_root = out_dict.lookup_ref(td::BitArray<15>{i});
+    CHECK(out_msg_root.not_null());  // we have pre-checked this
+    auto out_descr_cs = out_msg_dict_->lookup(out_msg_root->get_hash().as_bitslice());
+    if (out_descr_cs.is_null()) {
+      err_msg = PSTRING() << "outbound message #" << i + 1 << " with hash " << out_msg_root->get_hash().to_hex()
+                          << " of transaction " << lt << " of account " << addr.to_hex()
+                          << " does not have a corresponding OutMsg record";
+      return false;
+    }
+    auto tag = block::gen::t_OutMsg.get_tag(*out_descr_cs);
+    if (tag != block::gen::OutMsg::msg_export_ext && tag != block::gen::OutMsg::msg_export_new &&
+        tag != block::gen::OutMsg::msg_export_imm && tag != block::gen::OutMsg::msg_export_new_defer) {
+      err_msg = PSTRING() << "outbound message #" << i + 1 << " with hash " << out_msg_root->get_hash().to_hex()
+                          << " of transaction " << lt << " of account " << addr.to_hex()
+                          << " has an invalid OutMsg record (not one of msg_export_ext, msg_export_new, "
+                             "msg_export_imm or msg_export_new_defer)";
+      return false;
+    }
+    // once we know there is an OutMsg with correct hash, we already know that it contains a message with this hash
+    // (by the verification of OutMsg), so it is our message
+    // have still to check its source address, lt and imported value
+    // and that it refers to this transaction as its origin
+    Ref<vm::CellSlice> src;
+    LogicalTime message_lt;
+    if (tag == block::gen::OutMsg::msg_export_ext) {
+      block::gen::CommonMsgInfo::Record_ext_out_msg_info info;
+      CHECK(tlb::unpack_cell_inexact(out_msg_root, info));
+      src = std::move(info.src);
+      message_lt = info.created_lt;
+    } else {
+      block::gen::CommonMsgInfo::Record_int_msg_info info;
+      CHECK(tlb::unpack_cell_inexact(out_msg_root, info));
+      src = std::move(info.src);
+      message_lt = info.created_lt;
+      block::tlb::MsgEnvelope::Record_std msg_env;
+      CHECK(tlb::unpack_cell(out_descr_cs->prefetch_ref(), msg_env));
+      // unpack exported message value (from this transaction)
+      block::CurrencyCollection msg_export_value;
+      CHECK(msg_export_value.unpack(info.value));
+      msg_export_value += block::tlb::t_Grams.as_integer(info.ihr_fee);
+      msg_export_value += msg_env.fwd_fee_remaining;
+      CHECK(msg_export_value.is_valid());
+      money_exported += msg_export_value;
+      if (msg_env.metadata != new_msg_metadata) {
+        err_msg = PSTRING() << "outbound message #" << i + 1 << " with hash " << out_msg_root->get_hash().to_hex()
+                            << " of transaction " << lt << " of account " << addr.to_hex()
+                            << " has invalid metadata in an OutMsg record: expected "
+                            << (new_msg_metadata ? new_msg_metadata.value().to_str() : "<none>") << ", found "
+                            << (msg_env.metadata ? msg_env.metadata.value().to_str() : "<none>");
+        return false;
+      }
+    }
+    WorkchainId s_wc;
+    StdSmcAddress ss_addr;  // s_addr is some macros in Windows
+    CHECK(block::tlb::t_MsgAddressInt.extract_std_address(src, s_wc, ss_addr));
+    if (s_wc != workchain() || ss_addr != addr) {
+      err_msg = PSTRING() << "outbound message #" << i + 1 << " of transaction " << lt << " of account "
+                          << addr.to_hex() << " has a different source address " << s_wc << ":" << ss_addr.to_hex();
+      return false;
+    }
+    auto out_msg_trans = out_descr_cs->prefetch_ref(1);  // trans:^Transaction
+    CHECK(out_msg_trans.not_null());
+    if (out_msg_trans->get_hash() != trans_root->get_hash()) {
+      err_msg = PSTRING() << "OutMsg record for outbound message #" << i + 1 << " with hash "
+                          << out_msg_root->get_hash().to_hex() << " of transaction " << lt << " of account "
+                          << addr.to_hex() << " refers to a different processing transaction";
+      return false;
+    }
+    if (tag != block::gen::OutMsg::msg_export_ext) {
+      bool is_deferred = tag == block::gen::OutMsg::msg_export_new_defer;
+      if (account_expected_defer_all_messages_.count(ss_addr) && !is_deferred) {
+        err_msg = PSTRING() << "outbound message #" << i + 1 << " on account " << workchain() << ":" << ss_addr.to_hex()
+                            << " must be deferred because this account has earlier messages in DispatchQueue";
+        return false;
+      }
+      if (is_deferred) {
+        LOG(INFO) << "message from account " << workchain() << ":" << ss_addr.to_hex() << " with lt " << message_lt
+                  << " was deferred";
+        if (!deferring_messages_enabled_ && !account_expected_defer_all_messages_.count(ss_addr)) {
+          err_msg = PSTRING() << "outbound message #" << i + 1 << " on account " << workchain() << ":"
+                              << ss_addr.to_hex() << " is deferred, but deferring messages is disabled";
+          return false;
+        }
+        if (i == 0 && !account_expected_defer_all_messages_.count(ss_addr)) {
+          err_msg = PSTRING() << "outbound message #1 on account " << workchain() << ":" << ss_addr.to_hex()
+                              << " must not be deferred (the first message cannot be deferred unless some "
+                                 "prevoius messages are deferred)";
+          return false;
+        }
+        account_expected_defer_all_messages_.insert(ss_addr);
+      }
+    }
+  }
+  CHECK(money_exported.is_valid());
+  // check general transaction data
+  block::CurrencyCollection old_balance{account.get_balance()};
+  if (tag == block::gen::TransactionDescr::trans_merge_prepare ||
+      tag == block::gen::TransactionDescr::trans_merge_install ||
+      tag == block::gen::TransactionDescr::trans_split_prepare ||
+      tag == block::gen::TransactionDescr::trans_split_install) {
+    bool split = (tag == block::gen::TransactionDescr::trans_split_prepare ||
+                  tag == block::gen::TransactionDescr::trans_split_install);
+    if (split && !before_split_) {
+      err_msg = PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+                          << " is a split prepare/install transaction, but this block is not before a split";
+      return false;
+    }
+    if (split && !is_last) {
+      err_msg = PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+                          << " is a split prepare/install transaction, but it is not the last transaction "
+                             "for this account in this block";
+      return false;
+    }
+    if (!split && !after_merge_) {
+      err_msg = PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+                          << " is a merge prepare/install transaction, but this block is not immediately after a merge";
+      return false;
+    }
+    if (!split && !is_first) {
+      err_msg = PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+                          << " is a merge prepare/install transaction, but it is not the first transaction "
+                             "for this account in this block";
+      return false;
+    }
+    // check later a global configuration flag in config_.global_flags_
+    // (for now, split/merge transactions are always globally disabled)
+    err_msg = PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+                        << " is a split/merge prepare/install transaction, which are globally disabled";
+    return false;
+  }
+  if (tag == block::gen::TransactionDescr::trans_tick_tock) {
+    err_msg = PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+                        << " is a tick-tock transaction, which is impossible outside a masterchain block";
+    return false;
+  }
+  if (tag == block::gen::TransactionDescr::trans_storage && !is_first) {
+    err_msg =
+        PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+                  << " is a storage transaction, but it is not the first transaction for this account in this block";
+    return false;
+  }
+  // check that the original account state has correct hash
+  CHECK(account.total_state.not_null());
+  if (hash_upd.old_hash != account.total_state->get_hash().bits()) {
+    err_msg = PSTRING() << "transaction " << lt << " of account " << addr.to_hex()
+                        << " claims that the original account state hash must be " << hash_upd.old_hash.to_hex()
+                        << " but the actual value is " << account.total_state->get_hash().to_hex();
+    return false;
+  }
+  // some type-specific checks
+  int trans_type = block::transaction::Transaction::tr_none;
+  switch (tag) {
+    case block::gen::TransactionDescr::trans_ord: {
+      trans_type = block::transaction::Transaction::tr_ord;
+      if (in_msg_root.is_null()) {
+        err_msg = PSTRING() << "ordinary transaction " << lt << " of account " << addr.to_hex()
+                            << " has no inbound message";
+        return false;
+      }
+      need_credit_phase = !external;
+      break;
+    }
+    case block::gen::TransactionDescr::trans_storage: {
+      trans_type = block::transaction::Transaction::tr_storage;
+      if (in_msg_root.not_null()) {
+        err_msg = PSTRING() << "storage transaction " << lt << " of account " << addr.to_hex()
+                            << " has an inbound message";
+        return false;
+      }
+      if (trans.outmsg_cnt) {
+        err_msg = PSTRING() << "storage transaction " << lt << " of account " << addr.to_hex()
+                            << " has at least one outbound message";
+        return false;
+      }
+      // FIXME
+      err_msg = PSTRING() << "unable to verify storage transaction " << lt << " of account " << addr.to_hex();
+      return false;
+      break;
+    }
+    case block::gen::TransactionDescr::trans_tick_tock: {
+      bool is_tock = (td_cs.prefetch_ulong(4) & 1);
+      trans_type = is_tock ? block::transaction::Transaction::tr_tock : block::transaction::Transaction::tr_tick;
+      if (in_msg_root.not_null()) {
+        err_msg = PSTRING() << (is_tock ? "tock" : "tick") << " transaction " << lt << " of account " << addr.to_hex()
+                            << " has an inbound message";
+        return false;
+      }
+      break;
+    }
+    case block::gen::TransactionDescr::trans_merge_prepare: {
+      trans_type = block::transaction::Transaction::tr_merge_prepare;
+      if (in_msg_root.not_null()) {
+        err_msg = PSTRING() << "merge prepare transaction " << lt << " of account " << addr.to_hex()
+                            << " has an inbound message";
+        return false;
+      }
+      if (trans.outmsg_cnt != 1) {
+        err_msg = PSTRING() << "merge prepare transaction " << lt << " of account " << addr.to_hex()
+                            << " must have exactly one outbound message";
+        return false;
+      }
+      // FIXME
+      err_msg = PSTRING() << "unable to verify merge prepare transaction " << lt << " of account " << addr.to_hex();
+      return false;
+      break;
+    }
+    case block::gen::TransactionDescr::trans_merge_install: {
+      trans_type = block::transaction::Transaction::tr_merge_install;
+      if (in_msg_root.is_null()) {
+        err_msg = PSTRING() << "merge install transaction " << lt << " of account " << addr.to_hex()
+                            << " has no inbound message";
+        return false;
+      }
+      need_credit_phase = true;
+      // FIXME
+      err_msg = PSTRING() << "unable to verify merge install transaction " << lt << " of account " << addr.to_hex();
+      return false;
+      break;
+    }
+    case block::gen::TransactionDescr::trans_split_prepare: {
+      trans_type = block::transaction::Transaction::tr_split_prepare;
+      if (in_msg_root.not_null()) {
+        err_msg = PSTRING() << "split prepare transaction " << lt << " of account " << addr.to_hex()
+                            << " has an inbound message";
+        return false;
+      }
+      if (trans.outmsg_cnt > 1) {
+        err_msg = PSTRING() << "split prepare transaction " << lt << " of account " << addr.to_hex()
+                            << " must have exactly one outbound message";
+        return false;
+      }
+      // FIXME
+      err_msg = PSTRING() << "unable to verify split prepare transaction " << lt << " of account " << addr.to_hex();
+      return false;
+      break;
+    }
+    case block::gen::TransactionDescr::trans_split_install: {
+      trans_type = block::transaction::Transaction::tr_split_install;
+      if (in_msg_root.is_null()) {
+        err_msg = PSTRING() << "split install transaction " << lt << " of account " << addr.to_hex()
+                            << " has no inbound message";
+        return false;
+      }
+      // FIXME
+      err_msg = PSTRING() << "unable to verify split install transaction " << lt << " of account " << addr.to_hex();
+      return false;
+      break;
+    }
+  }
+  // ....
+  // check transaction computation by re-doing it
+  // similar to Collator::create_ordinary_transaction() and Collator::create_ticktock_transaction()
+  // ....
+  std::unique_ptr<block::transaction::Transaction> trs =
+      std::make_unique<block::transaction::Transaction>(account, trans_type, lt, now_, in_msg_root);
+  if (in_msg_root.not_null()) {
+    if (!trs->unpack_input_msg(ihr_delivered, &action_phase_cfg_)) {
+      // inbound external message was not accepted
+      err_msg = PSTRING() << "could not unpack inbound " << (external ? "external" : "internal")
+                          << " message processed by ordinary transaction " << lt << " of account " << addr.to_hex();
+      return false;
+    }
+  }
+  if (trs->bounce_enabled) {
+    if (!trs->prepare_storage_phase(storage_phase_cfg_, true)) {
+      err_msg = PSTRING() << "cannot re-create storage phase of transaction " << lt << " for smart contract "
+                          << addr.to_hex();
+      return false;
+    }
+    if (need_credit_phase && !trs->prepare_credit_phase()) {
+      err_msg = PSTRING() << "cannot create re-credit phase of transaction " << lt << " for smart contract "
+                          << addr.to_hex();
+      return false;
+    }
+  } else {
+    if (need_credit_phase && !trs->prepare_credit_phase()) {
+      err_msg = PSTRING() << "cannot re-create credit phase of transaction " << lt << " for smart contract "
+                          << addr.to_hex();
+      return false;
+    }
+    if (!trs->prepare_storage_phase(storage_phase_cfg_, true, need_credit_phase)) {
+      err_msg = PSTRING() << "cannot re-create storage phase of transaction " << lt << " for smart contract "
+                          << addr.to_hex();
+      return false;
+    }
+  }
+  if (!trs->prepare_compute_phase(compute_phase_cfg_)) {
+    err_msg = PSTRING() << "cannot re-create compute phase of transaction " << lt << " for smart contract "
+                        << addr.to_hex();
+    return false;
+  }
+  if (!trs->compute_phase->accepted) {
+    if (external) {
+      err_msg = PSTRING() << "inbound external message claimed to be processed by ordinary transaction " << lt
+                          << " of account " << addr.to_hex()
+                          << " was in fact rejected (such transaction cannot appear in valid blocks)";
+      return false;
+    } else if (trs->compute_phase->skip_reason == block::ComputePhase::sk_none) {
+      err_msg = PSTRING() << "inbound internal message processed by ordinary transaction " << lt << " of account "
+                          << addr.to_hex() << " was not processed without any reason";
+      return false;
+    }
+  }
+  if (trs->compute_phase->success && !trs->prepare_action_phase(action_phase_cfg_)) {
+    err_msg = PSTRING() << "cannot re-create action phase of transaction " << lt << " for smart contract "
+                        << addr.to_hex();
+    return false;
+  }
+  if (trs->bounce_enabled &&
+      (!trs->compute_phase->success || trs->action_phase->state_exceeds_limits || trs->action_phase->bounce) &&
+      !trs->prepare_bounce_phase(action_phase_cfg_)) {
+    err_msg = PSTRING() << "cannot re-create bounce phase of  transaction " << lt << " for smart contract "
+                        << addr.to_hex();
+    return false;
+  }
+  if (!trs->serialize()) {
+    err_msg = PSTRING() << "cannot re-create the serialization of  transaction " << lt << " for smart contract "
+                        << addr.to_hex();
+    return false;
+  }
+  if (!trs->update_limits(*block_limit_status_, /* with_gas = */ false, /* with_size = */ false)) {
+    return fatal_error(PSTRING() << "cannot update block limit status to include transaction " << lt << " of account "
+                                 << addr.to_hex());
+  }
+
+  // Collator should stop if total gas usage exceeds limits, including transactions on special accounts, but without
+  // ticktocks and mint/recover.
+  // Here Validator checks a weaker condition
+  if (!is_special_tx && !trs->gas_limit_overridden && trans_type == block::transaction::Transaction::tr_ord) {
+    (account.is_special ? total_special_gas_used_ : total_gas_used_) += trs->gas_used();
+  }
+  if (total_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.gas_limit) {
+    err_msg = PSTRING() << "gas block limits are exceeded: total_gas_used > gas_limit_hard + trx_gas_limit ("
+                        << "total_gas_used=" << total_gas_used_ << ", gas_limit_hard=" << block_limits_->gas.hard()
+                        << ", trx_gas_limit=" << compute_phase_cfg_.gas_limit << ")";
+    return false;
+  }
+  if (total_special_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.special_gas_limit) {
+    err_msg =
+        PSTRING() << "gas block limits are exceeded: total_special_gas_used > gas_limit_hard + special_gas_limit ("
+                  << "total_special_gas_used=" << total_special_gas_used_
+                  << ", gas_limit_hard=" << block_limits_->gas.hard()
+                  << ", special_gas_limit=" << compute_phase_cfg_.special_gas_limit << ")";
+    return false;
+  }
+
+  auto trans_root2 = trs->commit(account);
+  if (trans_root2.is_null()) {
+    err_msg = PSTRING() << "the re-created transaction " << lt << " for smart contract " << addr.to_hex()
+                        << " could not be committed";
+    return false;
+  }
+  // now compare the re-created transaction with the one we have
+  if (trans_root2->get_hash() != trans_root->get_hash()) {
+    if (verbosity >= 3 * 0) {
+      std::cerr << "original transaction " << lt << " of " << addr.to_hex() << ": ";
+      block::gen::t_Transaction.print_ref(std::cerr, trans_root);
+      std::cerr << "re-created transaction " << lt << " of " << addr.to_hex() << ": ";
+      block::gen::t_Transaction.print_ref(std::cerr, trans_root2);
+    }
+    err_msg = PSTRING() << "the transaction " << lt << " of " << addr.to_hex() << " has hash "
+                        << trans_root->get_hash().to_hex() << " different from that of the recreated transaction "
+                        << trans_root2->get_hash().to_hex();
+    return false;
+  }
+  block::gen::Transaction::Record trans2;
+  block::gen::HASH_UPDATE::Record hash_upd2;
+  if (!(tlb::unpack_cell(trans_root2, trans2) &&
+        tlb::type_unpack_cell(std::move(trans2.state_update), block::gen::t_HASH_UPDATE_Account, hash_upd2))) {
+    return fatal_error(PSTRING() << "cannot unpack the re-created transaction " << lt << " of " << addr.to_hex());
+  }
+  if (hash_upd2.old_hash != hash_upd.old_hash) {
+    return fatal_error(PSTRING() << "the re-created transaction " << lt << " of " << addr.to_hex()
+                                 << " is invalid: it starts from account state with different hash");
+  }
+  if (hash_upd2.new_hash != account.total_state->get_hash().bits()) {
+    return fatal_error(
+        PSTRING() << "the re-created transaction " << lt << " of " << addr.to_hex()
+                  << " is invalid: its claimed new account hash differs from the actual new account state");
+  }
+  if (hash_upd.new_hash != account.total_state->get_hash().bits()) {
+    return reject_query(PSTRING() << "transaction " << lt << " of " << addr.to_hex()
+                                  << " is invalid: it claims that the new account state hash is "
+                                  << hash_upd.new_hash.to_hex() << " but the re-computed value is "
+                                  << hash_upd2.new_hash.to_hex());
+  }
+  if (!trans.r1.out_msgs->contents_equal(*trans2.r1.out_msgs)) {
+    return reject_query(
+        PSTRING()
+        << "transaction " << lt << " of " << addr.to_hex()
+        << " is invalid: it has produced a set of outbound messages different from that listed in the transaction");
+  }
+  total_burned_ += trs->blackhole_burned;
+  // check new balance and value flow
+  auto new_balance = account.get_balance();
+  block::CurrencyCollection total_fees;
+  if (!total_fees.validate_unpack(trans.total_fees)) {
+    return reject_query(PSTRING() << "transaction " << lt << " of " << addr.to_hex()
+                                  << " has an invalid total_fees value");
+  }
+  if (old_balance + money_imported != new_balance + money_exported + total_fees + trs->blackhole_burned) {
+    return reject_query(
+        PSTRING() << "transaction " << lt << " of " << addr.to_hex()
+                  << " violates the currency flow condition: old balance=" << old_balance.to_str()
+                  << " + imported=" << money_imported.to_str() << " does not equal new balance=" << new_balance.to_str()
+                  << " + exported=" << money_exported.to_str() << " + total_fees=" << total_fees.to_str()
+                  << (trs->blackhole_burned.is_zero() ? ""
+                                                      : PSTRING() << " burned=" << trs->blackhole_burned.to_str()));
+  }
+  return true;
+}
+#else
 bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::LogicalTime lt, Ref<vm::Cell> trans_root,
                                                  bool is_first, bool is_last) {
   LOG(DEBUG) << "checking transaction " << lt << " of account " << account.addr.to_hex();
@@ -4551,7 +5252,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
         }
       }
       if (info.created_lt != start_lt_ || !is_special_tx) {
-        msg_proc_lt_.emplace_back(addr, lt, emitted_lt);
+        msg_proc_lt_.emplace(addr, lt, emitted_lt);
       }
       dest = std::move(info.dest);
       CHECK(money_imported.validate_unpack(info.value));
@@ -4966,6 +5667,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   }
   return true;
 }
+#endif
 
 /**
  * Checks the validity of transactions for a given account block.
@@ -4976,6 +5678,99 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
  *
  * @returns True if the account transactions are valid, false otherwise.
  */
+#ifdef USE_MULTIPLE_ACTORS
+bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root,
+                                                      std::string& err_msg) {
+  block::gen::AccountBlock::Record acc_blk;
+  CHECK(tlb::csr_unpack(std::move(acc_blk_root), acc_blk) && acc_blk.account_addr == acc_addr);
+  auto account_p = unpack_account(acc_addr.cbits());
+  if (!account_p) {
+    err_msg = "cannot unpack old state of account "s + acc_addr.to_hex();
+    return false;
+  }
+  auto& account = *account_p;
+  CHECK(account.addr == acc_addr);
+  vm::AugmentedDictionary trans_dict{vm::DictNonEmpty(), std::move(acc_blk.transactions), 64,
+                                     block::tlb::aug_AccountTransactions};
+  td::BitArray<64> min_trans, max_trans;
+  CHECK(trans_dict.get_minmax_key(min_trans).not_null() && trans_dict.get_minmax_key(max_trans, true).not_null());
+  ton::LogicalTime min_trans_lt = min_trans.to_ulong(), max_trans_lt = max_trans.to_ulong();
+  if (!trans_dict.check_for_each_extra(
+          [this, &account, min_trans_lt, max_trans_lt, &err_msg](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra,
+                                                                 td::ConstBitPtr key, int key_len) -> bool {
+            CHECK(key_len == 64);
+            ton::LogicalTime lt = key.get_uint(64);
+            extra.clear();
+            return check_one_transaction(account, lt, value->prefetch_ref(), lt == min_trans_lt, lt == max_trans_lt,
+                                         err_msg);
+          })) {
+    err_msg = "at least one Transaction of account "s + acc_addr.to_hex() + " is invalid";
+    return false;
+  }
+
+  // See Collator::combine_account_trabsactions
+  if (account.total_state->get_hash() != account.orig_total_state->get_hash()) {
+    // account changed
+    if (account.orig_status == block::Account::acc_nonexist) {
+      // account created
+      CHECK(account.status != block::Account::acc_nonexist);
+      vm::CellBuilder cb;
+      if (!(cb.store_ref_bool(account.total_state)             // account_descr$_ account:^Account
+            && cb.store_bits_bool(account.last_trans_hash_)    // last_trans_hash:bits256
+            && cb.store_long_bool(account.last_trans_lt_, 64)  // last_trans_lt:uint64
+            && ns_.account_dict_->set_builder(account.addr, cb, vm::Dictionary::SetMode::Add))) {
+        return fatal_error(std::string{"cannot add newly-created account "} + account.addr.to_hex() +
+                           " into ShardAccounts");
+      }
+    } else if (account.status == block::Account::acc_nonexist) {
+      // account deleted
+      if (verbosity > 2) {
+        std::cerr << "deleting account " << account.addr.to_hex() << " with empty new value ";
+        block::gen::t_Account.print_ref(std::cerr, account.total_state);
+      }
+      if (ns_.account_dict_->lookup_delete(account.addr).is_null()) {
+        return fatal_error(std::string{"cannot delete account "} + account.addr.to_hex() + " from ShardAccounts");
+      }
+    } else {
+      // existing account modified
+      if (verbosity > 4) {
+        std::cerr << "modifying account " << account.addr.to_hex() << " to ";
+        block::gen::t_Account.print_ref(std::cerr, account.total_state);
+      }
+      vm::CellBuilder cb;
+      if (!(cb.store_ref_bool(account.total_state)             // account_descr$_ account:^Account
+            && cb.store_bits_bool(account.last_trans_hash_)    // last_trans_hash:bits256
+            && cb.store_long_bool(account.last_trans_lt_, 64)  // last_trans_lt:uint64
+            && ns_.account_dict_->set_builder(account.addr, cb, vm::Dictionary::SetMode::Replace))) {
+        return fatal_error(std::string{"cannot modify existing account "} + account.addr.to_hex() +
+                           " in ShardAccounts");
+      }
+    }
+  }
+
+  block::gen::HASH_UPDATE::Record hash_upd;
+  if (!tlb::type_unpack_cell(std::move(acc_blk.state_update), block::gen::t_HASH_UPDATE_Account, hash_upd)) {
+    err_msg = "cannot extract (HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex();
+    return false;
+  }
+  block::tlb::ShardAccount::Record old_state, new_state;
+  if (!(old_state.unpack(ps_.account_dict_->lookup(account.addr)) &&
+        new_state.unpack(ns_.account_dict_->lookup(account.addr)))) {
+    err_msg = "cannot extract Account from the ShardAccount of "s + account.addr.to_hex();
+    return false;
+  }
+  if (hash_upd.old_hash != old_state.account->get_hash().bits()) {
+    err_msg = "(HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex() + " has incorrect old hash";
+    return false;
+  }
+  if (hash_upd.new_hash != new_state.account->get_hash().bits()) {
+    err_msg = "(HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex() + " has incorrect new hash";
+    return false;
+  }
+
+  return true;
+}
+#else
 bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root) {
   block::gen::AccountBlock::Record acc_blk;
   CHECK(tlb::csr_unpack(std::move(acc_blk_root), acc_blk) && acc_blk.account_addr == acc_addr);
@@ -5061,7 +5856,7 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
 
   return true;
 }
-
+#endif
 /**
  * Checks all transactions in the account blocks.
  *
@@ -5071,12 +5866,20 @@ bool ContestValidateQuery::check_transactions() {
   LOG(INFO) << "checking all transactions";
   ns_.account_dict_ =
       std::make_unique<vm::AugmentedDictionary>(ps_.account_dict_->get_root(), 256, block::tlb::aug_ShardAccounts);
+#ifdef USE_MULTIPLE_ACTORS
+  bool ok = parallel_process_with_actors<std::pair<td::BitArray<256>, Ref<vm::CellSlice>>>(
+      account_blocks_,
+      [this](const auto& item, std::string& err_msg) -> bool {
+        return check_account_transactions(item.first, item.second, err_msg);
+      },
+      [this](const std::string& err_msg) { reject_query(err_msg); });
+#else
   bool ok = account_blocks_dict_->check_for_each_extra(
       [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
         CHECK(key_len == 256);
         return check_account_transactions(key, std::move(value));
       });
-
+#endif
   return ok;
 }
 
@@ -5090,28 +5893,28 @@ bool ContestValidateQuery::check_message_processing_order() {
   // then (m1.created_lt < m2.created_lt) => (t1.lt < t2.lt).
   // New rule:
   // If message was taken from dispatch queue, instead of created_lt use emitted_lt
-  std::sort(msg_proc_lt_.begin(), msg_proc_lt_.end());
-  for (std::size_t i = 1; i < msg_proc_lt_.size(); i++) {
-    auto &a = msg_proc_lt_[i - 1], &b = msg_proc_lt_[i];
-    if (std::get<0>(a) == std::get<0>(b) && std::get<2>(a) > std::get<2>(b)) {
-      return reject_query(PSTRING() << "incorrect message processing order: transaction (" << std::get<1>(a) << ","
-                                    << std::get<0>(a).to_hex() << ") processes message created at logical time "
-                                    << std::get<2>(a) << ", but a later transaction (" << std::get<1>(b) << ","
-                                    << std::get<0>(a).to_hex()
-                                    << ") processes an earlier message created at logical time " << std::get<2>(b));
+  auto it = msg_proc_lt_.begin();
+  auto prev = it++;
+  for (; it != msg_proc_lt_.end(); ++prev, ++it) {
+    if (std::get<0>(*prev) == std::get<0>(*it) && std::get<2>(*prev) > std::get<2>(*it)) {
+      return reject_query(PSTRING() << "incorrect message processing order: transaction (" << std::get<1>(*prev) << ","
+                                    << std::get<0>(*prev).to_hex() << ") processes message created at logical time "
+                                    << std::get<2>(*prev) << ", but a later transaction (" << std::get<1>(*it) << ","
+                                    << std::get<0>(*prev).to_hex()
+                                    << ") processes an earlier message created at logical time " << std::get<2>(*it));
     }
   }
 
   // Check that if messages m1 and m2 with the same source have m1.created_lt < m2.created_lt then
   // m1.emitted_lt < m2.emitted_lt.
-  std::sort(msg_emitted_lt_.begin(), msg_emitted_lt_.end());
-  for (std::size_t i = 1; i < msg_emitted_lt_.size(); i++) {
-    auto &a = msg_emitted_lt_[i - 1], &b = msg_emitted_lt_[i];
-    if (std::get<0>(a) == std::get<0>(b) && std::get<2>(a) >= std::get<2>(b)) {
+  it = msg_emitted_lt_.begin();
+  prev = it++;
+  for (; it != msg_emitted_lt_.end(); ++prev, ++it) {
+    if (std::get<0>(*prev) == std::get<0>(*it) && std::get<2>(*prev) >= std::get<2>(*it)) {
       return reject_query(PSTRING() << "incorrect deferred message processing order for sender "
-                                    << std::get<0>(a).to_hex() << ": message with created_lt " << std::get<1>(a)
-                                    << " has emitted_lt" << std::get<2>(a) << ", but message with created_lt "
-                                    << std::get<1>(b) << " has emitted_lt" << std::get<2>(b));
+                                    << std::get<0>(*prev).to_hex() << ": message with created_lt " << std::get<1>(*prev)
+                                    << " has emitted_lt" << std::get<2>(*prev) << ", but message with created_lt "
+                                    << std::get<1>(*it) << " has emitted_lt" << std::get<2>(*it));
     }
   }
   return true;
@@ -5272,6 +6075,9 @@ bool ContestValidateQuery::try_validate() {
     if (!unpack_block_data()) {
       return reject_query("cannot unpack block data");
     }
+#ifdef USE_MULTIPLE_ACTORS
+    collect_account_blocks();
+#endif
     if (!precheck_account_transactions()) {
       return reject_query("invalid collection of account transactions in ShardAccountBlocks");
     }
@@ -5405,4 +6211,60 @@ bool ContestValidateQuery::store_master_ref(vm::CellBuilder& cb) {
          && cb.store_bits_bool(mc_blkid_.file_hash);            // file_hash:bits256
 }
 
+#ifdef USE_MULTIPLE_ACTORS
+/**
+ * Processes items in parallel using multiple actors.
+ * 
+ * @tparam T Type of items to process
+ * @param items Vector of items to process
+ * @param process_fn Function to process each item, returns bool (true = success)
+ * @param error_fn Function to handle errors
+ * @returns True if all items processed successfully, false if any failed
+ */
+template <typename T>
+bool ContestValidateQuery::parallel_process_with_actors(const std::vector<T>& items,
+                                                        std::function<bool(const T&, std::string&)> process_fn,
+                                                        std::function<void(const std::string&)> error_fn) {
+  std::atomic<bool> success = true;
+  std::atomic<size_t> pending_items = items.size();
+  std::string err_msg;
+  std::mutex mut;
+  std::condition_variable cv;
+
+  const static size_t NUM_THREADS =
+      td::actor::core::SchedulerContext::get()->scheduler_group()->schedulers[0].cpu_threads_count - 1;
+  const size_t BATCH_SIZE = (items.size() + NUM_THREADS - 1) / NUM_THREADS;
+
+  for (size_t batch_start = 0; batch_start < items.size(); batch_start += BATCH_SIZE) {
+    const size_t batch_end = std::min(batch_start + BATCH_SIZE, items.size());
+
+    run_in_actor([&, batch_start, batch_end]() {
+      for (size_t i = batch_start; i < batch_end; i++) {
+        mut.lock();
+        auto res = process_fn(std::move(items[i]), err_msg);
+        mut.unlock();
+
+        if (!res)
+          success = false;
+        pending_items--;
+
+        if (!success) {
+          pending_items -= (batch_end - i - 1);
+          break;
+        }
+      }
+      cv.notify_one();
+    });
+  }
+
+  std::unique_lock<std::mutex> lk(mut);
+  cv.wait(lk, [&pending_items] { return pending_items == 0; });
+
+  if (!success) {
+    error_fn(err_msg);
+  }
+
+  return success;
+}
+#endif
 }  // namespace solution

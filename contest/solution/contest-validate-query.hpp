@@ -7,6 +7,7 @@
 #include "block/transaction.h"
 #include "shard.hpp"
 #include "signature-set.hpp"
+#include <absl/container/btree_set.h>
 #include <vector>
 #include <string>
 #include <map>
@@ -81,6 +82,26 @@ inline ErrorCtxSet ErrorCtx::set_guard(std::vector<std::string> str_list) {
   return ErrorCtxSet(*this, std::move(str_list));
 }
 
+#ifdef USE_MULTIPLE_ACTORS
+class LambdaActor : public td::actor::Actor {
+  std::function<void()> lambda_;
+
+ public:
+  LambdaActor(std::function<void()> lambda) : lambda_(std::move(lambda)) {
+  }
+
+  void start_up() override {
+    lambda_();
+    stop();
+  }
+};
+
+template <typename F>
+void run_in_actor(F&& lambda) {
+  td::actor::create_actor<LambdaActor>("LambdaActor", std::forward<F>(lambda)).release();
+}
+#endif
+
 class ContestValidateQuery : public td::actor::Actor {
   static constexpr int supported_version() {
     return SUPPORTED_VERSION;
@@ -131,7 +152,7 @@ class ContestValidateQuery : public td::actor::Actor {
 
   Ref<vm::Cell> block_root_;
   std::vector<Ref<vm::Cell>> collated_roots_;
-  std::map<RootHash, Ref<vm::Cell>> virt_roots_;
+  std::unordered_map<RootHash, Ref<vm::Cell>> virt_roots_;
   std::unique_ptr<vm::Dictionary> top_shard_descr_dict_;
   block::gen::ExtraCollatedData::Record extra_collated_data_;
   bool have_extra_collated_data_ = false;
@@ -170,7 +191,7 @@ class ContestValidateQuery : public td::actor::Actor {
   td::RefInt256 masterchain_create_fee_, basechain_create_fee_;
 
   std::vector<block::McShardDescr> neighbors_;
-  std::map<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
+  td::HashMap<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
 
   block::ShardState ps_;
   block::ShardState ns_;
@@ -178,10 +199,13 @@ class ContestValidateQuery : public td::actor::Actor {
   std::unique_ptr<vm::AugmentedDictionary> sibling_out_msg_queue_;
   std::shared_ptr<block::MsgProcessedUptoCollection> sibling_processed_upto_;
 
-  std::map<td::Bits256, int> block_create_count_;
+  td::HashMap<td::Bits256, int> block_create_count_;
   unsigned block_create_total_{0};
 
   std::unique_ptr<vm::AugmentedDictionary> in_msg_dict_, out_msg_dict_, account_blocks_dict_;
+#ifdef USE_MULTIPLE_ACTORS
+  std::vector<std::pair<td::BitArray<256>, Ref<vm::CellSlice>>> account_blocks_;
+#endif
   block::ValueFlow value_flow_;
   block::CurrencyCollection import_created_, transaction_fees_, total_burned_{0}, fees_burned_{0};
   td::RefInt256 import_fees_;
@@ -189,12 +213,12 @@ class ContestValidateQuery : public td::actor::Actor {
   ton::LogicalTime proc_lt_{0}, claimed_proc_lt_{0}, min_enq_lt_{~0ULL};
   ton::Bits256 proc_hash_ = ton::Bits256::zero(), claimed_proc_hash_, min_enq_hash_;
 
-  std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_proc_lt_;
-  std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_emitted_lt_;
+  absl::btree_set<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_proc_lt_;
+  absl::btree_set<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_emitted_lt_;
 
-  std::map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;
-  std::map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> new_dispatch_queue_messages_;
-  std::set<StdSmcAddress> account_expected_defer_all_messages_;
+  std::unordered_map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;
+  std::unordered_map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> new_dispatch_queue_messages_;
+  td::HashSet<StdSmcAddress> account_expected_defer_all_messages_;
   td::uint64 old_out_msg_queue_size_ = 0;
   bool out_msg_queue_size_known_ = false;
   bool have_out_msg_queue_size_in_state_ = false;
@@ -287,14 +311,24 @@ class ContestValidateQuery : public td::actor::Actor {
   bool add_trivial_neighbor_after_merge();
   bool add_trivial_neighbor();
   bool unpack_block_data();
+#ifdef USE_MULTIPLE_ACTORS
+  void collect_account_blocks();
+#endif
   bool unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
   bool compute_minted_amount(block::CurrencyCollection& to_mint);
   bool postcheck_one_account_update(td::ConstBitPtr acc_id, Ref<vm::CellSlice> old_value, Ref<vm::CellSlice> new_value);
   bool postcheck_account_updates();
+#ifdef USE_MULTIPLE_ACTORS
+  bool precheck_one_transaction(td::ConstBitPtr acc_id, ton::LogicalTime trans_lt, Ref<vm::CellSlice> trans_csr,
+                                ton::Bits256& prev_trans_hash, ton::LogicalTime& prev_trans_lt,
+                                unsigned& prev_trans_lt_len, ton::Bits256& acc_state_hash, std::string& err_msg);
+  bool precheck_one_account_block(td::ConstBitPtr acc_id, Ref<vm::CellSlice> acc_blk, std::string& err_msg);
+#else
   bool precheck_one_transaction(td::ConstBitPtr acc_id, ton::LogicalTime trans_lt, Ref<vm::CellSlice> trans_csr,
                                 ton::Bits256& prev_trans_hash, ton::LogicalTime& prev_trans_lt,
                                 unsigned& prev_trans_lt_len, ton::Bits256& acc_state_hash);
   bool precheck_one_account_block(td::ConstBitPtr acc_id, Ref<vm::CellSlice> acc_blk);
+#endif
   bool precheck_account_transactions();
   Ref<vm::Cell> lookup_transaction(const ton::StdSmcAddress& addr, ton::LogicalTime lt) const;
   bool is_valid_transaction_ref(Ref<vm::Cell> trans_ref) const;
@@ -322,9 +356,15 @@ class ContestValidateQuery : public td::actor::Actor {
   bool check_in_queue();
   std::unique_ptr<block::Account> make_account_from(td::ConstBitPtr addr, Ref<vm::CellSlice> account);
   std::unique_ptr<block::Account> unpack_account(td::ConstBitPtr addr);
+#ifdef USE_MULTIPLE_ACTORS
+  bool check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first,
+                             bool is_last, std::string& err_msg);
+  bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr, std::string& err_msg);
+#else
   bool check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first,
                              bool is_last);
   bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr);
+#endif
   bool check_transactions();
   bool check_message_processing_order();
   bool check_new_state();
@@ -336,6 +376,12 @@ class ContestValidateQuery : public td::actor::Actor {
 
   bool store_master_ref(vm::CellBuilder& cb);
   bool build_state_update();
+
+#ifdef USE_MULTIPLE_ACTORS
+  template <typename T>
+  bool parallel_process_with_actors(const std::vector<T>& items, std::function<bool(const T&, std::string&)> process_fn,
+                                    std::function<void(const std::string&)> error_fn);
+#endif
 };
 
 }  // namespace solution

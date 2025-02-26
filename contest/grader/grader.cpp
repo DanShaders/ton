@@ -248,8 +248,8 @@ int main(int argc, char* argv[]) {
   std::string tests_dir = "tests/";
   p.add_option('d', "tests", "directory with tests (default: tests/)",
                [&](td::Slice arg) { tests_dir = arg.str() + "/"; });
-  td::uint32 threads = 8;
-  p.add_checked_option('t', "threads", "number of threads (default: 8)", [&](td::Slice arg) {
+  td::uint32 threads = 1;
+  p.add_checked_option('t', "threads", "number of threads (default: 1)", [&](td::Slice arg) {
     TRY_RESULT_ASSIGN(threads, td::to_integer_safe<td::uint32>(arg));
     return td::Status::OK();
   });
