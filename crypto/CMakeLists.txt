@@ -20,6 +20,7 @@ set(TON_CRYPTO_CORE_SOURCE
   openssl/residue.cpp
   openssl/rand.cpp
   vm/boc.cpp
+  vm/boc_ts.cpp
   vm/large-boc-serializer.cpp
   tl/tlblib.cpp
 
@@ -63,6 +64,7 @@ set(TON_CRYPTO_CORE_SOURCE
   vm/cells/LevelMask.cpp
   vm/cells/MerkleProof.cpp
   vm/cells/MerkleUpdate.cpp
+  vm/cells/ObjectPool.cpp
 
   vm/dict.h
   vm/cells/Cell.h
@@ -120,6 +122,7 @@ set(TON_CRYPTO_SOURCE
   vm/arithops.h
   vm/atom.h
   vm/boc.h
+  vm/boc_ts.h
   vm/boc-writers.h
   vm/box.hpp
   vm/cellops.h

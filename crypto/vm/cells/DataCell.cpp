@@ -63,7 +63,7 @@ std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
     return res;
   }
 
-  return detail::CellWithUniquePtrStorage<DataCell>::create(info.get_storage_size(), info);
+  return detail::CellWithInplaceStorage<DataCell>::create(info.get_storage_size(), info);
 }
 
 DataCell::DataCell(Info info) : info_(std::move(info)) {

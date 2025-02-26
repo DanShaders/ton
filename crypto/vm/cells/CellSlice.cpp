@@ -29,6 +29,8 @@ CellSlice::CellSlice(Ref<Cell>&& ref) : cell(std::move(ref)), bits_st(0), refs_s
 }
 */
 
+thread_local LocalObjectPoolGuard<CellSlice, CellSlice::POOL_SIZE> CellSlice::pool_guard_ {GlobalObjectPool<CellSlice, POOL_SIZE>::obtain_local()};
+
 CellSlice::CellSlice(VirtualCell::LoadedCell loaded_cell)
     : virt(loaded_cell.virt)
     , cell(std::move(loaded_cell.data_cell))
@@ -67,6 +69,14 @@ Cell::LoadedCell load_cell_nothrow(const Ref<Cell>& ref, int mode) {
 }
 
 }  // namespace
+
+void* CellSlice::operator new(size_t size) {
+  return pool_guard_->acquire();
+}
+
+void CellSlice::operator delete(void* ptr) {
+  return pool_guard_->retire(static_cast<CellSlice*>(ptr));
+}
 
 CellSlice::CellSlice(NoVm, Ref<Cell> ref) : CellSlice(load_cell_nothrow(std::move(ref))) {
 }

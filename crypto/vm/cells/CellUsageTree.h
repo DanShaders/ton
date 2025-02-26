@@ -18,11 +18,15 @@
 */
 #pragma once
 
+#include "CellUsageContainer.h"
 #include "vm/cells/CellTraits.h"
 
 #include "td/utils/int_types.h"
 #include "td/utils/logging.h"
+
+#include <deque>
 #include <functional>
+#include <shared_mutex>
 
 namespace vm {
 
@@ -75,7 +79,7 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
     std::array<td::uint32, CellTraits::max_refs> children{};
   };
   bool use_mark_{false};
-  std::vector<Node> nodes_{2};
+  DynamicArray<Node> nodes_{2};
   std::function<void(const td::Ref<vm::DataCell>&)> cell_load_callback_;
 
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);

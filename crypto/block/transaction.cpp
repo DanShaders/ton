@@ -26,6 +26,7 @@
 #include "ton/ton-shard.h"
 #include "vm/vm.h"
 #include "td/utils/Timer.h"
+#include "vm/boc_ts.h"
 
 namespace {
 /**
@@ -2867,12 +2868,17 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
   vm::CellStorageStat storage_stat;
   storage_stat.limit_cells = size_limits.max_acc_state_cells;
   storage_stat.limit_bits = size_limits.max_acc_state_bits;
+
   {
+    vm::CellStorageStatTs storage_stat_ts;
+    storage_stat_ts.limit_cells = size_limits.max_acc_state_cells;
+    storage_stat_ts.limit_bits = size_limits.max_acc_state_bits;
+
     TD_PERF_COUNTER(transaction_storage_stat_a);
     td::Timer timer;
     auto add_used_storage = [&](const td::Ref<vm::Cell>& cell) -> td::Status {
       if (cell.not_null()) {
-        TRY_RESULT(res, storage_stat.add_used_storage(cell));
+        TRY_RESULT(res, storage_stat_ts.dfs_visit_cells(cell));
         if (res.max_merkle_depth > max_allowed_merkle_depth) {
           return td::Status::Error("too big merkle depth");
         }
@@ -2885,6 +2891,10 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
     if (timer.elapsed() > 0.1) {
       LOG(INFO) << "Compute used storage took " << timer.elapsed() << "s";
     }
+
+    storage_stat.cells = storage_stat_ts.cells;
+    storage_stat.bits = storage_stat_ts.bits;
+    storage_stat.seen = std::move(storage_stat_ts.seen);
   }
 
   if (acc_status == Account::acc_active) {

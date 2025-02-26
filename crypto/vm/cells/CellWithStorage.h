@@ -74,31 +74,38 @@ class CellWithArrayStorage : public CellT {
 };
 
 template <class CellT>
-class CellWithUniquePtrStorage : public CellT {
+class CellWithInplaceStorage final : public CellT {
  public:
-  template <class... ArgsT>
-  CellWithUniquePtrStorage(size_t storage_size, ArgsT&&... args)
-      : CellT(std::forward<ArgsT>(args)...), storage_(std::make_unique<char[]>(storage_size)) {
-  }
-  ~CellWithUniquePtrStorage() {
+  ~CellWithInplaceStorage() {
     CellT::destroy_storage(get_storage());
   }
 
   template <class... ArgsT>
   static std::unique_ptr<CellT> create(size_t storage_size, ArgsT&&... args) {
-    return std::make_unique<CellWithUniquePtrStorage>(storage_size, std::forward<ArgsT>(args)...);
+    auto* ptr = static_cast<CellWithInplaceStorage*>(malloc(sizeof(CellWithInplaceStorage) + storage_size));
+    new(ptr) CellWithInplaceStorage(storage_size, std::forward<ArgsT>(args)...);
+    return std::unique_ptr<CellWithInplaceStorage>(ptr);
+  }
+
+  void operator delete(void *ptr) noexcept {
+    free(ptr);
   }
 
  private:
-  std::unique_ptr<char[]> storage_;
+  void* operator new(size_t, void *ptr) {
+    return ptr;
+  }
 
-  const char* get_storage() const final {
-    CHECK(storage_);
-    return storage_.get();
+  template <class... ArgsT>
+  explicit CellWithInplaceStorage(size_t storage_size, ArgsT&&... args)
+      : CellT(std::forward<ArgsT>(args)...) {
+  }
+
+  [[nodiscard]] const char* get_storage() const final {
+    return reinterpret_cast<const char*>(this) + sizeof(CellWithInplaceStorage);
   }
   char* get_storage() final {
-    CHECK(storage_);
-    return storage_.get();
+    return reinterpret_cast<char*>(this) + sizeof(CellWithInplaceStorage);
   }
 };
 }  // namespace detail

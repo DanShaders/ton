@@ -20,7 +20,9 @@
 
 #include "common/refcnt.hpp"
 #include "common/refint.h"
+#include "vm/boc_ts.h"
 #include "vm/cells.h"
+#include "vm/cells/ObjectPool.hpp"
 
 namespace td {
 class StringBuilder;
@@ -41,11 +43,18 @@ class CellSlice : public td::CntObject {
   mutable unsigned long long z;
   mutable unsigned zd;
 
+  enum : size_t { POOL_SIZE = 1024 };
+  static thread_local LocalObjectPoolGuard<CellSlice, POOL_SIZE> pool_guard_;
+
  public:
+  friend struct  vm::CellStorageStatTs;
   static constexpr long long fetch_long_eof = (static_cast<unsigned long long>(-1LL) << 63);
   static constexpr unsigned long long fetch_ulong_eof = (unsigned long long)-1LL;
   enum { default_recursive_print_limit = 100 };
   struct CellReadError {};
+
+  void *operator new (size_t size);
+  void operator delete (void *ptr);
 
   CellSlice(NoVm, Ref<Cell> cell_ref);
   CellSlice(NoVmOrd, Ref<Cell> cell_ref);
