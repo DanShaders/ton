@@ -109,7 +109,7 @@ td::Status CellText::store(CellBuilder &cb, td::BitSlice slice, unsigned int top
     return td::Status::Error("Need at least 16 top bits");
   }
   if (slice.size() == 0) {
-    cb.store_long(0, 8);
+    cb.store_byte(0);
     return td::Status::OK();
   }
   unsigned int head = td::min(slice.size(), td::min(cb.remaining_bits(), top_bits) - 16) / 8 * 8;
@@ -118,8 +118,8 @@ td::Status CellText::store(CellBuilder &cb, td::BitSlice slice, unsigned int top
   if (depth > max_chain_length) {
     return td::Status::Error("String is too long (2)");
   }
-  cb.store_long(depth, 8);
-  cb.store_long(head / 8, 8);
+  cb.store_byte(depth);
+  cb.store_byte(head / 8);
   cb.append_bitslice(slice.subslice(0, head));
   slice.advance(head);
   if (slice.size() == 0) {
@@ -132,7 +132,7 @@ td::Status CellText::store(CellBuilder &cb, td::BitSlice slice, unsigned int top
 td::Ref<vm::Cell> CellText::do_store(td::BitSlice slice) {
   vm::CellBuilder cb;
   unsigned int head = td::min(slice.size(), cb.remaining_bits() - 8) / 8 * 8;
-  cb.store_long(head / 8, 8);
+  cb.store_byte(head / 8);
   cb.append_bitslice(slice.subslice(0, head));
   slice.advance(head);
   if (slice.size() != 0) {

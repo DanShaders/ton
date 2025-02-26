@@ -1135,10 +1135,7 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlic
     TRY_RESULT(child, add_used_storage(cs.fetch_ref(), kill_dup));
     res.max_merkle_depth = std::max(res.max_merkle_depth, child.max_merkle_depth);
   }
-  if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
-      cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
-    ++res.max_merkle_depth;
-  }
+  res.max_merkle_depth += (cs.special_type() >= CellTraits::SpecialType::MerkleProof);
   return res;
 }
 
@@ -1193,7 +1190,7 @@ void NewCellStorageStat::dfs(Ref<Cell> cell, bool need_stat, bool need_proof_sta
   }
   if (need_stat) {
     stat_.internal_refs++;
-    if ((parent_ && parent_->seen_.count(cell->get_hash()) != 0) || !seen_.insert(cell->get_hash()).second) {
+    if ((parent_ && parent_->seen_.contains(cell->get_hash())) || !seen_.insert(cell->get_hash()).second) {
       need_stat = false;
     } else {
       stat_.cells++;

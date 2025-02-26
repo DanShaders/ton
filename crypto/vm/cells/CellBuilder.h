@@ -92,6 +92,8 @@ class CellBuilder : public td::CntObject {
   }
   CellBuilder& operator=(const CellBuilder&);
   CellBuilder& operator=(CellBuilder&&);
+  void store_short(td::uint16 value);
+  void store_byte(td::uint8 value);
   CellBuilder& store_bytes(const char* str, std::size_t len);
   CellBuilder& store_bytes(const char* str, const char* end);
   CellBuilder& store_bytes(const unsigned char* str, std::size_t len);

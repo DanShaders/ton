@@ -23,6 +23,9 @@
 #include "td/utils/bits.h"
 #include "td/utils/misc.h"
 #include "crypto/openssl/digest.hpp"
+#ifdef __x86_64__
+#include <x86intrin.h>
+#endif
 
 namespace td {
 
@@ -164,6 +167,56 @@ void bits_memcpy(unsigned char* to, int to_offs, const unsigned char* from, int 
       b += ld;
       bit_count -= 8;
       // b <= 15 here
+      while (bit_count >= 128) {
+#ifdef __x86_64__
+        __m128i data = _mm_loadu_si128(reinterpret_cast<const __m128i*>(from));
+        const __m128i swap_mask = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+        data = _mm_shuffle_epi8(data, swap_mask);
+        unsigned long long acc1 = _mm_extract_epi64(data, 1);
+        unsigned long long acc0 = (acc << 32) | (acc1 >> 32);
+        acc = _mm_extract_epi64(data, 0);
+        unsigned long long acc2 = (acc1 << 32) | (acc >> 32);
+
+        data = _mm_set_epi32((unsigned)(acc0 >> b), (unsigned)(acc1 >> b), (unsigned)(acc2 >> b), (unsigned)(acc >> b));
+        data = _mm_shuffle_epi8(data, swap_mask);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(to), data);
+#else
+        unsigned long long f0 = bswap32(as<unsigned>(from));
+        unsigned long long f1 = bswap32(as<unsigned>(from + 4));
+        unsigned long long f2 = bswap32(as<unsigned>(from + 8));
+        unsigned long long f3 = bswap32(as<unsigned>(from + 12));
+
+        unsigned long long acc0 = (acc << 32) | f0;
+        unsigned long long acc1 = (f0 << 32) | f1;
+        unsigned long long acc2 = (f1 << 32) | f2;
+        acc = (f2 << 32) | f3;
+
+        as<unsigned>(to) = bswap32((unsigned)(acc0 >> b));
+        as<unsigned>(to + 4) = bswap32((unsigned)(acc1 >> b));
+        as<unsigned>(to + 8) = bswap32((unsigned)(acc2 >> b));
+        as<unsigned>(to + 12) = bswap32((unsigned)(acc >> b));
+#endif
+
+        from += 16;
+        to += 16;
+        bit_count -= 128;
+      }
+
+      while (bit_count >= 64) {
+        unsigned long long f0 = bswap32(as<unsigned>(from));
+        unsigned long long f1 = bswap32(as<unsigned>(from + 4));
+
+        unsigned long long acc0 = (acc << 32) | f0;
+        acc = (f0 << 32) | f1;
+
+        as<unsigned>(to) = bswap32((unsigned)(acc0 >> b));
+        as<unsigned>(to + 4) = bswap32((unsigned)(acc >> b));
+
+        from += 8;
+        to += 8;
+        bit_count -= 64;
+      }
+
       while (bit_count >= 32) {
         acc <<= 32;
         acc |= td::bswap32(as<unsigned>(from));

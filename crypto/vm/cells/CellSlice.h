@@ -87,10 +87,7 @@ class CellSlice : public td::CntObject {
     if (merkle_depth == Cell::VirtualizationParameters::max_level()) {
       return merkle_depth;
     }
-    if (cell->special_type() == Cell::SpecialType::MerkleProof ||
-        cell->special_type() == Cell::SpecialType::MerkleUpdate) {
-      merkle_depth++;
-    }
+    merkle_depth += (cell->special_type() >= Cell::SpecialType::MerkleProof);
     return merkle_depth;
   }
   unsigned size_refs() const {

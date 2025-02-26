@@ -100,10 +100,9 @@ Ref<DataCell> CellBuilder::finalize(bool special) {
 
 Ref<Cell> CellBuilder::create_pruned_branch(Ref<Cell> cell, td::uint32 new_level, td::uint32 virt_level) {
   if (cell->is_loaded() && cell->get_level() <= virt_level && cell->get_virtualization() == 0) {
-    CellSlice cs(NoVm{}, cell);
-    if (cs.size_refs() == 0) {
+    auto refs_en = cell->load_cell().move_as_ok().data_cell->get_refs_cnt();
+    if (refs_en == 0)
       return cell;
-    }
   }
   return do_create_pruned_branch(std::move(cell), new_level, virt_level);
 }
@@ -115,8 +114,9 @@ Ref<DataCell> CellBuilder::do_create_pruned_branch(Ref<Cell> cell, td::uint32 ne
     throw CellWriteError();
   }
   CellBuilder cb;
-  cb.store_long(static_cast<td::uint8>(Cell::SpecialType::PrunnedBranch), 8);
-  cb.store_long(level_mask.apply_or(Cell::LevelMask::one_level(new_level)).get_mask(), 8);
+  unsigned int lvl = level_mask.apply_or(Cell::LevelMask::one_level(new_level)).get_mask();
+  lvl |= ((unsigned int) Cell::SpecialType::PrunnedBranch) << 8;
+  cb.store_short(lvl);
   for (td::uint32 i = 0; i <= level; i++) {
     if (level_mask.is_significant(i)) {
       cb.store_bytes(cell->get_hash(i).as_slice());
@@ -124,7 +124,7 @@ Ref<DataCell> CellBuilder::do_create_pruned_branch(Ref<Cell> cell, td::uint32 ne
   }
   for (td::uint32 i = 0; i <= level; i++) {
     if (level_mask.is_significant(i)) {
-      cb.store_long(cell->get_depth(i), 16);
+      cb.store_short(cell->get_depth(i));
     }
   }
   return cb.finalize(true);
@@ -132,20 +132,20 @@ Ref<DataCell> CellBuilder::do_create_pruned_branch(Ref<Cell> cell, td::uint32 ne
 
 Ref<DataCell> CellBuilder::create_merkle_proof(Ref<Cell> cell_proof) {
   CellBuilder cb;
-  cb.store_long(static_cast<td::uint8>(Cell::SpecialType::MerkleProof), 8);
+  cb.store_byte(static_cast<td::uint8>(Cell::SpecialType::MerkleProof));
   cb.store_bytes(cell_proof->get_hash(0).as_slice());
-  cb.store_long(cell_proof->get_depth(0), Cell::depth_bytes * 8);
+  cb.store_short(cell_proof->get_depth(0));
   cb.store_ref(cell_proof);
   return cb.finalize(true);
 }
 
 Ref<DataCell> CellBuilder::create_merkle_update(Ref<Cell> from_proof, Ref<Cell> to_proof) {
   CellBuilder cb;
-  cb.store_long(static_cast<td::uint8>(Cell::SpecialType::MerkleUpdate), 8);
+  cb.store_byte(static_cast<td::uint8>(Cell::SpecialType::MerkleUpdate));
   cb.store_bytes(from_proof->get_hash(0).as_slice());
   cb.store_bytes(to_proof->get_hash(0).as_slice());
-  cb.store_long(from_proof->get_depth(0), Cell::depth_bytes * 8);
-  cb.store_long(to_proof->get_depth(0), Cell::depth_bytes * 8);
+  cb.store_short(from_proof->get_depth(0));
+  cb.store_short(to_proof->get_depth(0));
   cb.store_ref(from_proof);
   cb.store_ref(to_proof);
   return cb.finalize(true);
@@ -189,8 +189,7 @@ CellBuilder& CellBuilder::store_bytes(const unsigned char* str, std::size_t len)
 }
 
 CellBuilder& CellBuilder::store_bytes(const unsigned char* str, const unsigned char* end) {
-  ensure_throw(end >= str && end <= str + Cell::max_bytes);
-  return store_bits(str, (end - str) * 8);
+  return store_bytes(str, end - str);
 }
 
 CellBuilder& CellBuilder::store_bytes(const char* str, std::size_t len) {
@@ -332,6 +331,38 @@ bool CellBuilder::store_ulong_rchk_bool(unsigned long long val, unsigned val_bit
   }
   store_long(val, val_bits);
   return true;
+}
+
+//todo tested on only LE machine
+void CellBuilder::store_short(td::uint16 value) {
+  unsigned pos = bits;
+  ensure_throw(prepare_reserve(16));
+  unsigned byte_offset = pos >> 3;
+  unsigned bit_offset = pos & 7;
+  if (bit_offset) {
+    unsigned char* to = data + byte_offset;
+    value = (value >> 8) | (value << 8);
+    to[0] = (value & 0xFF) >> bit_offset | *to & 0xFF00 >> bit_offset;
+    to[1] = value << 8 - bit_offset;
+    to[2] = value >> bit_offset;
+  } else {
+    data[byte_offset] = value >> 8;
+    data[byte_offset + 1] = value;
+  }
+}
+
+void CellBuilder::store_byte(td::uint8 value) {
+  unsigned pos = bits;
+  ensure_throw(prepare_reserve(8));
+  unsigned byte_offset = pos >> 3;
+  unsigned bit_offset = pos & 7;
+  if (bit_offset) {
+    unsigned char* to = data + byte_offset;
+    to[0] = value >> bit_offset | *to & 0xFF00 >> bit_offset;
+    to[1] = value << 8 - bit_offset;
+  } else {
+    data[byte_offset] = value;
+  }
 }
 
 CellBuilder& CellBuilder::store_long(long long val, unsigned val_bits) {
