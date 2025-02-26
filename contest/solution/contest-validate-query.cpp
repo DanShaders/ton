@@ -195,88 +195,69 @@ void ContestValidateQuery::finish_query() {
  * Then the function also sends requests to the ValidatorManager to fetch blocks and shard stated.
  */
 void ContestValidateQuery::start_up() {
-  LOG(INFO) << "validate query for " << id_.to_str() << " started";
-  rand_seed_.set_zero();
+    try {
+        LOG(INFO) << "validate query for " << id_.to_str() << " started";
+        rand_seed_.set_zero();
 
-  if (ShardIdFull(id_) != shard_) {
-    soft_reject_query(PSTRING() << "block candidate belongs to shard " << ShardIdFull(id_).to_str()
-                                << " different from current shard " << shard_.to_str());
-    return;
-  }
-  if (workchain() != ton::basechainId) {
-    soft_reject_query("only basechain is supported");
-    return;
-  }
-  if (!shard_.is_valid_ext()) {
-    reject_query("requested to validate a block for an invalid shard");
-    return;
-  }
-  td::uint64 x = td::lower_bit64(shard_.shard);
-  if (x < 8) {
-    reject_query("a shard cannot be split more than 60 times");
-    return;
-  }
-  // 3. unpack block candidate (while necessary data is being loaded)
-  if (!unpack_block_candidate()) {
-    reject_query("error unpacking block candidate");
-    return;
-  }
-  if (prev_blocks.size() > 2) {
-    soft_reject_query("cannot have more than two previous blocks");
-    return;
-  }
-  if (!prev_blocks.size()) {
-    soft_reject_query("must have one or two previous blocks to generate a next block");
-    return;
-  }
-  if (prev_blocks.size() == 2) {
-    if (!(shard_is_parent(shard_, ShardIdFull(prev_blocks[0])) &&
-          shard_is_parent(shard_, ShardIdFull(prev_blocks[1])) && prev_blocks[0].id.shard < prev_blocks[1].id.shard)) {
-      soft_reject_query(
-          "the two previous blocks for a merge operation are not siblings or are not children of current shard");
-      return;
+        auto full_id = ShardIdFull(id_);
+        if (full_id != shard_) {
+            soft_reject_query(PSTRING() << "block candidate belongs to shard " << full_id.to_str()
+                                        << " different from current shard " << shard_.to_str());
+            return;
+        }
+        if (workchain() != ton::basechainId) {
+            soft_reject_query("only basechain is supported");
+            return;
+        }
+        if (!shard_.is_valid_ext()) {
+            reject_query("requested to validate a block for an invalid shard");
+            return;
+        }
+        if (td::lower_bit64(shard_.shard) < 8) {
+            reject_query("a shard cannot be split more than 60 times");
+            return;
+        }
+
+        if (!unpack_block_candidate()) {
+            reject_query("error unpacking block candidate");
+            return;
+        }
+
+        size_t prev_size = prev_blocks.size();
+        if (prev_size == 0) {
+            soft_reject_query("must have one or two previous blocks to generate a next block");
+            return;
+        }
+        if (prev_size > 2) {
+            soft_reject_query("cannot have more than two previous blocks");
+            return;
+        }
+
+        prev_states.resize(prev_size); // Ensure memory is allocated
+
+        LOG(DEBUG) << "Loading " << prev_size << " previous blocks.";
+
+        for (size_t i = 0; i < prev_size; ++i) {
+            if (i >= prev_blocks.size()) {
+                reject_query("Unexpected vector out-of-bounds access in prev_blocks");
+                return;
+            }
+
+            LOG(DEBUG) << "sending wait_block_state() query #" << i << " for " << prev_blocks[i].to_str() << " to Manager";
+            ++pending;
+            td::actor::send_closure_later(actor_id(this), &ContestValidateQuery::after_get_shard_state, i,
+                                          fetch_block_state(prev_blocks[i]));
+        }
+
+        ++pending;
+        td::actor::send_closure_later(actor_id(this), &ContestValidateQuery::after_get_mc_state,
+                                      fetch_block_state(mc_blkid_));
+
+        CHECK(pending);
+    } catch (const std::exception &e) {
+        LOG(ERROR) << "Exception in start_up: " << e.what();
+        reject_query("Internal error: exception thrown in start_up");
     }
-    for (const auto& blk : prev_blocks) {
-      if (!blk.id.seqno) {
-        soft_reject_query("previous blocks for a block merge operation must have non-zero seqno");
-        return;
-      }
-    }
-    // soft_reject_query("merging shards is not implemented yet");
-    // return;
-  } else {
-    CHECK(prev_blocks.size() == 1);
-    // creating next block
-    if (!ShardIdFull(prev_blocks[0]).is_valid_ext()) {
-      soft_reject_query("previous block does not have a valid id");
-      return;
-    }
-    if (ShardIdFull(prev_blocks[0]) != shard_) {
-      if (!shard_is_parent(ShardIdFull(prev_blocks[0]), shard_)) {
-        soft_reject_query("previous block does not belong to the shard we are generating a new block for");
-        return;
-      }
-    }
-    if (after_split_) {
-      // soft_reject_query("splitting shards not implemented yet");
-      // return;
-    }
-  }
-  // 4. load state(s) corresponding to previous block(s)
-  prev_states.resize(prev_blocks.size());
-  for (int i = 0; (unsigned)i < prev_blocks.size(); i++) {
-    // 4.1. load state
-    LOG(DEBUG) << "sending wait_block_state() query #" << i << " for " << prev_blocks[i].to_str() << " to Manager";
-    ++pending;
-    td::actor::send_closure_later(actor_id(this), &ContestValidateQuery::after_get_shard_state, i,
-                                  fetch_block_state(prev_blocks[i]));
-  }
-  // 5. request masterchain state referred to in the block
-  ++pending;
-  td::actor::send_closure_later(actor_id(this), &ContestValidateQuery::after_get_mc_state,
-                                fetch_block_state(mc_blkid_));
-  // ...
-  CHECK(pending);
 }
 
 /**
@@ -304,15 +285,9 @@ bool ContestValidateQuery::unpack_block_candidate() {
   // 3. initial block parse
   {
     auto guard = error_ctx_add_guard("parsing block header");
-    try {
-      if (!init_parse()) {
+        if (!init_parse()) {
         return reject_query("invalid block header");
       }
-    } catch (vm::VmError& err) {
-      return reject_query(err.get_msg());
-    } catch (vm::VmVirtError& err) {
-      return reject_query(err.get_msg());
-    }
   }
   // ...
   // 8. deserialize collated data
@@ -322,9 +297,12 @@ bool ContestValidateQuery::unpack_block_candidate() {
   }
   int n = boc2.get_root_count();
   CHECK(n >= 0);
+  
+  collated_roots_.reserve(n);
   for (int i = 0; i < n; i++) {
-    collated_roots_.emplace_back(boc2.get_root_cell(i));
+    collated_roots_.push_back(boc2.get_root_cell(i));
   }
+
   // 9. extract/classify collated data
   return extract_collated_data();
 }
@@ -473,7 +451,10 @@ bool ContestValidateQuery::extract_collated_data() {
   int i = -1;
   for (auto croot : collated_roots_) {
     ++i;
-    auto guard = error_ctx_add_guard(PSTRING() << "collated datum #" << i);
+    std::ostringstream ss;
+    ss << "collated datum #" << i;
+    auto guard = error_ctx_add_guard(ss.str());
+
     try {
       if (!extract_collated_data_from(croot, i)) {
         return reject_query("cannot unpack collated datum");
@@ -528,7 +509,7 @@ void ContestValidateQuery::after_get_shard_state(int idx, td::Result<Ref<ShardSt
   }
   // got state of previous block #i
   CHECK((unsigned)idx < prev_blocks.size());
-  prev_states.at(idx) = res.move_as_ok();
+  prev_states[idx] = res.move_as_ok();
   CHECK(prev_states[idx].not_null());
   CHECK(prev_states[idx]->get_shard() == ShardIdFull(prev_blocks[idx]));
   CHECK(prev_states[idx]->root_cell().not_null());
