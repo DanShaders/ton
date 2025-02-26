@@ -32,6 +32,79 @@
 namespace vm {
 using td::Ref;
 
+void CellOptimizer::reset_visited() {
+  epoch++;
+}
+
+td::Result<size_t> CellOptimizer::resolve(Ref<vm::Cell> cell)
+{
+  //check if this cell is already known to us
+  auto ins = cell_indices.try_emplace(cell->get_hash());
+  if (!ins.second) {
+    return ins.first->second;
+  }
+
+  //recur into children and convert them into cell_metadata offsets
+  //also computes max_merkle_depth
+  size_t max_merkle_depth = 0;
+  vm::CellSlice cs{vm::NoVm{}, cell};
+  std::vector<size_t> children;
+  while (cs.size_refs()) {
+    TRY_RESULT(child, resolve(cs.fetch_ref()));
+    children.push_back(child);
+    max_merkle_depth = std::max(max_merkle_depth, cell_metadata[child+2]);
+  }
+  if (cs.special_type() == CellTraits::SpecialType::MerkleProof || cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
+    max_merkle_depth++;
+  }
+
+  //construct a new cell structure in cell_metadata. the first 3 fields are (n_children, bit_size, merkle_depth)
+  size_t ans = cell_metadata.size();
+  cell_metadata.push_back(children.size());
+  cell_metadata.push_back(cs.size());
+  cell_metadata.push_back(max_merkle_depth);
+
+  //the rest of the members are children's cell_metadata offsets themselves
+  cell_metadata.insert(cell_metadata.end(), children.begin(), children.end());
+  return ans;
+}
+
+td::Result<bool> CellOptimizer::walk(Ref<vm::Cell> cell, size_t& total_cells, size_t& total_size, size_t& max_merkle_depth) {
+  //initialize the variables
+  total_cells = 0;
+  total_size = 0;
+  max_merkle_depth = 0;
+
+  //resolve the provided cell into a cell_metadata offset
+  TRY_RESULT(root, resolve(cell));
+
+  //ensure that visited is big enough to hold any valid offset
+  visited.resize(cell_metadata.size());
+
+  //the main dfs function. visits the provided cell and recursively all its dependencies
+  auto dfs = [&](auto dfs, size_t i) -> void {
+    //is it already visited in this epoch?
+    if (visited[i] == epoch) {
+      return;
+    }
+    visited[i] = epoch;
+
+    //it's not visited, so add ourselves to the statistics
+    total_cells++;
+    total_size += cell_metadata[i+1];
+
+    //recur into children, so that they also get marked
+    for (size_t j = 0; j < cell_metadata[i]; j++) {
+      dfs(dfs, cell_metadata[i+3+j]);
+    }
+  };
+  dfs(dfs, root);
+
+  //max_merkle_depth is already computed in resolve()
+  max_merkle_depth = cell_metadata[root+2];
+  return true;
+}
+
 td::Status CellSerializationInfo::init(td::Slice data, int ref_byte_size) {
   if (data.size() < 2) {
     return td::Status::Error(PSLICE() << "Not enough bytes " << td::tag("got", data.size())
@@ -1153,7 +1226,29 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
       return ins.first->second;
     }
   }
-  vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
+  vm::CellSlice cs{vm::NoVm{}, cell};
+  if (opt != nullptr && kill_dup) {
+    if ((skip_count_root & 1)) {
+      cells--;
+    }
+    if ((skip_count_root & 2)) {
+      bits -= cs.size();
+    }
+    size_t tc, ts, mmd;
+    TRY_RESULT(result, opt->walk(cell, tc, ts, mmd));
+    //check the sum explicitly to avoid a potential integer overflow when downcasting to uint32
+    if (cells + tc > limit_cells) {
+      return td::Status::Error("too many cells");
+    }
+    cells += tc;
+    if (bits + ts > limit_bits) {
+      return td::Status::Error("too many bits");
+    }
+    bits += ts;
+    CellInfo ci = {};
+    ci.max_merkle_depth = mmd;
+    return ci;
+  }
   return add_used_storage(std::move(cs), kill_dup, skip_count_root);
 }
 

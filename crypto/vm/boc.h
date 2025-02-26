@@ -34,6 +34,32 @@
 namespace vm {
 using td::Ref;
 
+//this is an custom implementation of CellStorageStat::add_used_storage() that caches the cell graph between resets
+//CellStorageStat calls into it if its "opt" field is nonzero
+class CellOptimizer {
+ public:
+  //two independent "seen states" are supported, and swap() exchanges them
+  //this is used to share the cached graph between otherwise unrelated CellStorageStat objects
+  void swap() {
+    std::swap(visited, visited2);
+  }
+  //resets the current seen state. equivalent to CellStorageStat::clear_seen()
+  void reset_visited();
+  //equivalent to CellStorageStat::add_used_storage() with kill_dup=true and skip_count_root=0
+  //it doesn't update CellStorageStat::seen, and returns collected values to the caller instead of updating CellStorageStat's variables
+  td::Result<bool> walk(Ref<vm::Cell> cell, size_t& total_cells, size_t& total_size, size_t& max_merkle_depth);
+
+ private:
+  std::vector<size_t> cell_metadata; //an array of variable-sized structures describing cells
+  std::map<vm::Cell::Hash, size_t> cell_indices; //maps cell hashes to offsets into cell_metadata
+  std::vector<uint64_t> visited, visited2; //<epoch if not seen, ==epoch if seen. visited2 is the inactive version
+  uint64_t epoch = 1; //all reset_visited() really does is increment this
+
+  //if cell is already known, return its cell_metadata index directly
+  //otherwise run a dfs and add the cell and all its dependencies to cell_metadata
+  td::Result<size_t> resolve(Ref<vm::Cell> cell);
+};
+
 class NewCellStorageStat {
  public:
   NewCellStorageStat() {
@@ -117,7 +143,8 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+  std::unordered_map<vm::Cell::Hash, CellInfo> seen;
+  CellOptimizer* opt = nullptr;
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)

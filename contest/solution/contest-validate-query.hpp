@@ -323,8 +323,8 @@ class ContestValidateQuery : public td::actor::Actor {
   std::unique_ptr<block::Account> make_account_from(td::ConstBitPtr addr, Ref<vm::CellSlice> account);
   std::unique_ptr<block::Account> unpack_account(td::ConstBitPtr addr);
   bool check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first,
-                             bool is_last);
-  bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr);
+                             bool is_last, vm::CellOptimizer* opt = nullptr);
+  bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr, vm::CellOptimizer* opt = nullptr);
   bool check_transactions();
   bool check_message_processing_order();
   bool check_new_state();

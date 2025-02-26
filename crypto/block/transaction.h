@@ -385,8 +385,8 @@ struct Transaction {
   std::vector<Ref<vm::Cell>> compute_vm_libraries(const ComputePhaseConfig& cfg);
   bool run_precompiled_contract(const ComputePhaseConfig& cfg, precompiled::PrecompiledSmartContract& precompiled);
   bool prepare_compute_phase(const ComputePhaseConfig& cfg);
-  bool prepare_action_phase(const ActionPhaseConfig& cfg);
-  td::Status check_state_limits(const SizeLimitsConfig& size_limits, bool update_storage_stat = true);
+  bool prepare_action_phase(const ActionPhaseConfig& cfg, vm::CellOptimizer* opt = nullptr);
+  td::Status check_state_limits(const SizeLimitsConfig& size_limits, bool update_storage_stat = true, vm::CellOptimizer* opt = nullptr);
   bool prepare_bounce_phase(const ActionPhaseConfig& cfg);
   bool compute_state();
   bool serialize();
@@ -408,7 +408,7 @@ struct Transaction {
   bool prepare_rand_seed(td::BitArray<256>& rand_seed, const ComputePhaseConfig& cfg) const;
   int try_action_set_code(vm::CellSlice& cs, ActionPhase& ap, const ActionPhaseConfig& cfg);
   int try_action_change_library(vm::CellSlice& cs, ActionPhase& ap, const ActionPhaseConfig& cfg);
-  int try_action_send_msg(const vm::CellSlice& cs, ActionPhase& ap, const ActionPhaseConfig& cfg, int redoing = 0);
+  int try_action_send_msg(const vm::CellSlice& cs, ActionPhase& ap, const ActionPhaseConfig& cfg, int redoing = 0, vm::CellOptimizer* opt = nullptr);
   int try_action_reserve_currency(vm::CellSlice& cs, ActionPhase& ap, const ActionPhaseConfig& cfg);
   bool check_replace_src_addr(Ref<vm::CellSlice>& src_addr) const;
   bool check_rewrite_dest_addr(Ref<vm::CellSlice>& dest_addr, const ActionPhaseConfig& cfg,

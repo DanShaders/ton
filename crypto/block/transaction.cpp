@@ -1776,7 +1776,7 @@ bool Transaction::prepare_compute_phase(const ComputePhaseConfig& cfg) {
  *
  * @returns True if the action phase was prepared successfully, false otherwise.
  */
-bool Transaction::prepare_action_phase(const ActionPhaseConfig& cfg) {
+bool Transaction::prepare_action_phase(const ActionPhaseConfig& cfg, vm::CellOptimizer* opt) {
   if (!compute_phase || !compute_phase->success) {
     return false;
   }
@@ -1800,7 +1800,7 @@ bool Transaction::prepare_action_phase(const ActionPhaseConfig& cfg) {
     if (account.is_special) {
       return true;
     }
-    auto S = check_state_limits(cfg.size_limits);
+    auto S = check_state_limits(cfg.size_limits, true, opt);
     if (S.is_error()) {
       // Rollback changes to state, fail action phase
       LOG(INFO) << "Account state size exceeded limits: " << S.move_as_error();
@@ -1897,11 +1897,11 @@ bool Transaction::prepare_action_phase(const ActionPhaseConfig& cfg) {
         err_code = try_action_set_code(cs, ap, cfg);
         break;
       case block::gen::OutAction::action_send_msg:
-        err_code = try_action_send_msg(cs, ap, cfg);
+        err_code = try_action_send_msg(cs, ap, cfg, 0, opt);
         if (err_code == -2) {
-          err_code = try_action_send_msg(cs, ap, cfg, 1);
+          err_code = try_action_send_msg(cs, ap, cfg, 1, opt);
           if (err_code == -2) {
-            err_code = try_action_send_msg(cs, ap, cfg, 2);
+            err_code = try_action_send_msg(cs, ap, cfg, 2, opt);
           }
         }
         break;
@@ -1936,7 +1936,6 @@ bool Transaction::prepare_action_phase(const ActionPhaseConfig& cfg) {
       return true;
     }
   }
-
   if (cfg.action_fine_enabled) {
     ap.total_action_fees += ap.action_fine;
   }
@@ -1948,7 +1947,6 @@ bool Transaction::prepare_action_phase(const ActionPhaseConfig& cfg) {
   if (!enforce_state_limits()) {
     return true;
   }
-
   ap.result_arg = 0;
   ap.result_code = 0;
   CHECK(ap.remaining_balance.grams->sgn() >= 0);
@@ -2309,7 +2307,7 @@ bool Transaction::check_rewrite_dest_addr(Ref<vm::CellSlice>& dest_addr, const A
  *          Returns -2 if the action should be attempted again.
  */
 int Transaction::try_action_send_msg(const vm::CellSlice& cs0, ActionPhase& ap, const ActionPhaseConfig& cfg,
-                                     int redoing) {
+                                     int redoing, vm::CellOptimizer* opt) {
   block::gen::OutAction::Record_action_send_msg act_rec;
   // mode:
   // +128 = attach all remaining balance
@@ -2468,7 +2466,12 @@ int Transaction::try_action_send_msg(const vm::CellSlice& cs0, ActionPhase& ap, 
     }
   }
   // compute size of message
+  if (opt) {
+    opt->swap();
+    opt->reset_visited();
+  }
   vm::CellStorageStat sstat(max_cells);  // for message size
+  sstat.opt = opt;
   // preliminary storage estimation of the resulting message
   unsigned max_merkle_depth = 0;
   auto add_used_storage = [&](const auto& x, unsigned skip_root_count) -> td::Status {
@@ -2482,6 +2485,9 @@ int Transaction::try_action_send_msg(const vm::CellSlice& cs0, ActionPhase& ap, 
   add_used_storage(msg.body, 3);  // message body (the root cell itself is not counted)
   if (!ext_msg) {
     add_used_storage(info.value->prefetch_ref(), 0);
+  }
+  if (opt) {
+    opt->swap();
   }
   auto collect_fine = [&] {
     if (cfg.action_fine_enabled && !account.is_special) {
@@ -2850,7 +2856,7 @@ static td::uint32 get_public_libraries_diff_count(const td::Ref<vm::Cell>& old_l
  *          - If the state limits are within the allowed range, returns OK.
  *          - If the state limits exceed the maximum allowed range, returns an error.
  */
-td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, bool update_storage_stat) {
+td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, bool update_storage_stat, vm::CellOptimizer* opt) {
   auto cell_equal = [](const td::Ref<vm::Cell>& a, const td::Ref<vm::Cell>& b) -> bool {
     if (a.is_null()) {
       return b.is_null();
@@ -2864,7 +2870,11 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
       cell_equal(account.library, new_library)) {
     return td::Status::OK();
   }
+  if (opt) {
+    opt->reset_visited();
+  }
   vm::CellStorageStat storage_stat;
+  storage_stat.opt = opt;
   storage_stat.limit_cells = size_limits.max_acc_state_cells;
   storage_stat.limit_bits = size_limits.max_acc_state_bits;
   {
@@ -2886,6 +2896,7 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
       LOG(INFO) << "Compute used storage took " << timer.elapsed() << "s";
     }
   }
+  //storage_stat.opt = nullptr;
 
   if (acc_status == Account::acc_active) {
     storage_stat.clear_limit();
