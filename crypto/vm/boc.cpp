@@ -989,6 +989,7 @@ td::Result<std::vector<Ref<Cell>>> std_boc_deserialize_multi(td::Slice data, int
   }
   int n = boc.get_root_count();
   std::vector<Ref<Cell>> roots;
+  roots.reserve(n);
   for (int i = 0; i < n; i++) {
     auto root = boc.get_root_cell(i);
     if (root.is_null()) {
@@ -1084,7 +1085,8 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::compute_used_storage(Ref<
 td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::CellSlice> cs_ref, bool kill_dup,
                                                                         unsigned skip_count_root) {
   if (cs_ref->is_unique()) {
-    return add_used_storage(std::move(cs_ref.unique_write()), kill_dup, skip_count_root);
+    vm::CellSlice tmp = cs_ref->clone();
+    return add_used_storage(std::move(tmp), kill_dup, skip_count_root);
   } else {
     return add_used_storage(*cs_ref, kill_dup, skip_count_root);
   }

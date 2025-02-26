@@ -4380,6 +4380,8 @@ bool ContestValidateQuery::check_in_queue() {
   }
 
   std::vector<block::OutputQueueMerger::Neighbor> neighbor_queues;
+  neighbor_queues.reserve(neighbors_.size());
+  
   for (const auto& descr : neighbors_) {
     td::BitArray<96> key;
     key.bits().store_int(descr.workchain(), 32);
