@@ -30,6 +30,7 @@
 #include "td/utils/Time.h"
 #include "td/utils/Timer.h"
 #include "td/utils/port/FileFd.h"
+#include "absl/container/flat_hash_map.h"
 
 namespace vm {
 using td::Ref;
@@ -117,7 +118,7 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+  absl::flat_hash_map<vm::Cell::Hash, CellInfo> seen;
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)

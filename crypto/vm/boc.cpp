@@ -1154,6 +1154,7 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
     }
   }
   vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
+  cs.disable_usage_tree();
   return add_used_storage(std::move(cs), kill_dup, skip_count_root);
 }
 

@@ -71,6 +71,9 @@ class CellSlice : public td::CntObject {
   bool load(Ref<DataCell> dc_ref);
   bool load(Ref<Cell> cell);
   bool load_ord(Ref<Cell> cell);
+  void disable_usage_tree() {
+    tree_node = CellUsageTree::NodePtr();
+  }
   unsigned size() const {
     return bits_en - bits_st;
   }
