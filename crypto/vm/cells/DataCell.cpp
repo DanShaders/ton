@@ -25,7 +25,8 @@
 #include "vm/cells/CellWithStorage.h"
 
 namespace vm {
-thread_local bool DataCell::use_arena = false;
+// thread_local bool DataCell::use_arena = false;
+thread_local bool DataCell::use_arena = true;
 
 namespace {
 template <class CellT>

@@ -35,6 +35,7 @@ class CpuWorker {
             MutableSpan<LocalQueue<SchedulerMessage::Raw *>> local_queues)
       : queue_(queue), waiter_(waiter), id_(id), local_queues_(local_queues) {
   }
+  [[clang::xray_never_instrument]]
   void run();
 
  private:

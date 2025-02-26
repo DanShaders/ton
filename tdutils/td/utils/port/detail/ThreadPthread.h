@@ -86,6 +86,7 @@ class ThreadPthread {
 
   int do_pthread_create(pthread_t *thread, const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg);
 
+  [[clang::xray_never_instrument]]
   static void *run_thread(void *ptr) {
     ThreadIdGuard thread_id_guard;
     auto func = unique_ptr<Destructor>(static_cast<Destructor *>(ptr));

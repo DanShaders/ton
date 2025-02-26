@@ -117,7 +117,7 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+  td::HashSet<vm::Cell::Hash> seen;
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)
@@ -145,6 +145,8 @@ struct CellStorageStat {
   td::Result<CellInfo> add_used_storage(const CellSlice& cs, bool kill_dup = true, unsigned skip_count_root = 0);
   td::Result<CellInfo> add_used_storage(CellSlice&& cs, bool kill_dup = true, unsigned skip_count_root = 0);
   td::Result<CellInfo> add_used_storage(Ref<vm::Cell> cell, bool kill_dup = true, unsigned skip_count_root = 0);
+
+  td::Result<td::uint32> my_add_used_storage(Ref<vm::Cell> cell);
 
   unsigned long long limit_cells = std::numeric_limits<unsigned long long>::max();
   unsigned long long limit_bits = std::numeric_limits<unsigned long long>::max();

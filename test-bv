@@ -1,0 +1,7 @@
+#/bin/sh
+
+set -x
+set -e
+
+(cd build-release && cmake --build . --target contest-grader --parallel)
+./build-release/contest/grader/contest-grader --threads 1 --tests _tests

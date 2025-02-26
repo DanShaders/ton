@@ -180,6 +180,7 @@ class CellSlice : public td::CntObject {
   bool fetch_uint256_to(unsigned bits, td::RefInt256& res) {
     return (res = fetch_int256(bits, false)).not_null();
   }
+  [[clang::xray_always_instrument]]
   Ref<Cell> prefetch_ref(unsigned offset = 0) const;
   Ref<Cell> fetch_ref();
   bool fetch_ref_to(Ref<Cell>& ref) {

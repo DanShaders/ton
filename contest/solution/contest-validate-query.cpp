@@ -12,6 +12,7 @@
 #include "block/output-queue-merger.h"
 #include "vm/cells/MerkleProof.h"
 #include "vm/cells/MerkleUpdate.h"
+#include "td/utils/common.h"
 #include "common/errorlog.h"
 #include "fabric.h"
 #include <ctime>
@@ -188,6 +189,10 @@ void ContestValidateQuery::finish_query() {
  *
  */
 
+#define IF_UNLIKELY(x) if (x) [[ unlikely ]]
+#define IF_LIKELY(x) if (x) [[ likely ]]
+// #define if(x) if (x)
+
 /**
  * Starts the validation process.
  *
@@ -292,7 +297,7 @@ void ContestValidateQuery::start_up() {
 bool ContestValidateQuery::unpack_block_candidate() {
   vm::BagOfCells boc1, boc2;
   // 1. deserialize block itself
-  auto res1 = boc1.deserialize(block_data);
+  auto res1 = boc1.deserialize(block_data, 1);
   if (res1.is_error()) {
     return reject_query("cannot deserialize block", res1.move_as_error());
   }
@@ -300,7 +305,12 @@ bool ContestValidateQuery::unpack_block_candidate() {
     return reject_query("block BoC must contain exactly one root");
   }
   block_root_ = boc1.get_root_cell();
-  CHECK(block_root_.not_null());
+  if (block_root_.is_null()) {
+    return reject_query("null root");
+  }
+  if (block_root_->get_level() != 0) {
+    return reject_query("non-zero level");
+  }
   // 3. initial block parse
   {
     auto guard = error_ctx_add_guard("parsing block header");
@@ -321,7 +331,9 @@ bool ContestValidateQuery::unpack_block_candidate() {
     return reject_query("cannot deserialize collated data", res2.move_as_error());
   }
   int n = boc2.get_root_count();
-  CHECK(n >= 0);
+  if (n < 0) {
+    return reject_query("CHECK(n >= 0) failed");
+  }
   for (int i = 0; i < n; i++) {
     collated_roots_.emplace_back(boc2.get_root_cell(i));
   }

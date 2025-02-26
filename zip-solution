@@ -1,0 +1,11 @@
+#!/bin/sh
+
+cd ..
+rm -f ton-validation-solution.zip
+zip -r ton-validation-solution.zip ton-validation-contest \
+    -x ton-validation-contest/build/\* \
+    ton-validation-contest/build-release/\* \
+    ton-validation-contest/.git/\* \
+    ton-validation-contest/_tests/\* \
+
+cp ton-validation-solution.zip /Users/andrey/VM/Ubuntu/Shared/

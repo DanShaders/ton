@@ -1,0 +1,8 @@
+#!/bin/sh
+
+cd submission
+git diff d8e29f HEAD -- ':!/\_tests/*' > solution.patch
+rm -rf submission.zip
+zip submission.zip README.md solution.patch
+
+cp submission.zip /Users/andrey/VM/Ubuntu/Shared/

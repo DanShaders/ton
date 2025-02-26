@@ -44,6 +44,7 @@ struct LabelParser {
   void validate() const;
   void validate_simple(int n) const;
   void validate_ext(int n) const;
+  [[clang::xray_always_instrument]]
   bool is_prefix_of(td::ConstBitPtr key, int len) const;
   bool has_prefix(td::ConstBitPtr key, int len) const;
   int common_prefix_len(td::ConstBitPtr key, int len) const;
@@ -55,6 +56,7 @@ struct LabelParser {
   td::ConstBitPtr bits_end() const {
     return bits() + l_bits;
   }
+  [[clang::xray_always_instrument]]
   void skip_label() {
     remainder.write().advance(s_bits);
   }
@@ -264,6 +266,11 @@ class DictionaryFixed : public DictionaryBase {
     return lookup_nearest_key(key_buffer.bits(), key_buffer.size(), fetch_next, allow_eq, invert_first);
   }
 
+  bool my_check_for_each(const foreach_func_t& foreach_func);
+  
+  bool my_dict_check_for_each(Ref<Cell> dict, td::BitPtr key_buffer, int n, int total_key_len,
+                              const foreach_func_t& foreach_func) const;
+
  protected:
   virtual int label_mode() const {
     return dict::LabelParser::chk_all;
@@ -285,6 +292,7 @@ class DictionaryFixed : public DictionaryBase {
   bool check_fork_raw(Ref<CellSlice> cs_ref, int n) const;
   friend class DictIterator;
 
+  
  private:
   std::pair<Ref<CellSlice>, Ref<Cell>> dict_lookup_delete(Ref<Cell> dict, td::ConstBitPtr key, int n) const;
   Ref<CellSlice> dict_lookup_minmax(Ref<Cell> dict, td::BitPtr key_buffer, int n, int mode) const;

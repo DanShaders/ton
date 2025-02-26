@@ -72,6 +72,7 @@ struct CellHash {
  private:
   std::array<td::uint8, CellTraits::hash_bytes> hash_;
 };
+
 }  // namespace vm
 
 inline size_t cell_hash_slice_hash(td::Slice hash) {

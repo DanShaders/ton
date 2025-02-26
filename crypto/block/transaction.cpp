@@ -2868,10 +2868,15 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
   storage_stat.limit_cells = size_limits.max_acc_state_cells;
   storage_stat.limit_bits = size_limits.max_acc_state_bits;
   {
-    TD_PERF_COUNTER(transaction_storage_stat_a);
-    td::Timer timer;
+    // TD_PERF_COUNTER(transaction_storage_stat_a);
+    // td::Timer timer;
     auto add_used_storage = [&](const td::Ref<vm::Cell>& cell) -> td::Status {
       if (cell.not_null()) {
+        // CHECK(cell->id >= 0);
+        // TRY_RESULT(res, storage_stat.my_add_used_storage(cell));
+        // if (res > max_allowed_merkle_depth) {
+        //   return td::Status::Error("too big merkle depth");
+        // }
         TRY_RESULT(res, storage_stat.add_used_storage(cell));
         if (res.max_merkle_depth > max_allowed_merkle_depth) {
           return td::Status::Error("too big merkle depth");
@@ -2882,9 +2887,9 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
     TRY_STATUS(add_used_storage(new_code));
     TRY_STATUS(add_used_storage(new_data));
     TRY_STATUS(add_used_storage(new_library));
-    if (timer.elapsed() > 0.1) {
-      LOG(INFO) << "Compute used storage took " << timer.elapsed() << "s";
-    }
+    // if (timer.elapsed() > 0.1) {
+    //   LOG(INFO) << "Compute used storage took " << timer.elapsed() << "s";
+    // }
   }
 
   if (acc_status == Account::acc_active) {

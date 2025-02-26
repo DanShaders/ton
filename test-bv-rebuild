@@ -1,0 +1,19 @@
+#/bin/sh
+
+read -p "Rebuilding whole project - are you sure? (yes/no): " response
+
+case "$response" in
+    y|yes|YES|Yes)
+        ;;
+    *)
+        echo "Exiting..."
+        exit 1
+        ;;
+esac
+
+set -x
+set -e
+
+rm -rf build-release && mkdir build-release
+(cd build-release && cmake ../ -DCMAKE_BUILD_TYPE=Release)
+./test-bv

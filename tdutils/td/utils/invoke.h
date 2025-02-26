@@ -138,6 +138,7 @@ auto invoke_tuple_impl(std::tuple<Args...> &&tuple, IntSeq<S...>) {
 }
 
 template <class ActorT, class F, class... Args, std::size_t... S>
+[[clang::xray_never_instrument]]
 auto mem_call_tuple_impl(ActorT *actor, std::tuple<F, Args...> &&tuple, IntSeq<0, S...>) {
   return (actor->*std::get<0>(tuple))(std::forward<Args>(std::get<S>(tuple))...);
 }

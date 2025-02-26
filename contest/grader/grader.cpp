@@ -26,6 +26,7 @@ using namespace ton;
 
 static constexpr td::uint64 CPU_USAGE_PER_SEC = 1000000;
 
+[[clang::xray_never_instrument]]
 static td::uint64 get_cpu_usage() {
   rusage usage;
   CHECK(getrusage(RUSAGE_SELF, &usage) == 0);
@@ -37,12 +38,14 @@ class ContestGrader : public td::actor::Actor {
   explicit ContestGrader(std::string tests_dir) : tests_dir_(tests_dir) {
   }
 
+  [[clang::xray_never_instrument]]
   void start_up() override {
     vm::init_vm().ensure();
     scan_tests_dir();
     run_next_test();
   }
 
+  [[clang::xray_never_instrument]]
   void scan_tests_dir() {
     auto walk_status = td::WalkPath::run(tests_dir_, [&](td::CSlice name, td::WalkPath::Type type) {
       if (type == td::WalkPath::Type::NotDir && td::ends_with(name, ".bin")) {
@@ -73,6 +76,7 @@ class ContestGrader : public td::actor::Actor {
     printf("%s\n", std::string(separator_length_, '=').c_str());
   }
 
+  [[clang::xray_never_instrument]]
   void run_next_test() {
     if (test_idx_ == test_files_.size()) {
       finish();
@@ -135,11 +139,13 @@ class ContestGrader : public td::actor::Actor {
         });
   }
 
+  [[clang::xray_never_instrument]]
   td::Result<tl_object_ptr<ton_api::contest_test>> read_test_file() {
     TRY_RESULT(data, td::read_file(tests_dir_ + "/" + test_files_[test_idx_]));
     return ton::fetch_tl_object<ton_api::contest_test>(data, true);
   }
 
+  [[clang::xray_never_instrument]]
   void got_solution_result(td::Result<td::BufferSlice> res, bool valid, td::Ref<vm::Cell> original_merkle_update,
                            double elapsed, double cpu_time) {
     bool got_valid = res.is_ok();
@@ -183,6 +189,7 @@ class ContestGrader : public td::actor::Actor {
     run_next_test();
   }
 
+  [[clang::xray_never_instrument]]
   td::Status check_merkle_update(td::Slice data, td::Ref<vm::Cell> original_merkle_update) {
     TRY_RESULT(new_merkle_update, vm::std_boc_deserialize(data));
     TRY_STATUS(vm::MerkleUpdate::validate(new_merkle_update));
@@ -195,6 +202,7 @@ class ContestGrader : public td::actor::Actor {
     return td::Status::OK();
   }
 
+  [[clang::xray_never_instrument]]
   void finish() {
     printf("%s\n", std::string(separator_length_, '=').c_str());
     printf("Passed %lu/%lu tests\n", cnt_ok_, test_files_.size());
@@ -223,6 +231,7 @@ class ContestGrader : public td::actor::Actor {
   double total_cpu_time_ = 0.0;
 };
 
+[[clang::xray_never_instrument]]
 int main(int argc, char* argv[]) {
   SET_VERBOSITY_LEVEL(verbosity_ERROR);
 

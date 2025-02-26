@@ -2052,6 +2052,47 @@ bool DictionaryFixed::check_for_each(const foreach_func_t& foreach_func, bool in
                              shuffle);
 }
 
+bool DictionaryFixed::my_dict_check_for_each(
+  Ref<Cell> dict, td::BitPtr key_buffer, int n, int total_key_len,
+  const DictionaryFixed::foreach_func_t& foreach_func
+) const {
+  if (dict.is_null()) {
+    return true;
+  }
+
+  LabelParser label{std::move(dict), n, 1};
+  int l = label.l_bits;
+  label.extract_label_to(key_buffer);
+  if (l == n) {
+    // leaf node, value left in label.remainder
+    return foreach_func(std::move(label.remainder), key_buffer + n - total_key_len, total_key_len);
+  }
+  assert(l >= 0 && l < n);
+  // a fork with two children, c1 and c2
+  auto c1 = label.remainder->prefetch_ref(0);
+  auto c2 = label.remainder->prefetch_ref(1);
+  label.remainder.clear();
+  key_buffer += l + 1;
+
+  key_buffer[-1] = 0;
+  // recursive check_foreach applied to both children
+  if (!my_dict_check_for_each(std::move(c1), key_buffer, n - l - 1, total_key_len, foreach_func)) {
+    return false;
+  }
+  key_buffer[-1] = 1;
+  return my_dict_check_for_each(std::move(c2), key_buffer, n - l - 1, total_key_len, foreach_func);
+}
+
+bool DictionaryFixed::my_check_for_each(const foreach_func_t& foreach_func) {
+  force_validate();
+  if (is_empty()) {
+    return true;
+  }
+  int key_len = get_key_bits();
+  unsigned char key_buffer[max_key_bytes];
+  return my_dict_check_for_each(get_root_cell(), td::BitPtr{key_buffer}, key_len, key_len, foreach_func);
+}
+
 static inline bool set_bit(td::BitPtr ptr, bool value = true) {
   *ptr = value;
   return true;

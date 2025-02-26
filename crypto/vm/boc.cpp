@@ -1148,14 +1148,114 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
     return td::Status::Error("cell is null");
   }
   if (kill_dup) {
-    auto ins = seen.emplace(cell->get_hash(), CellInfo{});
+    auto ins = seen.emplace(cell->get_hash());
     if (!ins.second) {
-      return ins.first->second;
+      return CellInfo{};
     }
   }
   vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
   return add_used_storage(std::move(cs), kill_dup, skip_count_root);
 }
+
+#define MY_ADD_USED_STORAGE_IMPL(in, out, rec_res, rec_call) { \
+  if (in.is_null()) { \
+    return td::Status::Error("cell is null"); \
+  } \
+  auto ins = seen.emplace(in->get_hash()); \
+  if (!ins.second) { \
+    out = 0; \
+  } else { \
+    vm::CellSlice cs{vm::NoVm{}, std::move(in)}; \
+    ++cells; \
+    if (cells > limit_cells) { \
+      return td::Status::Error("too many cells"); \
+    } \
+    bits += cs.size(); \
+    if (bits > limit_bits) { \
+      return td::Status::Error("too many bits"); \
+    } \
+    td::uint32 max_merkle_depth = 0; \
+    while (cs.size_refs()) { \
+      td::uint32 rec_res = 0; \
+      rec_call; \
+      if (rec_res > max_merkle_depth) { \
+        max_merkle_depth = rec_res; \
+      } \
+    } \
+    auto t = cs.special_type(); \
+    if (t == CellTraits::SpecialType::MerkleProof || t == CellTraits::SpecialType::MerkleUpdate) { \
+      ++max_merkle_depth; \
+    } \
+    out = max_merkle_depth; \
+  } \
+}
+
+td::Result<td::uint32> CellStorageStat::my_add_used_storage(Ref<vm::Cell> in_0) {
+  int out_0 = 0;
+
+  // no unroll
+  // MY_ADD_USED_STORAGE_IMPL(in_0, out_0, out_1, {
+  //   TRY_RESULT(child, my_add_used_storage(cs.fetch_ref()));
+  //   out_1 = child;
+  // })
+
+  // 1 unroll
+  // MY_ADD_USED_STORAGE_IMPL(in_0, out_0, out_1, {
+  //   auto in_1 = cs.fetch_ref();
+  //   MY_ADD_USED_STORAGE_IMPL(in_1, out_1, out_2, {
+  //     TRY_RESULT(child, my_add_used_storage(cs.fetch_ref()));
+  //     out_2 = child;
+  //   })
+  // })
+
+  // 2 unrolls
+  MY_ADD_USED_STORAGE_IMPL(in_0, out_0, out_1, {
+    auto in_1 = cs.fetch_ref();
+    MY_ADD_USED_STORAGE_IMPL(in_1, out_1, out_2, {
+      auto in_2 = cs.fetch_ref();
+      MY_ADD_USED_STORAGE_IMPL(in_2, out_2, out_3, {
+        TRY_RESULT(child, my_add_used_storage(cs.fetch_ref()));
+        out_3 = child;
+      })
+    })
+  })
+
+  // 3 unrolls
+  // MY_ADD_USED_STORAGE_IMPL(in_0, out_0, out_1, {
+  //   auto in_1 = cs.fetch_ref();
+  //   MY_ADD_USED_STORAGE_IMPL(in_1, out_1, out_2, {
+  //     auto in_2 = cs.fetch_ref();
+  //     MY_ADD_USED_STORAGE_IMPL(in_2, out_2, out_3, {
+  //       auto in_3 = cs.fetch_ref();
+  //       MY_ADD_USED_STORAGE_IMPL(in_3, out_3, out_4, {
+  //         TRY_RESULT(child, my_add_used_storage(cs.fetch_ref()));
+  //         out_4 = child;
+  //       })
+  //     })
+  //   })
+  // })
+
+  // 4 unrolls
+  // MY_ADD_USED_STORAGE_IMPL(in_0, out_0, out_1, {
+  //   auto in_1 = cs.fetch_ref();
+  //   MY_ADD_USED_STORAGE_IMPL(in_1, out_1, out_2, {
+  //     auto in_2 = cs.fetch_ref();
+  //     MY_ADD_USED_STORAGE_IMPL(in_2, out_2, out_3, {
+  //       auto in_3 = cs.fetch_ref();
+  //       MY_ADD_USED_STORAGE_IMPL(in_3, out_3, out_4, {
+  //         auto in_4 = cs.fetch_ref();
+  //         MY_ADD_USED_STORAGE_IMPL(in_4, out_4, out_5, {
+  //           TRY_RESULT(child, my_add_used_storage(cs.fetch_ref()));
+  //           out_5 = child;
+  //         })
+  //       })
+  //     })
+  //   })
+  // })
+
+  return out_0;
+}
+
 
 void NewCellStorageStat::add_cell(Ref<Cell> cell) {
   dfs(std::move(cell), true, false);

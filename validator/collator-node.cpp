@@ -142,7 +142,8 @@ void CollatorNode::new_masterchain_block_notification(td::Ref<MasterchainState> 
     }
   }
   for (auto it = validator_groups_.begin(); it != validator_groups_.end();) {
-    if (new_shards.contains(it->first)) {
+    // if (new_shards.contains(it->first)) {
+    if (new_shards.count(it->first)) {
       ++it;
     } else {
       it->second.cleanup();
@@ -360,7 +361,8 @@ void CollatorNode::receive_query(adnl::AdnlNodeIdShort src, td::BufferSlice data
     promise.set_error(td::Status::Error("not authorized"));
     return;
   }
-  if (!validator_adnl_ids_.contains(src)) {
+  // if (!validator_adnl_ids_.contains(src)) {
+  if (!validator_adnl_ids_.count(src)) {
     promise.set_error(td::Status::Error("src is not a validator"));
     return;
   }
