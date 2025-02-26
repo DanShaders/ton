@@ -361,6 +361,14 @@ class BagOfCells {
                                                 int* refs_num_ptr = nullptr);
 
  private:
+  struct RefDataCell {
+    CellSerializationInfo cell_info;
+    td::Ref<vm::DataCell> data_cell;
+    td::Slice cell_slice;
+    std::vector<int> ref_idxs;
+    td::Status status;
+    int index = -1;
+  };
   int rv_idx;
   td::Result<int> import_cell(td::Ref<vm::Cell> cell, int depth);
   void cells_clear() {
@@ -377,7 +385,10 @@ class BagOfCells {
   unsigned long long get_idx_entry(int index);
   bool get_cache_entry(int index);
   td::Result<td::Slice> get_cell_slice(int index, td::Slice data);
-  td::Result<td::Ref<vm::DataCell>> deserialize_cell(int index, td::Slice data, td::Span<td::Ref<DataCell>> cells,
+  td::Result<td::Ref<vm::DataCell>> deserialize_cell(int index, const td::Slice& data, const td::Span<td::Ref<DataCell>>& cells,
+                                                     std::vector<td::uint8>* cell_should_cache);
+  td::Status prepare_deserialize_cell(int idx, const td::Slice& cells_slice, 
+                                                    std::vector<RefDataCell>& cells_span,
                                                      std::vector<td::uint8>* cell_should_cache);
 };
 

@@ -29,6 +29,9 @@
 #include "td/utils/misc.h"
 #include "td/utils/Slice-decl.h"
 
+#include <thread>
+#include <future>
+
 namespace vm {
 using td::Ref;
 
@@ -764,8 +767,8 @@ td::Result<td::Slice> BagOfCells::get_cell_slice(int idx, td::Slice data) {
   return data.substr(offs, td::narrow_cast<size_t>(offs_end - offs));
 }
 
-td::Result<td::Ref<vm::DataCell>> BagOfCells::deserialize_cell(int idx, td::Slice cells_slice,
-                                                               td::Span<td::Ref<DataCell>> cells_span,
+td::Result<td::Ref<vm::DataCell>> BagOfCells::deserialize_cell(int idx, const td::Slice& cells_slice,
+                                                               const td::Span<td::Ref<DataCell>>& cells_span,
                                                                std::vector<td::uint8>* cell_should_cache) {
   TRY_RESULT(cell_slice, get_cell_slice(idx, cells_slice));
   std::array<td::Ref<Cell>, 4> refs_buf;
@@ -796,8 +799,41 @@ td::Result<td::Ref<vm::DataCell>> BagOfCells::deserialize_cell(int idx, td::Slic
       }
     }
   }
-
   return cell_info.create_data_cell(cell_slice, refs);
+}
+
+td::Status BagOfCells::prepare_deserialize_cell(int idx, const td::Slice& cells_slice, 
+                                                    td::vector<RefDataCell>& cells_span,
+                                                     std::vector<td::uint8>* cell_should_cache) {
+  TRY_RESULT(cell_slice, get_cell_slice(idx, cells_slice));
+  CellSerializationInfo cell_info;
+  TRY_STATUS(cell_info.init(cell_slice, info.ref_byte_size));
+  if (cell_info.end_offset != cell_slice.size()) {
+    return td::Status::Error("unused space in cell serialization");
+  }
+  std::vector<int> ref_idxs;
+  ref_idxs.reserve(4);
+  for (int k = 0; k < cell_info.refs_cnt; k++) {
+    int ref_idx = (int)info.read_ref(cell_slice.ubegin() + cell_info.refs_offset + k * info.ref_byte_size);
+    if (ref_idx <= idx) {
+      return td::Status::Error(PSLICE() << "bag-of-cells error: reference #" << k << " of cell #" << idx
+                                        << " is to cell #" << ref_idx << " with smaller index");
+    }
+    if (ref_idx >= cell_count) {
+      return td::Status::Error(PSLICE() << "bag-of-cells error: reference #" << k << " of cell #" << idx
+                                        << " is to non-existent cell #" << ref_idx << ", only " << cell_count
+                                        << " cells are defined");
+    }
+    ref_idxs.emplace_back(cell_count - ref_idx - 1);
+    if (cell_should_cache) {
+      auto& cnt = (*cell_should_cache)[ref_idx];
+      if (cnt < 2) {
+        cnt++;
+      }
+    }
+  }
+  cells_span.emplace_back(cell_info, td::Ref<vm::DataCell>(), cell_slice, ref_idxs, td::Status::OK(), idx);
+  return td::Status::OK();
 }
 
 td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roots) {
@@ -830,7 +866,6 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
                                         << ", found " << td::format::as_hex(crc_stored));
     }
   }
-
   cell_count = info.cell_count;
   std::vector<td::uint8> cell_should_cache;
   if (info.has_cache_bits) {
@@ -884,17 +919,101 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
   auto cells_slice = data.substr(info.data_offset, info.data_size);
   std::vector<Ref<DataCell>> cell_list;
   cell_list.reserve(cell_count);
-  std::array<td::Ref<Cell>, 4> refs_buf;
-  for (int i = 0; i < cell_count; i++) {
-    // reconstruct cell with index cell_count - 1 - i
-    int idx = cell_count - 1 - i;
-    auto r_cell = deserialize_cell(idx, cells_slice, cell_list, info.has_cache_bits ? &cell_should_cache : nullptr);
-    if (r_cell.is_error()) {
-      return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << idx << " "
-                                        << r_cell.error());
+
+  if (cell_count > 64) {
+    std::vector<RefDataCell> cell_list_for_thread;
+    cell_list_for_thread.reserve(cell_count);
+
+    auto thread_deserialize_cell = [this, &cell_list_for_thread](int i, int count, bool* is_ok, std::pair<td::Status, int>* status) mutable {
+      *status = std::make_pair(td::Status::OK(), 0);
+      if (*is_ok)
+        return;
+      *is_ok = true;
+      for (int j = i; j < count; j++) {
+        auto& cl = cell_list_for_thread[j];
+        if (!cl.data_cell.is_null())
+          continue;
+        bool ref_is_null = false;
+        for (auto& ref_idx : cl.ref_idxs) {
+          if (cell_list_for_thread[ref_idx].data_cell.is_null()) {
+             ref_is_null = true;
+             break;
+          }
+        }
+        if (ref_is_null) {
+          *is_ok = false;
+          continue;
+        }
+        std::array<td::Ref<Cell>, 4> refs_buf;
+        auto refs = td::MutableSpan<td::Ref<Cell>>(refs_buf).substr(0, cl.cell_info.refs_cnt);
+        for (int k = 0; k < static_cast<int>(cl.ref_idxs.size()); k++) {
+          refs[k] = cell_list_for_thread[cl.ref_idxs[k]].data_cell;
+        }
+        auto r_cell = cl.cell_info.create_data_cell(cl.cell_slice, refs);
+        if (r_cell.is_error()) {
+          *status = std::make_pair(r_cell.move_as_error(), cl.index);
+          return;
+        }
+        cl.data_cell = r_cell.move_as_ok();
+      }
+    };
+
+    // preparation data for cell deserialization
+    std::vector<td::uint8>* _cell_should_cache = info.has_cache_bits ? &cell_should_cache : nullptr;
+    for (int i = 0; i < cell_count; i++) {
+      // reconstruct cell with index cell_count - 1 - i
+      int idx = cell_count - i - 1;
+      auto r_cell = prepare_deserialize_cell(idx, cells_slice, cell_list_for_thread, _cell_should_cache);
+      if (r_cell.is_error()) {
+        return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << i << " "
+                                          << r_cell.error());
+      }
     }
-    cell_list.push_back(r_cell.move_as_ok());
-    DCHECK(cell_list.back().not_null());
+
+    const int count_threads = 4;
+    std::array<std::thread, count_threads> threads;
+    std::array<std::pair<td::Status, int>, count_threads> status;
+    int cnt = (cell_count / count_threads) + 1;
+    bool _is_ok = false;
+    std::array<bool, count_threads> is_ok_by_thread = {0};
+    // run threads to deserialize cells
+    while (!_is_ok) {
+      int count = cnt;
+      for (int i = 0, j = 0; i < count_threads; ++i, j+=cnt) {
+        threads[i] = std::thread(thread_deserialize_cell, j, count, &is_ok_by_thread[i], &status[i]);
+        count += cnt;
+        if (count > cell_count)
+          count = cell_count;
+      }
+      _is_ok = true;
+      for (int i = 0; i < count_threads; ++i) {
+        threads[i].join();
+        _is_ok &= is_ok_by_thread[i];
+        if (status[i].first.is_error())
+          return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << status[i].second << " "
+                                             << status[i].first);
+      }
+    }
+    // fill and check cell_list
+    for (auto& r_cell : cell_list_for_thread) {
+      cell_list.emplace_back(r_cell.data_cell);
+      DCHECK(cell_list.back().not_null());
+    }
+
+  }
+  else {
+    for (int i = 0; i < cell_count; i++) {
+      // reconstruct cell with index cell_count - 1 - i
+      int idx = cell_count - 1 - i;
+      auto r_cell = deserialize_cell(idx, cells_slice, cell_list, info.has_cache_bits ? &cell_should_cache : nullptr);
+      if (r_cell.is_error()) {
+        return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << idx << " "
+                                          << r_cell.error());
+      }
+      cell_list.push_back(r_cell.move_as_ok());
+      DCHECK(cell_list.back().not_null());
+    }
+
   }
   if (info.has_cache_bits) {
     for (int idx = 0; idx < cell_count; idx++) {
@@ -920,7 +1039,7 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
 unsigned long long BagOfCells::get_idx_entry(int index) {
   auto raw = get_idx_entry_raw(index);
   if (info.has_cache_bits) {
-    raw /= 2;
+    raw >>= 1;
   }
   return raw;
 }

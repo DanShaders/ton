@@ -322,8 +322,10 @@ bool ContestValidateQuery::unpack_block_candidate() {
   }
   int n = boc2.get_root_count();
   CHECK(n >= 0);
+  auto size = collated_roots_.size();
+  collated_roots_.resize(size + n);
   for (int i = 0; i < n; i++) {
-    collated_roots_.emplace_back(boc2.get_root_cell(i));
+    collated_roots_[size + i] = boc2.get_root_cell(i);
   }
   // 9. extract/classify collated data
   return extract_collated_data();
@@ -4379,12 +4381,13 @@ bool ContestValidateQuery::check_in_queue() {
     return true;
   }
 
-  std::vector<block::OutputQueueMerger::Neighbor> neighbor_queues;
+  std::vector<block::OutputQueueMerger::Neighbor> neighbor_queues(neighbors_.size());
+  int i = 0;
   for (const auto& descr : neighbors_) {
     td::BitArray<96> key;
     key.bits().store_int(descr.workchain(), 32);
     (key.bits() + 32).store_uint(descr.shard().shard, 64);
-    neighbor_queues.emplace_back(descr.top_block_id(), descr.outmsg_root, descr.disabled_);
+    neighbor_queues[i++] = { descr.top_block_id(), descr.outmsg_root, descr.disabled_ };
   }
   block::OutputQueueMerger nb_out_msgs(shard_, std::move(neighbor_queues));
   while (!nb_out_msgs.is_eof()) {
