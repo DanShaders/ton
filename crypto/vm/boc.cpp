@@ -881,21 +881,128 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
                                         << cur << " is different from total data size " << info.data_size);
     }
   }
+
   auto cells_slice = data.substr(info.data_offset, info.data_size);
+
   std::vector<Ref<DataCell>> cell_list;
-  cell_list.reserve(cell_count);
-  std::array<td::Ref<Cell>, 4> refs_buf;
-  for (int i = 0; i < cell_count; i++) {
-    // reconstruct cell with index cell_count - 1 - i
-    int idx = cell_count - 1 - i;
-    auto r_cell = deserialize_cell(idx, cells_slice, cell_list, info.has_cache_bits ? &cell_should_cache : nullptr);
-    if (r_cell.is_error()) {
-      return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << idx << " "
-                                        << r_cell.error());
+
+  bool use_parallel = cell_count > 5000;
+  constexpr size_t n_threads = 4;
+  if (use_parallel) {
+    cell_list.resize(cell_count);
+
+    std::unordered_multimap<int, int> parents;
+    std::vector<int> degrees(cell_count);
+    parents.reserve(cell_count);
+    std::vector<int> work_queue;
+    work_queue.reserve(cell_count);
+    for (int i = 0; i < cell_count; ++i) {
+      TRY_RESULT(cell_slice, get_cell_slice(i, cells_slice));
+      std::array<td::Ref<Cell>, 4> refs_buf;
+
+      CellSerializationInfo cell_info;
+      TRY_STATUS(cell_info.init(cell_slice, info.ref_byte_size));
+      if (cell_info.end_offset != cell_slice.size()) {
+        return td::Status::Error("unused space in cell serialization");
+      }
+
+      for (int k = 0; k < cell_info.refs_cnt; k++) {
+        int ref_idx = (int)info.read_ref(cell_slice.ubegin() + cell_info.refs_offset + k * info.ref_byte_size);
+        if (ref_idx <= i) {
+          return td::Status::Error(PSLICE() << "bag-of-cells error: reference #" << k << " of cell #" << i
+                                            << " is to cell #" << ref_idx << " with smaller index");
+        }
+        if (ref_idx >= cell_count) {
+          return td::Status::Error(PSLICE() << "bag-of-cells error: reference #" << k << " of cell #" << i
+                                            << " is to non-existent cell #" << ref_idx << ", only " << cell_count
+                                            << " cells are defined");
+        }
+        if (info.has_cache_bits) {
+          auto& cnt = cell_should_cache[ref_idx];
+          if (cnt < 2) {
+            cnt++;
+          }
+        }
+
+        parents.emplace(ref_idx, i);
+      }
+      degrees[i] = cell_info.refs_cnt;
+      if (cell_info.refs_cnt == 0) {
+        work_queue.push_back(i);
+      }
     }
-    cell_list.push_back(r_cell.move_as_ok());
-    DCHECK(cell_list.back().not_null());
+
+    std::mutex mutex;
+    const size_t max_chunk_size = 1000;
+    std::atomic<int> processed = 0;
+    size_t work_queue_start = 0;
+    auto do_work = [&] {
+      int max_parents = 0;
+      while (processed < cell_count) {
+        size_t start_index;
+        size_t chunk_size;
+        {
+          std::lock_guard lock{mutex};
+          chunk_size = std::min(max_chunk_size, work_queue.size() - work_queue_start);
+          start_index = work_queue_start;
+          work_queue_start += chunk_size;
+        }
+
+        for (size_t i = start_index; i < start_index + chunk_size; ++i) {
+          int idx = work_queue[i];
+          auto r_cell = deserialize_cell(idx, cells_slice, cell_list, nullptr);
+          if (r_cell.is_error()) {
+            return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << idx << " "
+                                              << r_cell.error());
+          }
+
+          auto reverse_idx = cell_count - idx - 1;
+          cell_list[reverse_idx] = r_cell.move_as_ok();
+          DCHECK(cell_list[reverse_idx].not_null());
+        }
+
+        {
+          std::lock_guard lock{mutex};
+
+          for (size_t i = start_index; i < start_index + chunk_size; ++i) {
+            int idx = work_queue[i];
+            const auto& [beg, end] = parents.equal_range(idx);
+            max_parents = std::max<int>(max_parents, parents.count(idx));
+            for (auto it = beg; it != end; ++it) {
+              if (--degrees[it->second] == 0) {
+                work_queue.push_back(it->second);
+              }
+            }
+          }
+          processed += chunk_size;
+        }
+      }
+
+      return td::Status::OK();
+    };
+
+    {
+      std::array<std::jthread, n_threads> threads;
+      for (auto& thread : threads) {
+        thread = std::jthread{do_work};
+      }
+    }
+  } else {
+    cell_list.reserve(cell_count);
+
+    for (int i = 0; i < cell_count; i++) {
+      // reconstruct cell with index cell_count - 1 - i
+      int idx = cell_count - 1 - i;
+      auto r_cell = deserialize_cell(idx, cells_slice, cell_list, info.has_cache_bits ? &cell_should_cache : nullptr);
+      if (r_cell.is_error()) {
+        return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << idx << " "
+                                          << r_cell.error());
+      }
+      cell_list.push_back(r_cell.move_as_ok());
+      DCHECK(cell_list.back().not_null());
+    }
   }
+
   if (info.has_cache_bits) {
     for (int idx = 0; idx < cell_count; idx++) {
       auto should_cache = cell_should_cache[idx] > 1;
@@ -951,9 +1058,9 @@ unsigned long long BagOfCells::get_idx_entry_raw(int index) {
 }
 
 /*
- * 
+ *
  *  Simple BoC serialization/deserialization functions
- * 
+ *
  */
 
 td::Result<Ref<Cell>> std_boc_deserialize(td::Slice data, bool can_be_empty, bool allow_nonzero_level) {
@@ -1044,9 +1151,9 @@ td::Status std_boc_serialize_to_file(Ref<Cell> root, td::FileFd& fd, int mode,
 }
 
 /*
- * 
+ *
  *  Cell storage statistics
- * 
+ *
  */
 
 td::Result<CellStorageStat::CellInfo> CellStorageStat::compute_used_storage(Ref<vm::CellSlice> cs_ref, bool kill_dup,

@@ -322,6 +322,7 @@ bool ContestValidateQuery::unpack_block_candidate() {
   }
   int n = boc2.get_root_count();
   CHECK(n >= 0);
+  collated_roots_.reserve(n);
   for (int i = 0; i < n; i++) {
     collated_roots_.emplace_back(boc2.get_root_cell(i));
   }
