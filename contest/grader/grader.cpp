@@ -245,7 +245,10 @@ int main(int argc, char* argv[]) {
     std::cout << sb.as_cslice().c_str();
     std::exit(2);
   });
-  std::string tests_dir = "tests/";
+  std::string tests_dir = "/Users/abionics/Downloads/ton/tests/";
+  // std::string tests_dir = "/Users/abionics/Downloads/ton/tests/../../test-202/";
+  // std::string tests_dir = "/Users/abionics/Downloads/ton/tests/../../test-076/";
+  // std::string tests_dir = "/Users/abionics/Downloads/ton/tests/../../test-xxx/";
   p.add_option('d', "tests", "directory with tests (default: tests/)",
                [&](td::Slice arg) { tests_dir = arg.str() + "/"; });
   td::uint32 threads = 8;

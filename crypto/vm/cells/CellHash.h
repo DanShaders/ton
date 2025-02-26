@@ -91,6 +91,16 @@ struct hash<vm::CellHash> {
 namespace vm {
 template <class H>
 H AbslHashValue(H h, const CellHash& cell_hash) {
-  return H::combine(std::move(h), std::hash<vm::CellHash>()(cell_hash));
+  // default implementation:
+  //   return H::combine(std::move(h), std::hash<vm::CellHash>()(cell_hash));
+  // lets dive deeper in it:
+  // 1) cell_hash_slice_hash(s.as_slice())
+  // 2) hash.substr(8, 8)
+  // 3) td::as<size_t>
+  // so just do this:
+
+  auto& data = cell_hash.as_array();
+  auto key = *reinterpret_cast<const uint64_t*>(data.data() + 8);
+  return H::combine(std::move(h), key);
 }
 }  // namespace vm

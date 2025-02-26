@@ -5278,8 +5278,9 @@ std::unique_ptr<block::Account> ValidateQuery::unpack_account(td::ConstBitPtr ad
  *
  * @returns True if the transaction is valid, false otherwise.
  */
-bool ValidateQuery::check_one_transaction(block::Account& account, ton::LogicalTime lt, Ref<vm::Cell> trans_root,
-                                          bool is_first, bool is_last) {
+bool ValidateQuery::check_one_transaction(
+  block::Account& account, td::uint16 tx_count, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first, bool is_last
+) {
   if (!check_timeout()) {
     return false;
   }
@@ -5722,7 +5723,7 @@ bool ValidateQuery::check_one_transaction(block::Account& account, ton::LogicalT
     return reject_query(PSTRING() << "cannot re-create bounce phase of  transaction " << lt << " for smart contract "
                                   << addr.to_hex());
   }
-  if (!trs->serialize()) {
+  if (!trs->serialize(tx_count)) {
     return reject_query(PSTRING() << "cannot re-create the serialization of  transaction " << lt
                                   << " for smart contract " << addr.to_hex());
   }
@@ -5837,16 +5838,20 @@ bool ValidateQuery::check_account_transactions(const StdSmcAddress& acc_addr, Re
   vm::AugmentedDictionary trans_dict{vm::DictNonEmpty(), std::move(acc_blk.transactions), 64,
                                      block::tlb::aug_AccountTransactions};
   td::BitArray<64> min_trans, max_trans;
+  td::uint16 tx_count = 0;
+  for (const auto& _: trans_dict) {
+    tx_count++;
+  }
   CHECK(trans_dict.get_minmax_key(min_trans).not_null() && trans_dict.get_minmax_key(max_trans, true).not_null());
   ton::LogicalTime min_trans_lt = min_trans.to_ulong(), max_trans_lt = max_trans.to_ulong();
-  if (!trans_dict.check_for_each_extra([this, &account, min_trans_lt, max_trans_lt](Ref<vm::CellSlice> value,
-                                                                                    Ref<vm::CellSlice> extra,
-                                                                                    td::ConstBitPtr key, int key_len) {
-        CHECK(key_len == 64);
-        ton::LogicalTime lt = key.get_uint(64);
-        extra.clear();
-        return check_one_transaction(account, lt, value->prefetch_ref(), lt == min_trans_lt, lt == max_trans_lt);
-      })) {
+  if (!trans_dict.check_for_each_extra([this, &account, tx_count, min_trans_lt, max_trans_lt](
+    Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len
+  ) {
+    CHECK(key_len == 64);
+    LogicalTime lt = key.get_uint(64);
+    extra.clear();
+    return check_one_transaction(account, tx_count, lt, value->prefetch_ref(), lt == min_trans_lt, lt == max_trans_lt);
+  })) {
     return reject_query("at least one Transaction of account "s + acc_addr.to_hex() + " is invalid");
   }
   if (is_masterchain() && account.libraries_changed()) {

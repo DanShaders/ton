@@ -31,6 +31,8 @@
 #include "td/utils/Timer.h"
 #include "td/utils/port/FileFd.h"
 
+#include "absl/container/flat_hash_map.h"
+
 namespace vm {
 using td::Ref;
 
@@ -111,43 +113,84 @@ class NewCellStorageStat {
 };
 
 struct CellStorageStat {
-  unsigned long long cells;
-  unsigned long long bits;
-  unsigned long long public_cells;
-  struct CellInfo {
-    td::uint32 max_merkle_depth = 0;
+  static constexpr td::uint16 MAX_TOTAL_CELLS = 8;
+
+  struct CacheInfo {
+    td::uint16 merkle_depth = 0;
+    td::uint16 total_cells = 0;
+    td::uint32 bits = 0;
+    absl::flat_hash_set<Cell::Hash> children{};
+
+    explicit CacheInfo(td::uint16 total_cells) : total_cells(total_cells) {}
+
+    bool overflow() const {
+      return total_cells >= MAX_TOTAL_CELLS;
+    }
+
+    void merge(CacheInfo* other, const Cell::Hash& hash) {
+      if (other->overflow()) {
+        total_cells = MAX_TOTAL_CELLS;
+        return;
+      }
+      total_cells += other->total_cells;
+      merkle_depth = std::max(merkle_depth, other->merkle_depth);
+      const size_t size = children.size() + other->children.size() + 1;
+      children.reserve(size);
+      children.emplace(hash);
+      children.insert(other->children.begin(), other->children.end());
+    }
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
-  CellStorageStat() : cells(0), bits(0), public_cells(0) {
+
+  static inline CacheInfo OVERFLOW_INFO{MAX_TOTAL_CELLS};
+  static inline absl::flat_hash_map<Cell::Hash, std::unique_ptr<CacheInfo>> cache{};
+
+  td::uint32 limit_cells;
+  td::uint32 limit_bits;
+  td::uint32 cells = 0;
+  td::uint32 bits = 0;
+  td::uint32 public_cells = 0;
+  absl::flat_hash_map<Cell::Hash, td::uint16> seen;
+
+  explicit CellStorageStat(
+    td::uint32 limit_cells = std::numeric_limits<td::uint32>::max(),
+    td::uint32 limit_bits = std::numeric_limits<td::uint32>::max(),
+    td::size_t capacity = 0
+  ) : limit_cells(limit_cells), limit_bits(limit_bits) {
+    seen.reserve(capacity);
   }
-  explicit CellStorageStat(unsigned long long limit_cells)
-      : cells(0), bits(0), public_cells(0), limit_cells(limit_cells) {
-  }
-  void clear_seen() {
-    seen.clear();
-  }
+
   void clear() {
     cells = bits = public_cells = 0;
     clear_limit();
     clear_seen();
   }
-  void clear_limit() {
-    limit_cells = std::numeric_limits<unsigned long long>::max();
-    limit_bits = std::numeric_limits<unsigned long long>::max();
+  void clear_seen() {
+    seen.clear();
   }
-  td::Result<CellInfo> compute_used_storage(Ref<vm::CellSlice> cs_ref, bool kill_dup = true,
-                                            unsigned skip_count_root = 0);
-  td::Result<CellInfo> compute_used_storage(const CellSlice& cs, bool kill_dup = true, unsigned skip_count_root = 0);
-  td::Result<CellInfo> compute_used_storage(CellSlice&& cs, bool kill_dup = true, unsigned skip_count_root = 0);
-  td::Result<CellInfo> compute_used_storage(Ref<vm::Cell> cell, bool kill_dup = true, unsigned skip_count_root = 0);
+  void clear_limit() {
+    limit_cells = std::numeric_limits<td::uint32>::max();
+    limit_bits = std::numeric_limits<td::uint32>::max();
+  }
+  static void clear_cache() {
+    cache.clear();
+  }
 
-  td::Result<CellInfo> add_used_storage(Ref<vm::CellSlice> cs_ref, bool kill_dup = true, unsigned skip_count_root = 0);
-  td::Result<CellInfo> add_used_storage(const CellSlice& cs, bool kill_dup = true, unsigned skip_count_root = 0);
-  td::Result<CellInfo> add_used_storage(CellSlice&& cs, bool kill_dup = true, unsigned skip_count_root = 0);
-  td::Result<CellInfo> add_used_storage(Ref<vm::Cell> cell, bool kill_dup = true, unsigned skip_count_root = 0);
+  td::Result<td::uint32> compute_used_storage(Ref<CellSlice> cs_ref, bool kill_dup = true, unsigned skip_count_root = 0);
+  td::Result<td::uint32> compute_used_storage(const CellSlice& cs, bool kill_dup = true, unsigned skip_count_root = 0);
+  td::Result<td::uint32> compute_used_storage(CellSlice&& cs, bool kill_dup = true, unsigned skip_count_root = 0);
+  td::Result<td::uint32> compute_used_storage(Ref<Cell> cell, bool kill_dup = true, unsigned skip_count_root = 0);
 
-  unsigned long long limit_cells = std::numeric_limits<unsigned long long>::max();
-  unsigned long long limit_bits = std::numeric_limits<unsigned long long>::max();
+  td::Result<td::uint32> add_used_storage(Ref<CellSlice> cs_ref, bool kill_dup = true, unsigned skip_count_root = 0);
+  td::Result<td::uint32> add_used_storage(const CellSlice& cs, bool kill_dup = true, unsigned skip_count_root = 0);
+  td::Result<td::uint32> add_used_storage(CellSlice&& cs, bool kill_dup = true, unsigned skip_count_root = 0);
+  td::Result<td::uint32> add_used_storage(Ref<Cell> cell, bool kill_dup = true, unsigned skip_count_root = 0);
+
+  td::Result<td::uint16> add_used_storage_fast(Ref<CellSlice> cs, bool skip_root);
+  td::Result<td::uint16> add_used_storage_fast(const Ref<Cell>& root, bool use_cache);
+  td::Result<CacheInfo*> add_cell(const Ref<Cell>& cell, const Cell::Hash& hash);
+  td::Result<td::uint16> add_cell_no_cache(const Ref<Cell>& cell);
+  inline td::Result<bool> add_new_cell(const Ref<DataCell>& cell, CacheInfo* info);
+  inline void add_cached_cell(CacheInfo* info);
 };
 
 struct VmStorageStat {

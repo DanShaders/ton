@@ -24,6 +24,9 @@
 
 #include "vm/cells/CellWithStorage.h"
 
+#include "td/utils/base64.h"
+#include "vm/boc.h"
+
 namespace vm {
 thread_local bool DataCell::use_arena = false;
 
@@ -321,7 +324,16 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     DCHECK(extracted_size == hash_bytes);
   }
 
-  return Ref<DataCell>(data_cell.release(), Ref<DataCell>::acquire_t{});
+  // calc total bits and cells
+  data_cell->init_totals();
+  for (int i = 0; i < info.refs_count_; i++) {
+    data_cell->add_totals(refs_ptr[i]);
+  }
+  if (data_cell->special_type() == CellTraits::SpecialType::MerkleProof ||
+      data_cell->special_type() == CellTraits::SpecialType::MerkleUpdate) {
+    ++data_cell->max_merkle_depth;
+  }
+  return Ref(data_cell.release(), Ref<DataCell>::acquire_t{});
 }
 
 const DataCell::Hash DataCell::do_get_hash(td::uint32 level) const {

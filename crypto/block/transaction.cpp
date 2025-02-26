@@ -781,16 +781,16 @@ bool Transaction::unpack_input_msg(bool ihr_delivered, const ActionPhaseConfig* 
       in_msg_type = 2;
       in_msg_extern = true;
       // compute forwarding fees for this external message
-      vm::CellStorageStat sstat;                                     // for message size
-      auto cell_info = sstat.compute_used_storage(cs).move_as_ok();  // message body
-      sstat.bits -= cs.size();                                       // bits in the root cells are free
-      sstat.cells--;                                                 // the root cell itself is not counted as a cell
+      vm::CellStorageStat sstat;                                            // for message size
+      auto max_merkle_depth = sstat.compute_used_storage(cs).move_as_ok();  // message body
+      sstat.bits -= cs.size();                                              // bits in the root cells are free
+      sstat.cells--;                                                        // the root cell itself is not counted as a cell
       LOG(DEBUG) << "storage paid for a message: " << sstat.cells << " cells, " << sstat.bits << " bits";
       if (sstat.bits > cfg->size_limits.max_msg_bits || sstat.cells > cfg->size_limits.max_msg_cells) {
         LOG(DEBUG) << "inbound external message too large, invalid";
         return false;
       }
-      if (cell_info.max_merkle_depth > max_allowed_merkle_depth) {
+      if (max_merkle_depth > max_allowed_merkle_depth) {
         LOG(DEBUG) << "inbound external message has too big merkle depth, invalid";
         return false;
       }
@@ -1386,7 +1386,9 @@ int output_actions_count(Ref<vm::Cell> list) {
  *
  * @returns True if the unpacking is successful, false otherwise.
  */
-bool Transaction::unpack_msg_state(const ComputePhaseConfig& cfg, bool lib_only, bool forbid_public_libs) {
+bool Transaction::unpack_msg_state(
+  const ComputePhaseConfig& cfg, td::uint16 tx_count, bool lib_only, bool forbid_public_libs
+) {
   block::gen::StateInit::Record state;
   if (in_msg_state.is_null() || !tlb::unpack_cell(in_msg_state, state)) {
     LOG(ERROR) << "cannot unpack StateInit from an inbound message";
@@ -1418,7 +1420,7 @@ bool Transaction::unpack_msg_state(const ComputePhaseConfig& cfg, bool lib_only,
   if (forbid_public_libs) {
     size_limits.max_acc_public_libraries = 0;
   }
-  auto S = check_state_limits(size_limits, false);
+  auto S = check_state_limits(size_limits, tx_count, false);
   if (S.is_error()) {
     LOG(DEBUG) << "Cannot unpack msg state: " << S.move_as_error();
     new_code = old_code;
@@ -1550,7 +1552,7 @@ bool Transaction::run_precompiled_contract(const ComputePhaseConfig& cfg, precom
  *
  * @returns True if the compute phase was successfully prepared and executed, false otherwise.
  */
-bool Transaction::prepare_compute_phase(const ComputePhaseConfig& cfg) {
+bool Transaction::prepare_compute_phase(const ComputePhaseConfig& cfg, td::uint16 tx_count) {
   // TODO: add more skip verifications + sometimes use state from in_msg to re-activate
   // ...
   compute_phase = std::make_unique<ComputePhase>();
@@ -1596,7 +1598,7 @@ bool Transaction::prepare_compute_phase(const ComputePhaseConfig& cfg) {
     use_msg_state = true;
     bool forbid_public_libs =
         acc_status == Account::acc_uninit && account.is_masterchain();  // Forbid for deploying, allow for unfreezing
-    if (!(unpack_msg_state(cfg, false, forbid_public_libs) && account.check_split_depth(new_split_depth))) {
+    if (!(unpack_msg_state(cfg, tx_count, false, forbid_public_libs) && account.check_split_depth(new_split_depth))) {
       LOG(DEBUG) << "cannot unpack in_msg_state, or it has bad split_depth; cannot init account state";
       cp.skip_reason = ComputePhase::sk_bad_state;
       return true;
@@ -1619,7 +1621,7 @@ bool Transaction::prepare_compute_phase(const ComputePhaseConfig& cfg) {
         return true;
       }
     }
-    unpack_msg_state(cfg, true);  // use only libraries
+    unpack_msg_state(cfg, 0, true);  // use only libraries
   }
   if (!cfg.allow_external_unfreeze) {
     if (in_msg_extern && in_msg_state.not_null() && account.addr != in_msg_state->get_hash().bits()) {
@@ -1800,7 +1802,7 @@ bool Transaction::prepare_action_phase(const ActionPhaseConfig& cfg) {
     if (account.is_special) {
       return true;
     }
-    auto S = check_state_limits(cfg.size_limits);
+    auto S = check_state_limits(cfg.size_limits, 0);
     if (S.is_error()) {
       // Rollback changes to state, fail action phase
       LOG(INFO) << "Account state size exceeded limits: " << S.move_as_error();
@@ -2050,8 +2052,8 @@ int Transaction::try_action_change_library(vm::CellSlice& cs, ActionPhase& ap, c
         return 41;
       }
       vm::CellStorageStat sstat;
-      auto cell_info = sstat.compute_used_storage(lib_ref).move_as_ok();
-      if (sstat.cells > cfg.size_limits.max_library_cells || cell_info.max_merkle_depth > max_allowed_merkle_depth) {
+      auto max_merkle_depth = sstat.compute_used_storage(lib_ref).move_as_ok();
+      if (sstat.cells > cfg.size_limits.max_library_cells || max_merkle_depth > max_allowed_merkle_depth) {
         return 43;
       }
       vm::CellBuilder cb;
@@ -2471,17 +2473,24 @@ int Transaction::try_action_send_msg(const vm::CellSlice& cs0, ActionPhase& ap, 
   vm::CellStorageStat sstat(max_cells);  // for message size
   // preliminary storage estimation of the resulting message
   unsigned max_merkle_depth = 0;
-  auto add_used_storage = [&](const auto& x, unsigned skip_root_count) -> td::Status {
+  auto add_used_storage_cs = [&](const auto& x, bool skip_root) -> td::Status {
     if (x.not_null()) {
-      TRY_RESULT(res, sstat.add_used_storage(x, true, skip_root_count));
-      max_merkle_depth = std::max(max_merkle_depth, res.max_merkle_depth);
+      TRY_RESULT(child_max_merkle_depth, sstat.add_used_storage(x, true, skip_root ? 3 : 0));
+      max_merkle_depth = std::max(max_merkle_depth, child_max_merkle_depth);
     }
     return td::Status::OK();
   };
-  add_used_storage(msg.init, 3);  // message init
-  add_used_storage(msg.body, 3);  // message body (the root cell itself is not counted)
+  auto add_used_storage_cell = [&](const auto& x) -> td::Status {
+    if (x.not_null()) {
+      TRY_RESULT(child_max_merkle_depth, sstat.add_used_storage(x));
+      max_merkle_depth = std::max(max_merkle_depth, child_max_merkle_depth);
+    }
+    return td::Status::OK();
+  };
+  add_used_storage_cs(msg.init, true);  // message init
+  add_used_storage_cs(msg.body, true);  // message body (the root cell itself is not counted)
   if (!ext_msg) {
-    add_used_storage(info.value->prefetch_ref(), 0);
+    add_used_storage_cell(info.value->prefetch_ref());
   }
   auto collect_fine = [&] {
     if (cfg.action_fine_enabled && !account.is_special) {
@@ -2850,7 +2859,9 @@ static td::uint32 get_public_libraries_diff_count(const td::Ref<vm::Cell>& old_l
  *          - If the state limits are within the allowed range, returns OK.
  *          - If the state limits exceed the maximum allowed range, returns an error.
  */
-td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, bool update_storage_stat) {
+td::Status Transaction::check_state_limits(
+  const SizeLimitsConfig& size_limits, td::uint16 tx_count, bool update_storage_stat
+) {
   auto cell_equal = [](const td::Ref<vm::Cell>& a, const td::Ref<vm::Cell>& b) -> bool {
     if (a.is_null()) {
       return b.is_null();
@@ -2864,27 +2875,43 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
       cell_equal(account.library, new_library)) {
     return td::Status::OK();
   }
-  vm::CellStorageStat storage_stat;
-  storage_stat.limit_cells = size_limits.max_acc_state_cells;
-  storage_stat.limit_bits = size_limits.max_acc_state_bits;
+  size_t capacity = account.storage_stat.seen.capacity();
+  capacity = capacity > 0 ? 1.2 * capacity : 38;  // 38 = 1.2 * 31
+  vm::CellStorageStat storage_stat(size_limits.max_acc_state_cells, size_limits.max_acc_state_bits, capacity);
+  // vm::CellStorageStat original(size_limits.max_acc_state_cells, size_limits.max_acc_state_bits, capacity);
   {
     TD_PERF_COUNTER(transaction_storage_stat_a);
     td::Timer timer;
-    auto add_used_storage = [&](const td::Ref<vm::Cell>& cell) -> td::Status {
+    const bool use_cache = tx_count > 1;
+    auto add_used_storage = [&](const Ref<vm::Cell>& cell) -> td::Status {
       if (cell.not_null()) {
-        TRY_RESULT(res, storage_stat.add_used_storage(cell));
-        if (res.max_merkle_depth > max_allowed_merkle_depth) {
+        // TRY_RESULT(_, original.add_used_storage(cell));
+        TRY_RESULT(max_merkle_depth, storage_stat.add_used_storage_fast(cell, use_cache));
+        if (max_merkle_depth > max_allowed_merkle_depth) {
           return td::Status::Error("too big merkle depth");
         }
+        // if (original.bits != storage_stat.bits || original.cells != storage_stat.cells) {
+        //   std::cout << original.bits << " " << original.cells << " | " << storage_stat.bits << " " << storage_stat.cells << std::endl;
+        // } else {
+        //   std::cout << "ok\n";
+        // }
       }
       return td::Status::OK();
     };
+    td::Timer timer1;
     TRY_STATUS(add_used_storage(new_code));
-    TRY_STATUS(add_used_storage(new_data));
-    TRY_STATUS(add_used_storage(new_library));
-    if (timer.elapsed() > 0.1) {
-      LOG(INFO) << "Compute used storage took " << timer.elapsed() << "s";
+    if (timer1.elapsed() > 0.001) {
+      LOG(ERROR) << "CODE used storage took " << timer.elapsed() << "s";
     }
+    td::Timer timer2;
+    TRY_STATUS(add_used_storage(new_data));
+    if (timer2.elapsed() > 0.01) {
+      LOG(ERROR) << "DATA used storage took " << timer.elapsed() << "s";
+    }
+    TRY_STATUS(add_used_storage(new_library));
+    // if (timer.elapsed() > 0.01) {
+    //   LOG(ERROR) << "Compute used storage took " << timer.elapsed() << "s " << cell_equal(account.code, new_code) << " " << cell_equal(account.data, new_data);
+    // }
   }
 
   if (acc_status == Account::acc_active) {
@@ -3093,7 +3120,7 @@ namespace transaction {
  *
  * @returns True if the state computation is successful, false otherwise.
  */
-bool Transaction::compute_state() {
+bool Transaction::compute_state(td::uint16 tx_count) {
   if (new_total_state.not_null()) {
     return true;
   }
@@ -3134,6 +3161,7 @@ bool Transaction::compute_state() {
         std::cerr << "with hash " << frozen_hash.to_hex() << std::endl;
       }
     }
+    // todo rm?
     new_code.clear();
     new_data.clear();
     new_library.clear();
@@ -3169,10 +3197,11 @@ bool Transaction::compute_state() {
   } else {
     TD_PERF_COUNTER(transaction_storage_stat_b);
     td::Timer timer;
-    stats.add_used_storage(Ref<vm::Cell>(storage)).ensure();
-    if (timer.elapsed() > 0.1) {
-      LOG(INFO) << "Compute used storage took " << timer.elapsed() << "s";
-    }
+    const bool use_cache = tx_count > 1;
+    stats.add_used_storage_fast(Ref<vm::Cell>(storage), use_cache).ensure();
+//    if (timer.elapsed() > 0.1) {
+    // LOG(ERROR) << "Compute used storage took " << timer.elapsed() << "s";
+//    }
   }
   CHECK(cb.store_long_bool(1, 1)                       // account$1
         && cb.append_cellslice_bool(account.my_addr)   // addr:MsgAddressInt
@@ -3203,11 +3232,11 @@ bool Transaction::compute_state() {
  *
  * @returns True if the serialization is successful, False otherwise.
  */
-bool Transaction::serialize() {
+bool Transaction::serialize(td::uint16 tx_count) {
   if (root.not_null()) {
     return true;
   }
-  if (!compute_state()) {
+  if (!compute_state(tx_count)) {
     return false;
   }
   vm::Dictionary dict{15};

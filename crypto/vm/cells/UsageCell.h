@@ -80,6 +80,15 @@ class UsageCell : public Cell {
   td::uint16 do_get_depth(td::uint32 level) const override {
     return cell_->get_depth(level);
   }
+  td::uint32 get_total_bits() const override {
+    return cell_->get_total_bits();
+  }
+  td::uint32 get_total_cells() const override {
+    return cell_->get_total_cells();
+  }
+  td::uint32 get_max_merkle_depth() const override {
+    return cell_->get_max_merkle_depth();
+  }
 
  private:
   Ref<Cell> cell_;

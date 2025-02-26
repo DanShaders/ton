@@ -384,12 +384,14 @@ struct Transaction {
   Ref<vm::Stack> prepare_vm_stack(ComputePhase& cp);
   std::vector<Ref<vm::Cell>> compute_vm_libraries(const ComputePhaseConfig& cfg);
   bool run_precompiled_contract(const ComputePhaseConfig& cfg, precompiled::PrecompiledSmartContract& precompiled);
-  bool prepare_compute_phase(const ComputePhaseConfig& cfg);
+  bool prepare_compute_phase(const ComputePhaseConfig& cfg, td::uint16 tx_count = 0);
   bool prepare_action_phase(const ActionPhaseConfig& cfg);
-  td::Status check_state_limits(const SizeLimitsConfig& size_limits, bool update_storage_stat = true);
+  td::Status check_state_limits(
+    const SizeLimitsConfig& size_limits, td::uint16 tx_count, bool update_storage_stat = true
+  );
   bool prepare_bounce_phase(const ActionPhaseConfig& cfg);
-  bool compute_state();
-  bool serialize();
+  bool compute_state(td::uint16 tx_count);
+  bool serialize(td::uint16 tx_count = 0);
   td::uint64 gas_used() const {
     return compute_phase ? compute_phase->gas_used : 0;
   }
@@ -418,7 +420,9 @@ struct Transaction {
   bool serialize_compute_phase(vm::CellBuilder& cb);
   bool serialize_action_phase(vm::CellBuilder& cb);
   bool serialize_bounce_phase(vm::CellBuilder& cb);
-  bool unpack_msg_state(const ComputePhaseConfig& cfg, bool lib_only = false, bool forbid_public_libs = false);
+  bool unpack_msg_state(
+    const ComputePhaseConfig& cfg, td::uint16 tx_count, bool lib_only = false, bool forbid_public_libs = false
+  );
 };
 }  // namespace transaction
 

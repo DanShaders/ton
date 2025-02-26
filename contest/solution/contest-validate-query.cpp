@@ -4485,8 +4485,9 @@ std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBi
  *
  * @returns True if the transaction is valid, false otherwise.
  */
-bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::LogicalTime lt, Ref<vm::Cell> trans_root,
-                                                 bool is_first, bool is_last) {
+bool ContestValidateQuery::check_one_transaction(
+  block::Account& account, td::uint16 tx_count, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first, bool is_last
+) {
   LOG(DEBUG) << "checking transaction " << lt << " of account " << account.addr.to_hex();
   const StdSmcAddress& addr = account.addr;
   block::gen::Transaction::Record trans;
@@ -4849,7 +4850,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
                                     << addr.to_hex());
     }
   }
-  if (!trs->prepare_compute_phase(compute_phase_cfg_)) {
+  if (!trs->prepare_compute_phase(compute_phase_cfg_, tx_count)) {
     return reject_query(PSTRING() << "cannot re-create compute phase of transaction " << lt << " for smart contract "
                                   << addr.to_hex());
   }
@@ -4873,7 +4874,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     return reject_query(PSTRING() << "cannot re-create bounce phase of  transaction " << lt << " for smart contract "
                                   << addr.to_hex());
   }
-  if (!trs->serialize()) {
+  if (!trs->serialize(tx_count)) {
     return reject_query(PSTRING() << "cannot re-create the serialization of  transaction " << lt
                                   << " for smart contract " << addr.to_hex());
   }
@@ -4988,15 +4989,18 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
   vm::AugmentedDictionary trans_dict{vm::DictNonEmpty(), std::move(acc_blk.transactions), 64,
                                      block::tlb::aug_AccountTransactions};
   td::BitArray<64> min_trans, max_trans;
+  td::uint16 tx_count = 0;
+  for (const auto& _ : trans_dict) {
+    tx_count++;
+  }
   CHECK(trans_dict.get_minmax_key(min_trans).not_null() && trans_dict.get_minmax_key(max_trans, true).not_null());
   ton::LogicalTime min_trans_lt = min_trans.to_ulong(), max_trans_lt = max_trans.to_ulong();
-  if (!trans_dict.check_for_each_extra([this, &account, min_trans_lt, max_trans_lt](Ref<vm::CellSlice> value,
-                                                                                    Ref<vm::CellSlice> extra,
-                                                                                    td::ConstBitPtr key, int key_len) {
+  if (!trans_dict.check_for_each_extra([this, &account, tx_count, min_trans_lt, max_trans_lt](
+    Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
         CHECK(key_len == 64);
-        ton::LogicalTime lt = key.get_uint(64);
+        LogicalTime lt = key.get_uint(64);
         extra.clear();
-        return check_one_transaction(account, lt, value->prefetch_ref(), lt == min_trans_lt, lt == max_trans_lt);
+        return check_one_transaction(account, tx_count, lt, value->prefetch_ref(), lt == min_trans_lt, lt == max_trans_lt);
       })) {
     return reject_query("at least one Transaction of account "s + acc_addr.to_hex() + " is invalid");
   }
@@ -5068,6 +5072,7 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
  * @returns True if all transactions pass the check, False otherwise.
  */
 bool ContestValidateQuery::check_transactions() {
+  vm::CellStorageStat::clear_cache();
   LOG(INFO) << "checking all transactions";
   ns_.account_dict_ =
       std::make_unique<vm::AugmentedDictionary>(ps_.account_dict_->get_root(), 256, block::tlb::aug_ShardAccounts);

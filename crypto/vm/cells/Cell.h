@@ -81,6 +81,16 @@ class Cell : public CellTraits {
 
   td::Status check_equals_unloaded(const Ref<Cell>& other) const;
 
+  virtual td::uint32 get_total_bits() const {
+      return 0;
+  }
+  virtual td::uint32 get_total_cells() const {
+    return 0;
+  }
+  virtual td::uint32 get_max_merkle_depth() const {
+    return 0;
+  }
+
  private:
   virtual td::uint16 do_get_depth(td::uint32 level) const = 0;
   virtual const Hash do_get_hash(td::uint32 level) const = 0;

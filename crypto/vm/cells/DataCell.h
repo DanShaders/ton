@@ -117,6 +117,9 @@ class DataCell : public Cell {
   };
 
   Info info_;
+  td::uint32 total_bits = 0;
+  td::uint32 total_cells = 0;
+  td::uint32 max_merkle_depth = 0;
   virtual char* get_storage() = 0;
   virtual const char* get_storage() const = 0;
   // TODO: we may also save three different pointers
@@ -189,6 +192,24 @@ class DataCell : public Cell {
   size_t get_storage_size() const {
     return info_.get_storage_size();
   }
+  void init_totals() {
+    total_bits = get_bits();
+    total_cells = 1;
+  }
+  void add_totals(const Cell* cell) {
+    total_bits += cell->get_total_bits();
+    total_cells += cell->get_total_cells();
+    max_merkle_depth = std::max(max_merkle_depth, cell->get_max_merkle_depth());
+  }
+  td::uint32 get_total_bits() const override {
+    return total_bits;
+  }
+  td::uint32 get_total_cells() const override {
+    return total_cells;
+  }
+  td::uint32 get_max_merkle_depth() const override {
+    return max_merkle_depth;
+  }
   int serialize(unsigned char* buff, int buff_size, bool with_hashes = false) const;
   std::string serialize() const;
   std::string to_hex() const;
@@ -228,4 +249,3 @@ inline CellHash as_cell_hash(const Ref<DataCell>& cell) {
 }
 
 }  // namespace vm
-
