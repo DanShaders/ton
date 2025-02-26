@@ -303,7 +303,6 @@ bool ContestValidateQuery::unpack_block_candidate() {
   CHECK(block_root_.not_null());
   // 3. initial block parse
   {
-    auto guard = error_ctx_add_guard("parsing block header");
     try {
       if (!init_parse()) {
         return reject_query("invalid block header");
@@ -473,7 +472,6 @@ bool ContestValidateQuery::extract_collated_data() {
   int i = -1;
   for (auto croot : collated_roots_) {
     ++i;
-    auto guard = error_ctx_add_guard(PSTRING() << "collated datum #" << i);
     try {
       if (!extract_collated_data_from(croot, i)) {
         return reject_query("cannot unpack collated datum");
@@ -574,7 +572,6 @@ bool ContestValidateQuery::process_mc_state(Ref<MasterchainState> mc_state) {
  */
 bool ContestValidateQuery::try_unpack_mc_state() {
   LOG(DEBUG) << "unpacking reference masterchain state";
-  auto guard = error_ctx_add_guard("unpack last mc state");
   try {
     if (mc_state_.is_null()) {
       return fatal_error(-666, "no previous masterchain state present");

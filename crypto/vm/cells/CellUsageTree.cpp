@@ -23,35 +23,26 @@ namespace vm {
 // CellUsageTree::NodePtr
 //
 bool CellUsageTree::NodePtr::on_load(const td::Ref<vm::DataCell>& cell) const {
-  auto tree = tree_weak_.lock();
-  if (!tree) {
+  if (!tree_) {
     return false;
   }
-  tree->on_load(node_id_, cell);
+  tree_->on_load(node_id_, cell);
   return true;
 }
 
 CellUsageTree::NodePtr CellUsageTree::NodePtr::create_child(unsigned ref_id) const {
-  auto tree = tree_weak_.lock();
-  if (!tree) {
+  if (!tree_) {
     return {};
   }
-  return {tree_weak_, tree->create_child(node_id_, ref_id)};
+  return {tree_, tree_->create_child(node_id_, ref_id)};
 }
 
 bool CellUsageTree::NodePtr::is_from_tree(const CellUsageTree* master_tree) const {
-  DCHECK(master_tree);
-  auto tree = tree_weak_.lock();
-  if (tree.get() != master_tree) {
-    return false;
-  }
-  return true;
+  return tree_ == master_tree;
 }
 
 bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
-  DCHECK(master_tree);
-  auto tree = tree_weak_.lock();
-  if (tree.get() != master_tree) {
+  if (tree_ != master_tree) {
     return false;
   }
   master_tree->mark_path(node_id_);
@@ -62,7 +53,7 @@ bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
 // CellUsageTree
 //
 CellUsageTree::NodePtr CellUsageTree::root_ptr() {
-  return {shared_from_this(), 1};
+  return {this, 1};
 }
 
 CellUsageTree::NodeId CellUsageTree::root_id() const {
@@ -103,7 +94,6 @@ CellUsageTree::NodeId CellUsageTree::get_parent(NodeId node_id) {
 }
 
 CellUsageTree::NodeId CellUsageTree::get_child(NodeId node_id, unsigned ref_id) {
-  DCHECK(ref_id < CellTraits::max_refs);
   return nodes_[node_id].children[ref_id];
 }
 
@@ -122,7 +112,6 @@ void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
 }
 
 CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_id) {
-  DCHECK(ref_id < CellTraits::max_refs);
   NodeId res = nodes_[node_id].children[ref_id];
   if (res) {
     return res;

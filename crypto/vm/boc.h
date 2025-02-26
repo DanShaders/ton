@@ -117,7 +117,7 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+  std::unordered_map<vm::Cell::Hash, CellInfo> seen;
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)
@@ -173,7 +173,7 @@ class ProofStorageStat {
   enum CellStatus {
     c_none = 0, c_prunned = 1, c_loaded = 2
   };
-  std::map<vm::Cell::Hash, CellStatus> cells_;
+  std::unordered_map<vm::Cell::Hash, CellStatus> cells_;
   td::uint64 proof_size_ = 0;
 };
 
