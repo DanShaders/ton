@@ -73,6 +73,18 @@ td::Result<Ref<DataCell>> CellBuilder::finalize_novm_nothrow(bool special) {
   return res;
 }
 
+td::Result<Ref<DataCell>> CellBuilder::finalize_novm_nothrow_only_datacell(bool special) {
+  std::array<Ref<DataCell>, Cell::max_refs> dc_refs;
+  for(size_t i = 0; i < size_refs(); i++)
+  {
+    Ref<Cell> r = std::move(refs[i]);
+    dc_refs[i] = Ref<DataCell>(static_cast<DataCell*>(r.release()), Ref<DataCell>::acquire_t{});
+  }
+  auto res = DataCell::create<DataCell>(data, size(), td::mutable_span(dc_refs.data(), size_refs()), special);
+  bits = refs_cnt = 0;
+  return res;
+}
+
 Ref<DataCell> CellBuilder::finalize_novm(bool special) {
   auto res = finalize_novm_nothrow(special);
   if (res.is_error()) {

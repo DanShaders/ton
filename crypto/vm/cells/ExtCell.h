@@ -29,7 +29,7 @@
 namespace vm {
 
 template <class ExtraT, class Loader>
-class ExtCell : public Cell {
+class ExtCell final : public Cell {
  private:
   struct PrivateTag {};
 
@@ -104,11 +104,11 @@ class ExtCell : public Cell {
     const Cell* cell_;
   };
 
-  const Hash do_get_hash(td::uint32 level) const override {
+  const Hash get_hash(td::uint32 level = max_level) const override {
     return CellView(this)->get_hash(level);
   }
 
-  td::uint16 do_get_depth(td::uint32 level) const override {
+  td::uint16 get_depth(td::uint32 level = max_level) const override {
     return CellView(this)->get_depth(level);
   }
 

@@ -390,8 +390,8 @@ td::Status MasterchainStateQ::mc_reinit() {
 
   auto cv_root = config_->get_config_param(35, 34);
   if (cv_root.not_null()) {
-    TRY_RESULT(validators, block::Config::unpack_validator_set(std::move(cv_root)));
-    cur_validators_ = std::move(validators);
+    // alias shared_ptr: points to the validator set, but holds config_ alive
+    cur_validators_ = std::shared_ptr<const block::ValidatorSet>(config_, config_->get_cur_validator_set());
   }
   auto nv_root = config_->get_config_param(37, 36);
   if (nv_root.not_null()) {

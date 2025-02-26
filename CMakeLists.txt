@@ -1,8 +1,24 @@
-cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.9 FATAL_ERROR)
 
 project(TON VERSION 0.5 LANGUAGES C CXX)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 #set(OPENSSL_USE_STATIC_LIBS TRUE)
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # CMAKE_INTERPROCEDURAL_OPTIMIZATION sets -flto=thin for clang
+  # to get full LTO, specify explictly
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -flto")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_CXX_FLAGS} -flto")
+  # whole-program devirtualization
+  # enable early to ensure third-party dependencies get it
+  # (linking fails if some code does not get this)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fwhole-program-vtables")
+  # assume that functions will not illegally change object vtable functions
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstrict-vtable-pointers")
+else()
+  set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+  set(CMAKE_POLICY_DEFAULT_CMP0069 NEW) # force LTO even in subprojects with older cmake_minimum_required
+endif()
 
 # Define the two required variables before including the source code for watching a git repository.
 set(PRE_CONFIGURE_FILE "git.cc.in")
@@ -271,6 +287,7 @@ elseif (CLANG OR GCC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstrong-eval-order=some")
   endif()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-semantic-interposition")
   if (APPLE)
     #use "-Wl,-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/export_list" for exported symbols
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fvisibility=hidden -Wl,-dead_strip,-x,-S")

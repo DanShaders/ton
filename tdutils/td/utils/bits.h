@@ -67,6 +67,14 @@ inline uint64 big_endian_to_host64(uint64 x) {
   // NB: works only for little-endian systems
   return bswap64(x);
 }
+inline uint32 host_to_big_endian32(uint32 x) {
+  // NB: works only for little-endian systems
+  return bswap32(x);
+}
+inline uint32 big_endian_to_host32(uint32 x) {
+  // NB: works only for little-endian systems
+  return bswap32(x);
+}
 
 //TODO: optimize
 inline int32 count_leading_zeroes_non_zero32(uint32 x) {

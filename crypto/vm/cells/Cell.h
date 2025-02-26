@@ -69,21 +69,10 @@ class Cell : public CellTraits {
     return get_level_mask().get_level();
   }
 
-  // hash helper functions
-  const Hash get_hash(int level = max_level) const {
-    return do_get_hash(level);
-  }
-
-  // depth helper function
-  td::uint16 get_depth(int level = max_level) const {
-    return do_get_depth(level);
-  }
-
   td::Status check_equals_unloaded(const Ref<Cell>& other) const;
 
- private:
-  virtual td::uint16 do_get_depth(td::uint32 level) const = 0;
-  virtual const Hash do_get_hash(td::uint32 level) const = 0;
+  virtual td::uint16 get_depth(td::uint32 level = max_level) const = 0;
+  virtual const Hash get_hash(td::uint32 level = max_level) const = 0;
 };
 
 std::ostream& operator<<(std::ostream& os, const Cell& c);

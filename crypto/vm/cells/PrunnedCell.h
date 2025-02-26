@@ -28,7 +28,8 @@ struct PrunnedCellInfo {
 };
 
 template <class ExtraT>
-class PrunnedCell : public Cell {
+class PrunnedCell final : public Cell, public detail::CellWithInlineStorage<PrunnedCell<ExtraT>> {
+  friend class detail::CellWithInlineStorage<PrunnedCell>;
  public:
   ExtraT& get_extra() {
     return extra_;
@@ -37,12 +38,8 @@ class PrunnedCell : public Cell {
     return extra_;
   }
 
-  static td::Result<Ref<PrunnedCell<ExtraT>>> create(const PrunnedCellInfo& prunned_cell_info, ExtraT&& extra) {
-    return create(detail::DefaultAllocator<PrunnedCell<ExtraT>>(), prunned_cell_info, std::forward<ExtraT>(extra));
-  }
-
-  template <class AllocatorT>
-  static td::Result<Ref<PrunnedCell<ExtraT>>> create(AllocatorT allocator, const PrunnedCellInfo& prunned_cell_info,
+  template <class AllocatorT = detail::DefaultAllocator>
+  static td::Result<Ref<PrunnedCell<ExtraT>>> create(const PrunnedCellInfo& prunned_cell_info,
                                                      ExtraT&& extra) {
     auto level_mask = prunned_cell_info.level_mask;
     if (level_mask.get_level() > max_level) {
@@ -50,7 +47,7 @@ class PrunnedCell : public Cell {
     }
     Info info(level_mask);
     auto prunned_cell =
-        detail::CellWithArrayStorage<PrunnedCell<ExtraT>>::create(allocator, info.get_storage_size(), info, std::move(extra));
+        detail::CellWithInlineStorage<PrunnedCell<ExtraT>>::template create_alloc<AllocatorT>(info.get_storage_size(), info, std::move(extra));
     TRY_STATUS(prunned_cell->init(prunned_cell_info));
     return Ref<PrunnedCell<ExtraT>>(prunned_cell.release(), typename Ref<PrunnedCell<ExtraT>>::acquire_t{});
   }
@@ -93,14 +90,12 @@ class PrunnedCell : public Cell {
 
   Info info_;
   ExtraT extra_;
-  virtual char* get_storage() = 0;
-  virtual const char* get_storage() const = 0;
   void destroy_storage(char* storage) {
     // noop
   }
 
   td::Status init(const PrunnedCellInfo& prunned_cell_info) {
-    auto storage = get_storage();
+    auto storage = this->get_storage();
     auto& new_hash = prunned_cell_info.hash;
     auto* hash = info_.get_hashes(storage);
     size_t n = prunned_cell_info.level_mask.get_hashes_count();
@@ -134,12 +129,12 @@ class PrunnedCell : public Cell {
   }
 
  private:
-  const Hash do_get_hash(td::uint32 level) const override {
-    return info_.get_hashes(get_storage())[get_level_mask().apply(level).get_hash_i()];
+  const Hash get_hash(td::uint32 level = max_level) const override {
+    return info_.get_hashes(this->get_storage())[get_level_mask().apply(level).get_hash_i()];
   }
 
-  td::uint16 do_get_depth(td::uint32 level) const override {
-    return info_.get_depth(get_storage())[get_level_mask().apply(level).get_hash_i()];
+  td::uint16 get_depth(td::uint32 level = max_level) const override {
+    return info_.get_depth(this->get_storage())[get_level_mask().apply(level).get_hash_i()];
   }
 
   td::Result<LoadedCell> load_cell() const override {

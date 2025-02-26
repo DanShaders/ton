@@ -507,41 +507,53 @@ td::Result<std::unique_ptr<ValidatorSet>> Config::unpack_validator_set(Ref<vm::C
   }
   vm::Dictionary dict{std::move(dict_root), 16};
   td::BitArray<16> key_buffer;
-  auto last = dict.get_minmax_key(key_buffer.bits(), 16, true);
-  if (last.is_null() || (int)key_buffer.to_ulong() != rec.total - 1) {
-    return td::Status::Error(
-        "maximal index in a validator set dictionary must be one less than the total number of validators");
-  }
   auto ptr = std::make_unique<ValidatorSet>(rec.utime_since, rec.utime_until, rec.total, rec.main);
-  for (int i = 0; i < rec.total; i++) {
-    key_buffer.store_ulong(i);
-    auto descr_cs = dict.lookup(key_buffer.bits(), 16);
-    if (descr_cs.is_null()) {
-      return td::Status::Error("indices in a validator set dictionary must be integers 0..total-1");
+  int expect = 0;
+  td::Status ret = {};
+  dict.check_for_each([&](Ref<vm::CellSlice> descr_cs, td::ConstBitPtr key, int key_len) {
+    if(key_len != 16) {
+      ret = td::Status::Error("indices in a validator set dictionary must be 16-bit");
+      return false;
     }
+    int i = td::bitstring::bits_load_ulong(key, 16);
+    if(i != expect || descr_cs.is_null() || expect >= rec.total) {
+      ret = td::Status::Error("indices in a validator set dictionary must be integers 0..total-1");
+      return false;
+    }
+    expect++;
     gen::ValidatorDescr::Record_validator_addr descr;
     if (!tlb::csr_unpack(descr_cs, descr)) {
       descr.adnl_addr.set_zero();
       if (!(gen::t_ValidatorDescr.unpack_validator(descr_cs.write(), descr.public_key, descr.weight) &&
             descr_cs->empty_ext())) {
-        return td::Status::Error(PSLICE() << "validator #" << i
-                                          << " has an invalid ValidatorDescr record in the validator set dictionary");
+        ret = td::Status::Error(PSLICE() << "validator #" << i
+                                         << " has an invalid ValidatorDescr record in the validator set dictionary");
+        return false;
       }
     }
     gen::SigPubKey::Record sig_pubkey;
     if (!tlb::csr_unpack(std::move(descr.public_key), sig_pubkey)) {
-      return td::Status::Error(PSLICE() << "validator #" << i
-                                        << " has no public key or its public key is in unsupported format");
+      ret = td::Status::Error(PSLICE() << "validator #" << i
+                                       << " has no public key or its public key is in unsupported format");
+      return false;
     }
     if (!descr.weight) {
-      return td::Status::Error(PSLICE() << "validator #" << i << " has zero weight");
+      ret = td::Status::Error(PSLICE() << "validator #" << i << " has zero weight");
+      return false;
     }
     if (descr.weight > ~(ptr->total_weight)) {
-      return td::Status::Error("total weight of all validators in validator set exceeds 2^64");
+      ret = td::Status::Error("total weight of all validators in validator set exceeds 2^64");
+      return false;
     }
     ptr->list.emplace_back(sig_pubkey.pubkey, descr.weight, ptr->total_weight, descr.adnl_addr);
     ptr->total_weight += descr.weight;
+    return true;
+  });
+  if(expect != rec.total) {
+    return td::Status::Error("indices in a validator set dictionary must be integers 0..total-1");
   }
+  if(ret.is_error())
+    return ret;
   if (rec.total_weight && rec.total_weight != ptr->total_weight) {
     return td::Status::Error("validator set declares incorrect total weight");
   }

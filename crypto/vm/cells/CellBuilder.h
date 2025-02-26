@@ -178,6 +178,7 @@ class CellBuilder : public td::CntObject {
   Ref<DataCell> finalize(bool special = false);
   Ref<DataCell> finalize_novm(bool special = false);
   td::Result<Ref<DataCell>> finalize_novm_nothrow(bool special = false);
+  td::Result<Ref<DataCell>> finalize_novm_nothrow_only_datacell(bool special = false); // unchecked
   bool finalize_to(Ref<Cell>& res, bool special = false) {
     return (res = finalize(special)).not_null();
   }

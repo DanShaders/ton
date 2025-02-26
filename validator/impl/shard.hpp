@@ -174,7 +174,7 @@ class MasterchainStateQ : public MasterchainState, public ShardStateQ {
  private:
   ZeroStateIdExt zerostate_id_;
   std::shared_ptr<block::ConfigInfo> config_;
-  std::shared_ptr<block::ValidatorSet> cur_validators_, next_validators_;
+  std::shared_ptr<const block::ValidatorSet> cur_validators_, next_validators_;
   MasterchainStateQ(const MasterchainStateQ& other) = default;
   td::Status mc_init();
   td::Status mc_reinit();

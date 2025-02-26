@@ -21,7 +21,7 @@
 #include "vm/cells/CellUsageTree.h"
 
 namespace vm {
-class UsageCell : public Cell {
+class UsageCell final : public Cell {
  private:
   struct PrivateTag {};
 
@@ -74,10 +74,10 @@ class UsageCell : public Cell {
   }
 
  protected:
-  const Hash do_get_hash(td::uint32 level) const override {
+  const Hash get_hash(td::uint32 level = max_depth) const override {
     return cell_->get_hash(level);
   }
-  td::uint16 do_get_depth(td::uint32 level) const override {
+  td::uint16 get_depth(td::uint32 level = max_depth) const override {
     return cell_->get_depth(level);
   }
 

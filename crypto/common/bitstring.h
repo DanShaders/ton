@@ -20,9 +20,11 @@
 #include "common/refcnt.hpp"
 #include <utility>
 #include <array>
+#include <limits>
 #include <string>
 #include <ostream>
 #include <cstdlib>
+#include "td/utils/as.h"
 #include "td/utils/bits.h"
 
 namespace td {
@@ -50,13 +52,13 @@ std::size_t bits_memscan(const unsigned char* ptr, int offs, std::size_t bit_cou
 std::size_t bits_memscan_rev(const unsigned char* ptr, int offs, std::size_t bit_count, bool cmp_to);
 std::size_t bits_memscan(ConstBitPtr bs, std::size_t bit_count, bool cmp_to);
 std::size_t bits_memscan_rev(ConstBitPtr bs, std::size_t bit_count, bool cmp_to);
-void bits_store_long_top(unsigned char* to, int to_offs, unsigned long long val, unsigned top_bits);
-void bits_store_long_top(BitPtr to, unsigned long long val, unsigned top_bits);
-void bits_store_long(BitPtr to, unsigned long long val, unsigned bits);
-unsigned long long bits_load_long_top(const unsigned char* from, int from_offs, unsigned top_bits);
-unsigned long long bits_load_long_top(ConstBitPtr from, unsigned top_bits);
-long long bits_load_long(ConstBitPtr from, unsigned bits);
-unsigned long long bits_load_ulong(ConstBitPtr from, unsigned bits);
+[[gnu::always_inline]] inline void bits_store_long_top(unsigned char* to, int to_offs, unsigned long long val, unsigned top_bits);
+[[gnu::always_inline]] inline void bits_store_long_top(BitPtr to, unsigned long long val, unsigned top_bits);
+[[gnu::always_inline]] inline void bits_store_long(BitPtr to, unsigned long long val, unsigned bits);
+[[gnu::always_inline]] inline unsigned long long bits_load_long_top(const unsigned char* from, int from_offs, unsigned top_bits);
+[[gnu::always_inline]] inline unsigned long long bits_load_long_top(ConstBitPtr from, unsigned top_bits);
+[[gnu::always_inline]] inline long long bits_load_long(ConstBitPtr from, unsigned bits);
+[[gnu::always_inline]] inline unsigned long long bits_load_ulong(ConstBitPtr from, unsigned bits);
 long parse_bitstring_hex_literal(unsigned char* buff, std::size_t buff_size, const char* str, const char* str_end);
 long parse_bitstring_binary_literal(BitPtr buff, std::size_t buff_size_bits, const char* str, const char* str_end);
 
@@ -224,7 +226,7 @@ class BitSliceGen {
   BitSliceGen(BitSliceGen&& bs, unsigned _offs, unsigned _len);
   BitSliceGen(Pt* _ptr, unsigned _len) : ref(), ptr(_ptr), offs(0), len(_len) {
   }
-  explicit BitSliceGen(Slice slice) : BitSliceGen(slice.data(), slice.size() * 8) {
+  explicit BitSliceGen(Slice slice) : BitSliceGen(slice.ubegin(), slice.size() * 8) {
   }
   ~BitSliceGen() {
   }
@@ -667,5 +669,87 @@ template <unsigned N>
 Ref<BitString> make_bitstring_ref(const BitArray<N>& value) {
   return value.make_bitstring_ref();
 }
+
+namespace bitstring {
+inline void bits_store_long_top(unsigned char* to, int to_offs, unsigned long long val, unsigned top_bits) {
+  CHECK(top_bits <= 64);
+  if (top_bits <= 0) {
+    return;
+  }
+  to += (to_offs >> 3);
+  to_offs &= 7;
+  if (!to_offs && !(top_bits & 7)) {
+    // good only on little-endian machines!
+    unsigned long long tmp = td::bswap64(val);
+    std::memcpy(to, &tmp, top_bits >> 3);
+    return;
+  }
+  unsigned long long z = (unsigned long long)(*to & (-0x100 >> to_offs)) << 56;
+  z |= (val >> to_offs);
+  top_bits += to_offs;
+  if (top_bits > 64) {
+    as<unsigned long long>(to) = td::bswap64(z);
+    z = (val << (8 - to_offs));
+    int mask = (0xff >> (top_bits - 64));
+    to[8] = (unsigned char)((to[8] & mask) | ((int)z & ~mask));
+  } else {
+    int p = 56, q = 64 - top_bits;
+    if (q <= 32) {
+      as<unsigned>(to) = td::bswap32((unsigned)(z >> 32));
+      to += 4;
+      p -= 32;
+    }
+    while (p >= q) {
+      *to++ = (unsigned char)(z >> p);
+      p -= 8;
+    }
+    top_bits = p + 8 - q;
+    if (top_bits > 0) {
+      int mask = (0xff >> top_bits);
+      *to = (unsigned char)((*to & mask) | ((z >> p) & ~mask));
+    }
+  }
+}
+
+inline void bits_store_long_top(BitPtr to, unsigned long long val, unsigned top_bits) {
+  bits_store_long_top(to.ptr, to.offs, val, top_bits);
+}
+
+inline void bits_store_long(BitPtr to, unsigned long long val, unsigned bits) {
+  bits_store_long_top(to, val << (64 - bits), bits);
+}
+
+inline unsigned long long bits_load_long_top(const unsigned char* from, int from_offs, unsigned top_bits) {
+  CHECK(top_bits <= 64);
+  if (!top_bits) {
+    return 0;
+
+  }
+  from += (from_offs >> 3);
+  from_offs &= 7;
+  if ((unsigned)from_offs + top_bits <= 64) {
+    unsigned long long tmp;
+    std::memcpy(&tmp, from, (from_offs + top_bits + 7) >> 3);
+    return (td::bswap64(tmp) << from_offs) & (std::numeric_limits<td::uint64>::max() << (64 - top_bits));
+  } else {
+    unsigned long long z = td::bswap64(as<unsigned long long>(from));
+    z <<= from_offs;
+    z |= (from[8] >> (8 - from_offs));
+    return z & (std::numeric_limits<td::uint64>::max() << (64 - top_bits));
+  }
+}
+
+inline unsigned long long bits_load_long_top(ConstBitPtr from, unsigned top_bits) {
+  return bits_load_long_top(from.ptr, from.offs, top_bits);
+}
+
+inline unsigned long long bits_load_ulong(ConstBitPtr from, unsigned bits) {
+  return bits == 0 ? 0 : bits_load_long_top(from, bits) >> (64 - bits);
+}
+
+inline long long bits_load_long(ConstBitPtr from, unsigned bits) {
+  return (long long)bits_load_long_top(from, bits) >> (64 - bits);
+}
+}  // namespace bitstring
 
 }  // namespace td

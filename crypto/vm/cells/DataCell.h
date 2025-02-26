@@ -18,6 +18,7 @@
 */
 #pragma once
 #include "vm/cells/Cell.h"
+#include "vm/cells/CellWithStorage.h"
 
 #include "td/utils/Span.h"
 
@@ -25,10 +26,12 @@
 
 namespace vm {
 
-class DataCell : public Cell {
+class DataCell final : public Cell, public detail::CellWithInlineStorage<DataCell> {
+  friend class detail::CellWithInlineStorage<DataCell>;
  public:
   // NB: cells created with use_arena=true are never freed
   static thread_local bool use_arena;
+  static std::atomic<size_t> total_data_cells;
 
   DataCell(const DataCell& other) = delete;
   ~DataCell() override;
@@ -42,16 +45,20 @@ class DataCell : public Cell {
 
  protected:
   struct Info {
-    unsigned bits_;
+    // assumed by this implementation
+    static_assert(max_level == 3);
+    static_assert(alignof(Cell::Hash) == 1);
+    uint16_t bits_;
+    bool is_special_;
+    uint8_t virtualization_;
+    uint8_t level_mask_;
+    uint8_t refs_count_;
+    uint8_t data_offs_;
+    uint8_t pair_offs_[4];
 
-    // d1
-    unsigned char refs_count_ : 3;
-    bool is_special_ : 1;
-    unsigned char level_mask_ : 3;
-
-    unsigned char hash_count_ : 3;
-
-    unsigned char virtualization_ : 3;
+    unsigned get_refs_cnt() const {
+      return refs_count_;
+    }
 
     unsigned char d1() const {
       return d1(LevelMask{level_mask_});
@@ -69,36 +76,38 @@ class DataCell : public Cell {
       }
       return res;
     }
-    size_t get_hashes_offset() const {
+    size_t get_refs_offset() const {
       return 0;
     }
-    size_t get_refs_offset() const {
-      return get_hashes_offset() + hash_bytes * hash_count_;
+    size_t get_hash_offset(size_t i) const {
+      DCHECK(i < 4);
+      return pair_offs_[i];
     }
-    size_t get_depth_offset() const {
-      return get_refs_offset() + refs_count_ * sizeof(Cell*);
+    size_t get_depth_offset(size_t i) const {
+      DCHECK(i < 4);
+      return pair_offs_[i] + sizeof(Cell::Hash);
     }
     size_t get_data_offset() const {
-      return get_depth_offset() + sizeof(td::uint16) * hash_count_;
+      return data_offs_;
     }
     size_t get_storage_size() const {
       return get_data_offset() + (bits_ + 7) / 8;
     }
 
-    const Hash* get_hashes(const char* storage) const {
-      return reinterpret_cast<const Hash*>(storage + get_hashes_offset());
+    const Hash* get_hash(const char* storage, size_t i) const {
+      return reinterpret_cast<const Hash*>(storage + get_hash_offset(i));
     }
 
-    Hash* get_hashes(char* storage) const {
-      return reinterpret_cast<Hash*>(storage + get_hashes_offset());
+    Hash* get_hash(char* storage, size_t i) const {
+      return reinterpret_cast<Hash*>(storage + get_hash_offset(i));
     }
 
-    const td::uint16* get_depth(const char* storage) const {
-      return reinterpret_cast<const td::uint16*>(storage + get_depth_offset());
+    const td::uint16* get_depth(const char* storage, size_t i) const {
+      return reinterpret_cast<const td::uint16*>(storage + get_depth_offset(i));
     }
 
-    td::uint16* get_depth(char* storage) const {
-      return reinterpret_cast<td::uint16*>(storage + get_depth_offset());
+    td::uint16* get_depth(char* storage, size_t i) const {
+      return reinterpret_cast<td::uint16*>(storage + get_depth_offset(i));
     }
 
     const unsigned char* get_data(const char* storage) const {
@@ -117,8 +126,6 @@ class DataCell : public Cell {
   };
 
   Info info_;
-  virtual char* get_storage() = 0;
-  virtual const char* get_storage() const = 0;
   // TODO: we may also save three different pointers
 
   void destroy_storage(char* storage);
@@ -130,13 +137,13 @@ class DataCell : public Cell {
     return LoadedCell{Ref<DataCell>{this}, {}, {}};
   }
   unsigned get_refs_cnt() const {
-    return info_.refs_count_;
+    return info_.get_refs_cnt();
   }
   unsigned get_bits() const {
     return info_.bits_;
   }
   unsigned size_refs() const {
-    return info_.refs_count_;
+    return info_.get_refs_cnt();
   }
   unsigned size() const {
     return info_.bits_;
@@ -165,16 +172,16 @@ class DataCell : public Cell {
     return res;
   }
 
-  td::uint32 get_virtualization() const override {
+  inline td::uint32 get_virtualization() const override {
     return info_.virtualization_;
   }
-  CellUsageTree::NodePtr get_tree_node() const override {
+  inline CellUsageTree::NodePtr get_tree_node() const override {
     return {};
   }
-  bool is_loaded() const override {
+  inline bool is_loaded() const override {
     return true;
   }
-  LevelMask get_level_mask() const override {
+  inline LevelMask get_level_mask() const override {
     return LevelMask{info_.level_mask_};
   }
 
@@ -193,7 +200,7 @@ class DataCell : public Cell {
   std::string serialize() const;
   std::string to_hex() const;
   static td::int64 get_total_data_cells() {
-    return get_thread_safe_counter().sum();
+    return total_data_cells;
   }
 
   template <class StorerT>
@@ -203,6 +210,8 @@ class DataCell : public Cell {
     storer.store_slice(td::Slice(get_data(), (get_bits() + 7) / 8));
   }
 
+  const Hash get_hash(td::uint32 level = max_level) const override final;
+  td::uint16 get_depth(td::uint32 level = max_level) const override final;
  protected:
   static constexpr auto max_storage_size = max_refs * sizeof(void*) + (max_level + 1) * hash_bytes + max_bytes;
 
@@ -211,14 +220,13 @@ class DataCell : public Cell {
     static auto res = td::NamedThreadSafeCounter::get_default().get_counter("DataCell");
     return res;
   }
-  static std::unique_ptr<DataCell> create_empty_data_cell(Info info);
+  static std::unique_ptr<DataCell> create_empty_data_cell(size_t storage);
 
-  const Hash do_get_hash(td::uint32 level) const override;
-  td::uint16 do_get_depth(td::uint32 level) const override;
 
   friend class CellBuilder;
   static td::Result<Ref<DataCell>> create(td::ConstBitPtr data, unsigned bits, td::Span<Ref<Cell>> refs, bool special);
-  static td::Result<Ref<DataCell>> create(td::ConstBitPtr data, unsigned bits, td::MutableSpan<Ref<Cell>> refs,
+  template<typename CellT>
+  static td::Result<Ref<DataCell>> create(td::ConstBitPtr data, unsigned bits, td::MutableSpan<Ref<CellT>> refs,
                                           bool special);
 };
 

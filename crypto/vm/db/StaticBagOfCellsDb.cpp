@@ -72,10 +72,10 @@ class RootCell : public Cell {
  private:
   Ref<Cell> cell_;
   ExtraT extra_;
-  td::uint16 do_get_depth(td::uint32 level) const override {
+  td::uint16 get_depth(td::uint32 level = max_level) const override {
     return cell_->get_depth(level);
   }
-  const Hash do_get_hash(td::uint32 level) const override {
+  const Hash get_hash(td::uint32 level = max_level) const override {
     return cell_->get_hash(level);
   }
 };

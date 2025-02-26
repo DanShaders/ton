@@ -21,84 +21,40 @@
 namespace vm {
 namespace detail {
 
-template <class CellT>
 struct DefaultAllocator {
-  template <class T, class... ArgsT>
-  std::unique_ptr<CellT> make_unique(ArgsT&&... args) {
-    return std::make_unique<T>(std::forward<ArgsT>(args)...);
-  }
-};
-
-template <class CellT, size_t Size = 0>
-class CellWithArrayStorage : public CellT {
- public:
-  template <class... ArgsT>
-  CellWithArrayStorage(ArgsT&&... args) : CellT(std::forward<ArgsT>(args)...) {
-  }
-  ~CellWithArrayStorage() {
-    CellT::destroy_storage(get_storage());
-  }
-  template <class Allocator, class... ArgsT>
-  static auto create(Allocator allocator, size_t storage_size, ArgsT&&... args) {
-    static_assert(CellT::max_storage_size <= 40 * 8, "");
-    //size = 128 + 32 + 8;
-    auto size = (storage_size + 7) / 8;
-#define CASE(size) \
-  case (size):     \
-    return allocator. template make_unique<CellWithArrayStorage<CellT, (size) * 8>>(std::forward<ArgsT>(args)...);
-#define CASE2(offset) CASE(offset) CASE(offset + 1)
-#define CASE8(offset) CASE2(offset) CASE2(offset + 2) CASE2(offset + 4) CASE2(offset + 6)
-#define CASE32(offset) CASE8(offset) CASE8(offset + 8) CASE8(offset + 16) CASE8(offset + 24)
-    switch (size) { CASE32(0) CASE8(32) }
-#undef CASE
-#undef CASE2
-#undef CASE8
-#undef CASE32
-    LOG(FATAL) << "TOO BIG " << storage_size;
-    UNREACHABLE();
-  }
-  template <class... ArgsT>
-  static std::unique_ptr<CellT> create(size_t storage_size, ArgsT&&... args) {
-    return create(DefaultAllocator<CellT>{}, storage_size, std::forward<ArgsT>(args)...);
-  }
-
- private:
-  alignas(alignof(void*)) char storage_[Size];
-
-  const char* get_storage() const final {
-    return storage_;
-  }
-  char* get_storage() final {
-    return storage_;
+  static void* allocate(size_t x) {
+    return operator new(x);
   }
 };
 
 template <class CellT>
-class CellWithUniquePtrStorage : public CellT {
+class CellWithInlineStorage {
+  CellT* self() { return static_cast<CellT*>(this); }
+  const CellT* self() const { return static_cast<const CellT*>(this); }
  public:
-  template <class... ArgsT>
-  CellWithUniquePtrStorage(size_t storage_size, ArgsT&&... args)
-      : CellT(std::forward<ArgsT>(args)...), storage_(std::make_unique<char[]>(storage_size)) {
-  }
-  ~CellWithUniquePtrStorage() {
-    CellT::destroy_storage(get_storage());
+  ~CellWithInlineStorage() {
+    self()->destroy_storage(self()->get_storage());
   }
 
-  template <class... ArgsT>
-  static std::unique_ptr<CellT> create(size_t storage_size, ArgsT&&... args) {
-    return std::make_unique<CellWithUniquePtrStorage>(storage_size, std::forward<ArgsT>(args)...);
+  template <typename A = DefaultAllocator, class... ArgsT>
+  static std::unique_ptr<CellT> create_alloc(size_t storage_size, ArgsT&&... args) {
+    static_assert(alignof(CellWithInlineStorage) <= 8); // assumed by InMemoryBagOfCellsDb.cpp
+    void* ptr = A::allocate(sizeof(CellT) + storage_size);
+    CellT* ret = new(ptr) CellT(std::forward<ArgsT>(args)...);
+    return std::unique_ptr<CellT>(ret);
   }
 
- private:
-  std::unique_ptr<char[]> storage_;
-
-  const char* get_storage() const final {
-    CHECK(storage_);
-    return storage_.get();
+  // ensure that sized deallocation is not used for this class
+  static void operator delete(void* ptr) {
+    ::operator delete(ptr);
   }
-  char* get_storage() final {
-    CHECK(storage_);
-    return storage_.get();
+
+ protected:
+  const char* get_storage() const {
+    return (const char*)(self() + 1);
+  }
+  char* get_storage() {
+    return (char*)(self() + 1);
   }
 };
 }  // namespace detail
