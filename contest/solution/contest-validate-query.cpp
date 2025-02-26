@@ -264,7 +264,7 @@ void ContestValidateQuery::start_up() {
   }
   // 4. load state(s) corresponding to previous block(s)
   prev_states.resize(prev_blocks.size());
-  for (int i = 0; (unsigned)i < prev_blocks.size(); i++) {
+  for (int i = 0; (unsigned)i < prev_blocks.size(); ++i) {
     // 4.1. load state
     LOG(DEBUG) << "sending wait_block_state() query #" << i << " for " << prev_blocks[i].to_str() << " to Manager";
     ++pending;
@@ -322,7 +322,8 @@ bool ContestValidateQuery::unpack_block_candidate() {
   }
   int n = boc2.get_root_count();
   CHECK(n >= 0);
-  for (int i = 0; i < n; i++) {
+  collated_roots_.reserve(n);
+  for (int i = 0; i < n; ++i) {
     collated_roots_.emplace_back(boc2.get_root_cell(i));
   }
   // 9. extract/classify collated data
@@ -1513,7 +1514,7 @@ bool ContestValidateQuery::add_trivial_neighbor_after_merge() {
   CHECK(prev_blocks.size() == 2);
   int found = 0;
   std::size_t n = neighbors_.size();
-  for (std::size_t i = 0; i < n; i++) {
+  for (std::size_t i = 0; i < n; ++i) {
     auto& nb = neighbors_.at(i);
     if (ton::shard_intersects(nb.shard(), shard_)) {
       ++found;
@@ -1585,7 +1586,7 @@ bool ContestValidateQuery::add_trivial_neighbor() {
   // 5. there are two prev_shards, the two children of shard, and two neighbors coinciding with prev_shards
   int found = 0, cs = 0;
   std::size_t n = neighbors_.size();
-  for (std::size_t i = 0; i < n; i++) {
+  for (std::size_t i = 0; i < n; ++i) {
     auto& nb = neighbors_.at(i);
     if (ton::shard_intersects(nb.shard(), shard_)) {
       ++found;
@@ -1980,9 +1981,9 @@ bool ContestValidateQuery::precheck_one_transaction(td::ConstBitPtr acc_id, ton:
   acc_state_hash = hash_upd.new_hash;
   unsigned c = 0;
   vm::Dictionary out_msgs{trans.r1.out_msgs, 15};
-  if (!out_msgs.check_for_each([&c](Ref<vm::CellSlice> value, td::ConstBitPtr key, int key_len) {
+  if (!out_msgs.check_for_each_light([&c](unsigned long long keyUint, int key_len) -> bool {
         CHECK(key_len == 15);
-        return key.get_uint(15) == c++;
+        return keyUint == c++;
       }) ||
       c != (unsigned)trans.outmsg_cnt) {
     return reject_query(PSTRING() << "transaction " << trans_lt << " of " << acc_id.to_hex(256)
@@ -2801,12 +2802,9 @@ bool ContestValidateQuery::unpack_dispatch_queue_update() {
       try {
         have_unprocessed_account_dispatch_queue_ = false;
         td::uint64 total_account_dispatch_queues = 0;
-        ps_.dispatch_queue_->check_for_each([&](Ref<vm::CellSlice>, td::ConstBitPtr, int n) -> bool {
+        ps_.dispatch_queue_->check_for_each_light([&]() -> bool {
           ++total_account_dispatch_queues;
-          if (total_account_dispatch_queues > processed_account_dispatch_queues_) {
-            return false;
-          }
-          return true;
+            return total_account_dispatch_queues <= processed_account_dispatch_queues_;
         });
         have_unprocessed_account_dispatch_queue_ =
             (total_account_dispatch_queues != processed_account_dispatch_queues_);
@@ -4587,7 +4585,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     }
   }
   vm::Dictionary out_dict{trans.r1.out_msgs, 15};
-  for (int i = 0; i < trans.outmsg_cnt; i++) {
+  for (int i = 0; i < trans.outmsg_cnt; ++i) {
     auto out_msg_root = out_dict.lookup_ref(td::BitArray<15>{i});
     CHECK(out_msg_root.not_null());  // we have pre-checked this
     auto out_descr_cs = out_msg_dict_->lookup(out_msg_root->get_hash().as_bitslice());
@@ -5091,7 +5089,7 @@ bool ContestValidateQuery::check_message_processing_order() {
   // New rule:
   // If message was taken from dispatch queue, instead of created_lt use emitted_lt
   std::sort(msg_proc_lt_.begin(), msg_proc_lt_.end());
-  for (std::size_t i = 1; i < msg_proc_lt_.size(); i++) {
+  for (std::size_t i = 1; i < msg_proc_lt_.size(); ++i) {
     auto &a = msg_proc_lt_[i - 1], &b = msg_proc_lt_[i];
     if (std::get<0>(a) == std::get<0>(b) && std::get<2>(a) > std::get<2>(b)) {
       return reject_query(PSTRING() << "incorrect message processing order: transaction (" << std::get<1>(a) << ","
@@ -5105,7 +5103,7 @@ bool ContestValidateQuery::check_message_processing_order() {
   // Check that if messages m1 and m2 with the same source have m1.created_lt < m2.created_lt then
   // m1.emitted_lt < m2.emitted_lt.
   std::sort(msg_emitted_lt_.begin(), msg_emitted_lt_.end());
-  for (std::size_t i = 1; i < msg_emitted_lt_.size(); i++) {
+  for (std::size_t i = 1; i < msg_emitted_lt_.size(); ++i) {
     auto &a = msg_emitted_lt_[i - 1], &b = msg_emitted_lt_[i];
     if (std::get<0>(a) == std::get<0>(b) && std::get<2>(a) >= std::get<2>(b)) {
       return reject_query(PSTRING() << "incorrect deferred message processing order for sender "
