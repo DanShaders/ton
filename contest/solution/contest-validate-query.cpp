@@ -54,7 +54,12 @@ ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice 
     , collated_data(std::move(collated_data))
     , main_promise(std::move(promise))
     , shard_pfx_(shard_.shard)
-    , shard_pfx_len_(ton::shard_prefix_length(shard_)) {
+    , shard_pfx_len_(ton::shard_prefix_length(shard_)) 
+{
+}
+
+ContestValidateQuery::~ContestValidateQuery()
+{
 }
 
 /**
@@ -195,6 +200,9 @@ void ContestValidateQuery::finish_query() {
  * Then the function also sends requests to the ValidatorManager to fetch blocks and shard stated.
  */
 void ContestValidateQuery::start_up() {
+
+  td::PerfWarningTimer perf_warn_("start_up",1.06);
+
   LOG(INFO) << "validate query for " << id_.to_str() << " started";
   rand_seed_.set_zero();
 
@@ -221,6 +229,11 @@ void ContestValidateQuery::start_up() {
     reject_query("error unpacking block candidate");
     return;
   }
+
+  #if defined(USE_DEBUG_LOG)
+  LOG(PLAIN) << "elapsed start_up stage0.1 took " << perf_warn_.elapsed() << " s";
+  #endif 
+
   if (prev_blocks.size() > 2) {
     soft_reject_query("cannot have more than two previous blocks");
     return;
@@ -262,6 +275,11 @@ void ContestValidateQuery::start_up() {
       // return;
     }
   }
+
+#if defined(USE_DEBUG_LOG)
+  LOG(PLAIN) << "elapsed start_up stage1 took " << perf_warn_.elapsed() << " s";
+#endif
+
   // 4. load state(s) corresponding to previous block(s)
   prev_states.resize(prev_blocks.size());
   for (int i = 0; (unsigned)i < prev_blocks.size(); i++) {
@@ -277,9 +295,13 @@ void ContestValidateQuery::start_up() {
                                 fetch_block_state(mc_blkid_));
   // ...
   CHECK(pending);
-}
 
-/**
+#if defined(USE_DEBUG_LOG)
+  LOG(PLAIN) << "elapsed start_up stage2 took " << perf_warn_.elapsed() << " s";
+#endif
+
+}
+    /**
  * Unpacks and validates a block candidate.
  *
  * This function unpacks the block candidate data and performs various validation checks to ensure its integrity.
@@ -290,9 +312,59 @@ void ContestValidateQuery::start_up() {
  * @returns True if the block candidate was successfully unpacked, false otherwise.
  */
 bool ContestValidateQuery::unpack_block_candidate() {
+#if 1
+  td::Result<long long> res1 = 0;
+  td::Result<long long> res2 = 0;
+
+#if 1
+  vm::BagOfCells boc1, boc2;
+
+  {
+    td::PerfWarningTimer perf_warn_("boc1", 1.06);
+    res1 = boc1.deserialize(block_data);
+#if defined(USE_DEBUG_LOG)
+    LOG(PLAIN) << "boc1 deserialize elapsed took " << perf_warn_.elapsed() << " s";
+#endif
+  }
+
+  {
+    td::PerfWarningTimer perf_warn_("boc2", 1.06);
+    res2 = boc2.deserialize(collated_data);
+#if defined(USE_DEBUG_LOG)
+    LOG(PLAIN) << "boc2 deserialize elapsed took " << perf_warn_.elapsed() << " s";
+#endif 
+  }
+
+#else //perf check in loop
+  while (1) {
+    vm::BagOfCells boc1, boc2;
+
+    vm::detail::CellWithPreAllocateStorage<vm::DataCell>::unsafe_reset_all_storage();
+
+    {
+      td::PerfWarningTimer perf_warn_("boc1", 1.06);
+      res1 = boc1.deserialize(block_data);
+      LOG(PLAIN) << "boc1 deserialize elapsed took " << perf_warn_.elapsed() << " s";
+    }
+
+    {
+      td::PerfWarningTimer perf_warn_("boc2", 1.06);
+      res2 = boc2.deserialize(collated_data);
+      LOG(PLAIN) << "boc2 deserialize elapsed took " << perf_warn_.elapsed() << " s";
+    }
+  }
+#endif
+
+#else
   vm::BagOfCells boc1, boc2;
   // 1. deserialize block itself
   auto res1 = boc1.deserialize(block_data);
+  // ...
+  // 8. deserialize collated data
+  auto res2 = boc2.deserialize(collated_data);
+
+#endif
+  
   if (res1.is_error()) {
     return reject_query("cannot deserialize block", res1.move_as_error());
   }
@@ -314,17 +386,17 @@ bool ContestValidateQuery::unpack_block_candidate() {
       return reject_query(err.get_msg());
     }
   }
-  // ...
-  // 8. deserialize collated data
-  auto res2 = boc2.deserialize(collated_data);
+
   if (res2.is_error()) {
     return reject_query("cannot deserialize collated data", res2.move_as_error());
   }
+
   int n = boc2.get_root_count();
   CHECK(n >= 0);
   for (int i = 0; i < n; i++) {
     collated_roots_.emplace_back(boc2.get_root_cell(i));
   }
+  
   // 9. extract/classify collated data
   return extract_collated_data();
 }
@@ -5299,9 +5371,17 @@ bool ContestValidateQuery::try_validate() {
     if (!check_in_queue()) {
       return reject_query("cannot check inbound message queues");
     }
-    if (!check_transactions()) {
-      return reject_query("invalid collection of account transactions in ShardAccountBlocks");
+
+    {
+      td::PerfWarningTimer perf_warn_("check_transactions", 1.06);
+      if (!check_transactions()) {
+        return reject_query("invalid collection of account transactions in ShardAccountBlocks");
+      }
+#if defined(USE_DEBUG_LOG)
+      LOG(PLAIN) << "check_transactions took " << perf_warn_.elapsed() << " s";
+#endif
     }
+
     if (!postcheck_account_updates()) {
       return reject_query("invalid AccountState update");
     }

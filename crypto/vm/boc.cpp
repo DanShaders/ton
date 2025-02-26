@@ -19,6 +19,9 @@
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
+#include <barrier>
+#include <cassert>
+
 #include "vm/boc.h"
 #include "vm/boc-writers.h"
 #include "vm/cells.h"
@@ -28,6 +31,9 @@
 #include "td/utils/format.h"
 #include "td/utils/misc.h"
 #include "td/utils/Slice-decl.h"
+#include "../contest/solution/ctpl_stl.h"
+
+#define USE_TEST_THREAD_POOL
 
 namespace vm {
 using td::Ref;
@@ -764,6 +770,72 @@ td::Result<td::Slice> BagOfCells::get_cell_slice(int idx, td::Slice data) {
   return data.substr(offs, td::narrow_cast<size_t>(offs_end - offs));
 }
 
+
+td::Status BagOfCells::deserialize_cell_build(int idx, struct vm::BagOfCells::cell_build_info* build_cells) {
+
+  std::array<td::Ref<Cell>, 4> refs_buf;
+
+  auto& build = build_cells[idx];
+
+  auto refs = td::MutableSpan<td::Ref<Cell>>(refs_buf).substr(0, build.cell_info.refs_cnt);
+  for (int k = 0; k < build.cell_info.refs_cnt; k++) {
+    auto& ref_cell = build_cells[build.refs_idxs[k]];
+    refs[k] = ref_cell.cell;
+  }
+
+  auto result = build.cell_info.create_data_cell(build.cell_slice, refs);
+
+  if (result.is_ok())
+  {
+    build.cell = result.move_as_ok();
+    return td::Status::OK();
+  }
+
+  return result.move_as_error();
+}
+
+td::Status BagOfCells::deserialize_cell_prepare( int idx, td::Slice cells_slice,
+                                                 std::vector<td::uint8>* cell_should_cache, 
+                                                 struct vm::BagOfCells::cell_build_info* build_cells) {
+  auto r_name = get_cell_slice(idx, cells_slice);
+  if (r_name.is_error()) {
+    return r_name.move_as_error();
+  }
+  auto& build = build_cells[idx];
+
+  build.cell_slice = r_name.move_as_ok();
+
+  TRY_STATUS(build.cell_info.init(build.cell_slice, info.ref_byte_size));
+
+  if (build.cell_info.end_offset != build.cell_slice.size()) {
+    return td::Status::Error("unused space in cell serialization");
+  }
+
+  for (int k = 0; k < build.cell_info.refs_cnt; k++) {
+    int ref_idx = (int)info.read_ref(build.cell_slice.ubegin() + build.cell_info.refs_offset + k * info.ref_byte_size);
+    if (ref_idx <= idx) {
+      return td::Status::Error(PSLICE() << "bag-of-cells error: reference #" << k << " of cell #" << idx
+                                        << " is to cell #" << ref_idx << " with smaller index");
+    }
+    if (ref_idx >= cell_count) {
+      return td::Status::Error(PSLICE() << "bag-of-cells error: reference #" << k << " of cell #" << idx
+                                        << " is to non-existent cell #" << ref_idx << ", only " << cell_count
+                                        << " cells are defined");
+    }
+    build.refs_idxs[k] = ref_idx;
+    if (cell_should_cache) {
+      auto& cnt = (*cell_should_cache)[ref_idx];
+      if (cnt < 2) {
+        cnt++;
+      }
+    }
+  }
+  build.cell.clear();
+  build.state.exchange(0);
+  return td::Status::OK();
+}
+
+
 td::Result<td::Ref<vm::DataCell>> BagOfCells::deserialize_cell(int idx, td::Slice cells_slice,
                                                                td::Span<td::Ref<DataCell>> cells_span,
                                                                std::vector<td::uint8>* cell_should_cache) {
@@ -882,20 +954,224 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
     }
   }
   auto cells_slice = data.substr(info.data_offset, info.data_size);
-  std::vector<Ref<DataCell>> cell_list;
-  cell_list.reserve(cell_count);
-  std::array<td::Ref<Cell>, 4> refs_buf;
-  for (int i = 0; i < cell_count; i++) {
-    // reconstruct cell with index cell_count - 1 - i
-    int idx = cell_count - 1 - i;
-    auto r_cell = deserialize_cell(idx, cells_slice, cell_list, info.has_cache_bits ? &cell_should_cache : nullptr);
-    if (r_cell.is_error()) {
-      return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << idx << " "
-                                        << r_cell.error());
+
+  volatile bool failed = false;
+
+#if defined(USE_TEST_THREAD_POOL) 
+
+  // proof of concept only - need add pool of object as in CellWithPreAllocateStorage
+    static void* persistent_array_holder =
+        new uint8_t[sizeof(struct vm::BagOfCells::cell_build_info) * vm::BagOfCells::max_cell_num];
+
+    if (cell_count >= vm::BagOfCells::max_cell_num)
+    {
+      LOG(FATAL) << "CEll NUM TOO BIG incrase vm::BagOfCells::max_cell_num";
+      UNREACHABLE();
+    } 
+
+    struct vm::BagOfCells::cell_build_info* builds_info =
+        new (persistent_array_holder) struct vm::BagOfCells::cell_build_info[cell_count];
+
+
+    for (int i = 0; i < cell_count; i++) {
+      int idx = cell_count - 1 - i;
+      auto r_cell =
+          deserialize_cell_prepare(idx, cells_slice, info.has_cache_bits ? &cell_should_cache : nullptr, builds_info);
+      if (r_cell.is_error()) {
+        failed = true;
+        break;
+      }
     }
-    cell_list.push_back(r_cell.move_as_ok());
-    DCHECK(cell_list.back().not_null());
+
+    constexpr int threads_num = 6;
+
+    auto work = [&](int thread_id) {
+      int ready_state = 0;
+      int bind_to_other = 0;
+	    int index = cell_count - 1; 
+      if (info.root_count)  // if possible start with root index
+        index = cell_count - 1 - roots[thread_id % info.root_count].idx;
+		   
+      thread_id++;  // 1..threads_num
+
+      while ( (ready_state + bind_to_other) != cell_count) {
+
+        if (index<0) {
+          ready_state = bind_to_other = 0;
+          index = cell_count - 1;
+        }
+
+        long state = builds_info[index].state.load();
+
+        // check cell ready flag
+        if (state & 0x80000000) {
+          ready_state++;
+        } else {  // not ready - check bind thrade id
+          //not bind cell - try check bind necessity
+          int cell_thread_id = state & 0xff;
+          if (!state || (thread_id == cell_thread_id)) {
+			      ready_state = bind_to_other = 0;
+            bool cell_ready = true;
+            int ref_cnt = builds_info[index].cell_info.refs_cnt;
+            // have ref - need check
+            for (int k = 0; (k < ref_cnt) && (cell_ready); k++) {
+              int recheck_ref;
+              do {
+                recheck_ref = 0;
+                int ref_index = builds_info[index].refs_idxs[(k + thread_id - 1) % ref_cnt];
+                long ref_state = builds_info[ref_index].state.load();
+
+                // ref cell ready
+                if (ref_state & 0x80000000)
+                  continue;
+
+                cell_ready = false;
+
+                int ref_thread_id = ref_state & 0xff;
+
+                // ref cell not bind or bind to current thread
+                // - switch to ref cell
+                if (!ref_state || (ref_thread_id == thread_id)) {
+                  index = ref_index + 1;
+                  break;
+                }
+                // ref cell bind to thread
+                long new_state = ref_thread_id;
+                long new_ref_state = (ref_state + (1 << 8)) & 0x7fffffff;
+                if (!builds_info[index].state.compare_exchange_weak(state, new_state)) {
+                  // bind failed self state change - need full recheck cell
+                  index++;
+                  break;
+                }
+                // stage1 bind ok, check ref state not change
+
+                if (!builds_info[ref_index].state.compare_exchange_weak(ref_state, new_ref_state)) {
+                  // ref state change, try roll back stage1 bind
+                  if (builds_info[index].state.compare_exchange_weak(new_state, state)) {
+                    // rool back ok - simple recheck ref
+                    recheck_ref = 1;
+                    continue;
+                  } else {
+                    // rool failed - need full recheck cell
+                    index++;
+                    break;
+                  }
+                }
+                state = new_state;
+                // stage2 bind ok
+                break;
+              } while (recheck_ref);
+            }
+            if (cell_ready) {
+              int new_state = (((state + (1 << 8)) & 0x7fffff00) + thread_id) | 0x40000000;
+              if (builds_info[index].state.compare_exchange_weak(state, new_state)) {
+                auto r_cell = deserialize_cell_build(index, builds_info);
+                if (r_cell.is_error()) {
+                  failed = true;
+                }
+                builds_info[index].state.fetch_or(0x80000000);
+              } else {
+                //current call state change - recheck
+                index++;
+              }
+            }
+          } else {
+            // bind to other thread
+            bind_to_other++;
+          }
+        }
+        index--;
+      }
+      return 0;
+    };
+
+#if defined(__ctpl_stl_thread_pool_H__)
+    static ctpl::thread_pool boc_worker_pool(threads_num-1);
+    std::array<std::future<int>, threads_num-1> wait_future;
+
+    for (int i = 0; i < threads_num - 1; i++)
+      wait_future[i] = boc_worker_pool.push(work);
+
+    work(threads_num-1);
+
+    for (int i = 0; i < threads_num - 1; i++)
+      wait_future[i].get();
+
+#elif defined(THREADPOOL_H)
+    static threadpool::ThreadPool boc_worker_pool(threads_num);
+    std::array<std::future<int>, threads_num> wait_future;
+
+    for (int i = 0; i < threads_num - 1; i++)
+      wait_future[i] = boc_worker_pool.add_job(work,i);
+
+    work(threads_num - 1);
+
+    for (int i = 0; i < threads_num - 1; i++)
+      wait_future[i].get();
+
+
+#else
+    std::vector<std::jthread> threads;
+    threads.reserve(threads_num);
+
+    for (int i = 0; i < threads_num - 1; i++) {
+      threads.emplace_back(work, i);
+    }
+
+    work(threads_num - 1);
+
+    for (auto& thread : threads)
+      thread.join();
+#endif
+    
+
+    if (!failed) {
+      root_count = info.root_count;
+      dangle_count = info.absent_count;
+      for (auto& root_info : roots) {
+        int index = cell_count - 1 - root_info.idx;
+        root_info.cell = builds_info[index].cell;
+      }
+    }
+    
+#else 
+
+    std::vector<Ref<DataCell>> cell_list;
+    cell_list.reserve(cell_count);
+
+    {
+      for (int i = 0; i < cell_count; i++) {
+        // reconstruct cell with index cell_count - 1 - i
+
+        int idx = cell_count - 1 - i;
+        auto r_cell = deserialize_cell(idx, cells_slice, cell_list, info.has_cache_bits ? &cell_should_cache : nullptr);
+        if (r_cell.is_error()) {
+          failed = true;
+          break;
+        }
+        cell_list.push_back(r_cell.move_as_ok());
+        DCHECK(cell_list.back().not_null());
+      }
+    }
+
+    if (!failed) {
+      root_count = info.root_count;
+      dangle_count = info.absent_count;
+      for (auto& root_info : roots) {
+        root_info.cell = cell_list[root_info.idx];
+      }
+    }
+
+    cell_list.clear();
+
+#endif 
+
+  if (failed) {
+    return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell");
+                                      //<< idx;
+                                      //<< r_cell.error());
   }
+
   if (info.has_cache_bits) {
     for (int idx = 0; idx < cell_count; idx++) {
       auto should_cache = cell_should_cache[idx] > 1;
@@ -908,12 +1184,8 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
   }
   custom_index.clear();
   index_ptr = nullptr;
-  root_count = info.root_count;
-  dangle_count = info.absent_count;
-  for (auto& root_info : roots) {
-    root_info.cell = cell_list[root_info.idx];
-  }
-  cell_list.clear();
+
+
   return size_est;
 }
 
@@ -1148,7 +1420,14 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
     return td::Status::Error("cell is null");
   }
   if (kill_dup) {
-    auto ins = seen.emplace(cell->get_hash(), CellInfo{});
+
+#if (SEEN_USE == SEEN_BOOST_FLAT_uint64)
+	auto hash_array = cell->get_hash().as_array();
+	uint64_t key = ((uint64_t *)hash_array.data())[0];
+    auto ins = seen.emplace(key, CellInfo{});
+#else
+	auto ins = seen.emplace(cell->get_hash(), CellInfo{});
+#endif
     if (!ins.second) {
       return ins.first->second;
     }
@@ -1191,9 +1470,18 @@ void NewCellStorageStat::dfs(Ref<Cell> cell, bool need_stat, bool need_proof_sta
     // FIXME: save error flag?
     return;
   }
+
+#if (SEEN_USE == SEEN_BOOST_FLAT_uint64)	
+	auto hash_array = cell->get_hash().as_array();
+	uint64_t key = ((uint64_t*)hash_array.data())[0];
+#else 
+	auto &key = cell->get_hash();
+#endif
+
   if (need_stat) {
     stat_.internal_refs++;
-    if ((parent_ && parent_->seen_.count(cell->get_hash()) != 0) || !seen_.insert(cell->get_hash()).second) {
+	
+	if ((parent_ && parent_->seen_.count(key) != 0) || !seen_.insert(key).second) {
       need_stat = false;
     } else {
       stat_.cells++;
@@ -1207,8 +1495,8 @@ void NewCellStorageStat::dfs(Ref<Cell> cell, bool need_stat, bool need_proof_sta
       need_proof_stat = false;
     } else {
       proof_stat_.internal_refs++;
-      if ((parent_ && parent_->proof_seen_.count(cell->get_hash()) != 0) ||
-          !proof_seen_.insert(cell->get_hash()).second) {
+      if ((parent_ && parent_->proof_seen_.count(key) != 0) ||
+          !proof_seen_.insert(key).second) {
         need_proof_stat = false;
       } else {
         proof_stat_.cells++;

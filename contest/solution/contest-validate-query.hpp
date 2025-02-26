@@ -93,8 +93,11 @@ class ContestValidateQuery : public td::actor::Actor {
  public:
   ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice collated_data,
                        td::Promise<td::BufferSlice> promise);
+  
+  ~ContestValidateQuery();
 
  private:
+  long storage_level;
   int verbosity{0};
   int pending{0};
   const ShardIdFull shard_;

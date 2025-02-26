@@ -24,6 +24,8 @@
 
 #include "vm/cells/CellWithStorage.h"
 
+bool gl_use_pool = true;
+
 namespace vm {
 thread_local bool DataCell::use_arena = false;
 
@@ -54,6 +56,7 @@ private:
   }
 };
 }
+
 std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
   if (use_arena) {
     ArenaAllocator<DataCell> allocator;
@@ -63,6 +66,12 @@ std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
     return res;
   }
 
+  if (gl_use_pool) 
+  {
+    auto res = detail::CellWithPreAllocateStorage<DataCell>::create(info.get_storage_size(), info);
+    Ref<DataCell>(res.get()).release();
+    return res;
+  }
   return detail::CellWithUniquePtrStorage<DataCell>::create(info.get_storage_size(), info);
 }
 

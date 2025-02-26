@@ -21,6 +21,7 @@
 
 #include <set>
 #include <map>
+#include <queue>
 #include "vm/db/DynamicBagOfCellsDb.h"
 #include "vm/cells.h"
 #include "td/utils/Status.h"
@@ -30,6 +31,49 @@
 #include "td/utils/Time.h"
 #include "td/utils/Timer.h"
 #include "td/utils/port/FileFd.h"
+
+#define SEEN_UNORDERED		        0
+#define SEEN_BOOST_FLAT		        1 		
+#define SEEN_SKA_FLAT		          2
+#define SEEN_TD_HASH		          3
+#define SEEN_BOOST_FLAT_uint64    4		// test only  - need rework hash creation 
+#define SEEN_UNORDERED_DENSE		  5
+#define SEEN_USE SEEN_TD_HASH
+
+#if (SEEN_USE == SEEN_BOOST_FLAT) || (SEEN_USE == SEEN_BOOST_FLAT_uint64)
+#include "boost_unordered.hpp"
+
+namespace boost {
+template <>
+struct hash<vm::CellHash> {
+  typedef vm::CellHash argument_type;
+  typedef std::size_t result_type;
+  result_type operator()(argument_type const& s) const noexcept {
+    //return cell_hash_slice_hash(s.as_slice());
+    return td::as<size_t>(s.as_array().data() + 8);
+  }
+};
+}
+
+
+#elif (SEEN_USE == SEEN_SKA_FLAT)
+#include "flat_hash_map.hpp"
+#elif (SEEN_USE == SEEN_UNORDERED_DENSE)
+#include "unordered_dense.h"
+
+namespace ankerl::unordered_dense {
+template <>
+struct hash<vm::CellHash> {
+  typedef vm::CellHash argument_type;
+  using is_avalanching = void;
+
+  [[nodiscard]] auto operator()(argument_type const& s) const noexcept -> uint64_t {
+    return td::as<uint64_t>(s.as_array().data() + 8);
+  }
+};
+}
+
+#endif
 
 namespace vm {
 using td::Ref;
@@ -101,9 +145,26 @@ class NewCellStorageStat {
 
  private:
   const CellUsageTree* usage_tree_;
+#if (SEEN_USE == SEEN_BOOST_FLAT_uint64)
+  boost::unordered::unordered_flat_set<uint64_t> seen_;
+  boost::unordered::unordered_flat_set<uint64_t> proof_seen_;
+#elif (SEEN_USE == SEEN_UNORDERED_DENSE)
+  ankerl::unordered_dense::segmented_set<CellHash> seen_;
+  ankerl::unordered_dense::segmented_set<CellHash> proof_seen_;
+#elif (SEEN_USE == SEEN_BOOST_FLAT)
+  boost::unordered::unordered_flat_set<CellHash> seen_;
+  boost::unordered::unordered_flat_set<CellHash> proof_seen_;
+#elif (SEEN_USE == SEEN_TD_HASH)
+  td::HashSet<vm::Cell::Hash> seen_;
+  td::HashSet<vm::Cell::Hash> proof_seen_;
+#elif (SEEN_USE == SEEN_SKA_FLAT)
+  ska::flat_hash_set<vm::Cell::Hash> seen_;
+  ska::flat_hash_set<vm::Cell::Hash> proof_seen_;
+#else	
   std::set<vm::Cell::Hash> seen_;
-  Stat stat_;
   std::set<vm::Cell::Hash> proof_seen_;
+#endif
+  Stat stat_;
   Stat proof_stat_;
   const NewCellStorageStat* parent_{nullptr};
 
@@ -117,7 +178,23 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
+
+#if (SEEN_USE == SEEN_BOOST_FLAT_uint64)
+  boost::unordered::unordered_flat_map<uint64_t, CellInfo> seen;
+#elif (SEEN_USE == SEEN_UNORDERED_DENSE)
+  ankerl::unordered_dense::segmented_map<CellHash, CellInfo> seen;
+#elif (SEEN_USE == SEEN_BOOST_FLAT)
+  boost::unordered::unordered_flat_map<CellHash, CellInfo> seen;
+#elif (SEEN_USE == SEEN_TD_HASH)
+  td::HashMap<vm::Cell::Hash, CellInfo> seen;
+#elif (SEEN_USE == SEEN_SKA_FLAT)
+  ska::flat_hash_map<vm::Cell::Hash, CellInfo> seen;
+#elif (SEEN_USE == SEEN_UNORDERED)
+  std::unordered_map<vm::Cell::Hash, CellInfo> seen;
+#else
   std::map<vm::Cell::Hash, CellInfo> seen;
+#endif
+
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)
@@ -174,6 +251,7 @@ class ProofStorageStat {
     c_none = 0, c_prunned = 1, c_loaded = 2
   };
   std::map<vm::Cell::Hash, CellStatus> cells_;
+  //boost::unordered::unordered_flat_map<vm::Cell::Hash, CellStatus> cells_;
   td::uint64 proof_size_ = 0;
 };
 
@@ -199,6 +277,7 @@ struct CellSerializationInfo {
   td::Result<int> get_bits(td::Slice cell) const;
 
   td::Result<Ref<DataCell>> create_data_cell(td::Slice data, td::Span<Ref<Cell>> refs) const;
+
 };
 
 class BagOfCellsLogger {
@@ -320,7 +399,7 @@ class BagOfCells {
   std::vector<RootInfo> roots;
   std::vector<unsigned char> serialized;
   const unsigned char* index_ptr{nullptr};
-  const unsigned char* data_ptr{nullptr};
+  //const unsigned char* data_ptr{nullptr};
   std::vector<unsigned long long> custom_index;
   BagOfCellsLogger* logger_ptr_{nullptr};
 
@@ -377,6 +456,22 @@ class BagOfCells {
   unsigned long long get_idx_entry(int index);
   bool get_cache_entry(int index);
   td::Result<td::Slice> get_cell_slice(int index, td::Slice data);
+
+  struct cell_build_info {
+    td::Slice cell_slice;
+    std::array<int, 4> refs_idxs;
+    td::Ref<DataCell> cell;
+    CellSerializationInfo cell_info;
+    std::atomic<long> state;
+  };
+  
+  static constexpr int max_cell_num = 200000;
+  td::Status deserialize_cell_prepare(int index, td::Slice data,
+                                      std::vector<td::uint8>* cell_should_cache, 
+                                      struct vm::BagOfCells::cell_build_info *build_cells);
+
+  td::Status deserialize_cell_build(int idx, struct vm::BagOfCells::cell_build_info *build_cells);
+  
   td::Result<td::Ref<vm::DataCell>> deserialize_cell(int index, td::Slice data, td::Span<td::Ref<DataCell>> cells,
                                                      std::vector<td::uint8>* cell_should_cache);
 };

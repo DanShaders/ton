@@ -19,12 +19,69 @@
 #include "td/utils/port/signals.h"
 #include "vm/vm.h"
 #include "vm/cells/MerkleUpdate.h"
+#include "vm/boc.h"
 
+#define CHECK_MERKEL_UPDATE
+//#define USE_ONE_FILE 
+
+#if TD_WINDOWS
+
+#define RUSAGE_SELF 0
+#define RUSAGE_CHILDREN (-1)
+
+static int getrusage(int who, struct rusage* rusage);
+#else
 #include <sys/resource.h>
+#endif
 
 using namespace ton;
 
 static constexpr td::uint64 CPU_USAGE_PER_SEC = 1000000;
+
+#if TD_WINDOWS
+
+struct rusage {
+  struct timeval ru_utime; /* user time used */
+  struct timeval ru_stime; /* system time used */
+};
+
+int getrusage(int who, struct rusage* rusage) {
+  FILETIME starttime;
+  FILETIME exittime;
+  FILETIME kerneltime;
+  FILETIME usertime;
+  ULARGE_INTEGER li;
+
+  if (who != RUSAGE_SELF) {
+    /* Only RUSAGE_SELF is supported in this implementation for now */
+    errno = EINVAL;
+    return -1;
+  }
+
+  if (rusage == (struct rusage*)NULL) {
+    errno = EFAULT;
+    return -1;
+  }
+  memset(rusage, 0, sizeof(struct rusage));
+  if (GetProcessTimes(GetCurrentProcess(), &starttime, &exittime, &kerneltime, &usertime) == 0) {
+    //_dosmaperr(GetLastError());
+    return -1;
+  }
+
+  /* Convert FILETIMEs (0.1 us) to struct timeval */
+  memcpy(&li, &kerneltime, sizeof(FILETIME));
+  li.QuadPart /= 10L; /* Convert to microseconds */
+  rusage->ru_stime.tv_sec = li.QuadPart / 1000000L;
+  rusage->ru_stime.tv_usec = li.QuadPart % 1000000L;
+
+  memcpy(&li, &usertime, sizeof(FILETIME));
+  li.QuadPart /= 10L; /* Convert to microseconds */
+  rusage->ru_utime.tv_sec = li.QuadPart / 1000000L;
+  rusage->ru_utime.tv_usec = li.QuadPart % 1000000L;
+
+  return 0;
+}
+#endif 
 
 static td::uint64 get_cpu_usage() {
   rusage usage;
@@ -74,6 +131,11 @@ class ContestGrader : public td::actor::Actor {
   }
 
   void run_next_test() {
+
+#if defined(USE_ONE_FILE)
+    test_idx_ = 0;
+#endif 
+
     if (test_idx_ == test_files_.size()) {
       finish();
       return;
@@ -98,7 +160,8 @@ class ContestGrader : public td::actor::Actor {
     bool valid = test->valid_;
 
     td::Ref<vm::Cell> original_merkle_update;
-    auto S = [&]() -> td::Status {
+#if defined(CHECK_MERKEL_UPDATE)
+      auto S = [&]() -> td::Status {
       TRY_RESULT(root, vm::std_boc_deserialize(block_data));
       block::gen::Block::Record rec;
       if (!block::gen::t_Block.cell_unpack(root, rec)) {
@@ -115,7 +178,7 @@ class ContestGrader : public td::actor::Actor {
       }
       TRY_RESULT_ASSIGN(block_data, vm::std_boc_serialize(root, 31));
       return td::Status::OK();
-    }();
+    }();  
     if (S.is_error()) {
       printf("%*lu  %-*s %8.5f %8.5f  FATAL  %s\n", (int)test_idx_column_width_, test_idx_ + 1,
              (int)test_name_column_width_, test_files_[test_idx_].c_str(), 0.0, 0.0, S.to_string().c_str());
@@ -125,6 +188,7 @@ class ContestGrader : public td::actor::Actor {
       run_next_test();
       return;
     }
+#endif
 
     run_contest_solution(
         block_id, std::move(block_data), std::move(collated_data),
@@ -136,7 +200,12 @@ class ContestGrader : public td::actor::Actor {
   }
 
   td::Result<tl_object_ptr<ton_api::contest_test>> read_test_file() {
+#if defined(USE_ONE_FILE)
+    TRY_RESULT(data, td::read_file("tests/valid-150.bin" /* 125tests_dir_ + "/" +  test_files_[test_idx_]*/));
+#else
     TRY_RESULT(data, td::read_file(tests_dir_ + "/" + test_files_[test_idx_]));
+#endif
+
     return ton::fetch_tl_object<ton_api::contest_test>(data, true);
   }
 
@@ -162,6 +231,8 @@ class ContestGrader : public td::actor::Actor {
       run_next_test();
       return;
     }
+
+#if defined(CHECK_MERKEL_UPDATE)
     auto S = check_merkle_update(res.move_as_ok(), original_merkle_update);
     if (S.is_error()) {
       printf("%*lu  %-*s %8.5f %8.5f  ERROR  invalid Merkle update %s\n", (int)test_idx_column_width_, test_idx_ + 1,
@@ -172,6 +243,7 @@ class ContestGrader : public td::actor::Actor {
       run_next_test();
       return;
     }
+#endif
 
     printf("%*lu  %-*s %8.5f %8.5f  OK     block is VALID\n", (int)test_idx_column_width_, test_idx_ + 1,
            (int)test_name_column_width_, test_files_[test_idx_].c_str(), elapsed, cpu_time);
@@ -183,7 +255,8 @@ class ContestGrader : public td::actor::Actor {
     run_next_test();
   }
 
-  td::Status check_merkle_update(td::Slice data, td::Ref<vm::Cell> original_merkle_update) {
+  td::Status check_merkle_update(td::Slice data, td::Ref<vm::Cell> original_merkle_update) 
+  {
     TRY_RESULT(new_merkle_update, vm::std_boc_deserialize(data));
     TRY_STATUS(vm::MerkleUpdate::validate(new_merkle_update));
 
@@ -224,7 +297,17 @@ class ContestGrader : public td::actor::Actor {
 };
 
 int main(int argc, char* argv[]) {
-  SET_VERBOSITY_LEVEL(verbosity_ERROR);
+  
+#if TD_WINDOWS
+  /* MMRESULT result = timeBeginPeriod(1);
+  if (result != TIMERR_NOERROR) {
+    printf("failed set windows perfomance timer");
+    return -1;
+  }*/
+#endif
+
+   SET_VERBOSITY_LEVEL(verbosity_ERROR);
+  //SET_VERBOSITY_LEVEL(verbosity_DEBUG);
 
   td::actor::ActorOwn<ContestGrader> x;
   td::unique_ptr<td::LogInterface> logger_;

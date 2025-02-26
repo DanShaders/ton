@@ -314,6 +314,7 @@ class Stack : public td::CntObject {
 
  public:
   Stack() {
+    stack.reserve(1024);
   }
   ~Stack() override = default;
   Stack(const std::vector<StackEntry>& _stack) : stack(_stack) {
