@@ -36,6 +36,7 @@ struct LabelParser {
   int l_same;
   int l_bits;
   unsigned s_bits;
+  LabelParser();
   LabelParser(Ref<CellSlice> cs, int max_label_len, int auto_validate = chk_all);
   LabelParser(Ref<Cell> cell, int max_label_len, int auto_validate = chk_all);
   int is_valid() const {
@@ -112,6 +113,7 @@ class DictionaryBase {
   int key_bits;
   mutable int flags;
   enum { f_valid = 1, f_root_cached = 2, f_invalid = 0x80 };
+  bool already_validated_{false};
 
  public:
   enum class SetMode : int { Set = 3, Replace = 1, Add = 2 };
@@ -168,6 +170,7 @@ class DictionaryBase {
   void set_root_cell(Ref<Cell> cell) {
     root_cell = std::move(cell);
     flags &= ~f_root_cached;
+    already_validated_ = false;
   }
 };
 
@@ -223,7 +226,7 @@ class DictionaryFixed : public DictionaryBase {
   int get_common_prefix(td::BitPtr buffer, unsigned buffer_len);
   bool cut_prefix_subdict(td::ConstBitPtr prefix, int prefix_len, bool remove_prefix = false);
   Ref<vm::Cell> extract_prefix_subdict_root(td::ConstBitPtr prefix, int prefix_len, bool remove_prefix = false);
-  bool check_for_each(const foreach_func_t& foreach_func, bool invert_first = false, bool shuffle = false);
+  bool check_for_each(const foreach_func_t& foreach_func, bool invert_first = false);
   int filter(filter_func_t check);
   bool combine_with(DictionaryFixed& dict2, const combine_func_t& combine_func, int mode = 0);
   bool combine_with(DictionaryFixed& dict2, const simple_combine_func_t& simple_combine_func, int mode = 0);
@@ -292,7 +295,7 @@ class DictionaryFixed : public DictionaryBase {
   std::pair<Ref<Cell>, bool> extract_prefix_subdict_internal(Ref<Cell> dict, td::ConstBitPtr prefix, int prefix_len,
                                                              bool remove_prefix = false) const;
   bool dict_check_for_each(Ref<Cell> dict, td::BitPtr key_buffer, int n, int total_key_len,
-                           const foreach_func_t& foreach_func, bool invert_first = false, bool shuffle = false) const;
+                           const foreach_func_t& foreach_func, bool invert_first = false) const;
   std::pair<Ref<Cell>, int> dict_filter(Ref<Cell> dict, td::BitPtr key, int n, const filter_func_t& check_leaf,
                                         int& skip_rest) const;
   Ref<Cell> dict_combine_with(Ref<Cell> dict1, Ref<Cell> dict2, td::BitPtr key_buffer, int n, int total_key_len,

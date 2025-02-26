@@ -322,6 +322,7 @@ bool ContestValidateQuery::unpack_block_candidate() {
   }
   int n = boc2.get_root_count();
   CHECK(n >= 0);
+  collated_roots_.reserve(n);
   for (int i = 0; i < n; i++) {
     collated_roots_.emplace_back(boc2.get_root_cell(i));
   }
@@ -419,7 +420,7 @@ bool ContestValidateQuery::init_parse() {
  *
  * @returns True if the extraction is successful, false otherwise.
  */
-bool ContestValidateQuery::extract_collated_data_from(Ref<vm::Cell> croot, int idx) {
+inline bool ContestValidateQuery::extract_collated_data_from(Ref<vm::Cell> croot, int idx) {
   bool is_special = false;
   auto cs = vm::load_cell_slice_special(croot, is_special);
   if (!cs.is_valid()) {
@@ -495,7 +496,7 @@ bool ContestValidateQuery::extract_collated_data() {
  *
  * @param res The result of the masterchain state retrieval.
  */
-void ContestValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
+inline void ContestValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
   LOG(INFO) << "in ContestValidateQuery::after_get_mc_state() for " << mc_blkid_.to_str();
   --pending;
   if (res.is_error()) {
@@ -519,7 +520,7 @@ void ContestValidateQuery::after_get_mc_state(td::Result<Ref<ShardState>> res) {
  * @param idx The index of the previous block (0 or 1).
  * @param res The result of the shard state retrieval.
  */
-void ContestValidateQuery::after_get_shard_state(int idx, td::Result<Ref<ShardState>> res) {
+inline void ContestValidateQuery::after_get_shard_state(int idx, td::Result<Ref<ShardState>> res) {
   LOG(INFO) << "in ContestValidateQuery::after_get_shard_state(" << idx << ")";
   --pending;
   if (res.is_error()) {
@@ -546,7 +547,7 @@ void ContestValidateQuery::after_get_shard_state(int idx, td::Result<Ref<ShardSt
  *
  * @returns True if the masterchain state is successfully processed, false otherwise.
  */
-bool ContestValidateQuery::process_mc_state(Ref<MasterchainState> mc_state) {
+inline bool ContestValidateQuery::process_mc_state(Ref<MasterchainState> mc_state) {
   if (mc_state.is_null()) {
     return fatal_error("could not obtain reference masterchain state "s + mc_blkid_.to_str());
   }
@@ -773,7 +774,7 @@ bool ContestValidateQuery::fetch_config_params() {
  *
  * @returns True if the previous block is valid, false otherwise.
  */
-bool ContestValidateQuery::check_prev_block(const BlockIdExt& listed, const BlockIdExt& prev, bool chk_chain_len) {
+inline bool ContestValidateQuery::check_prev_block(const BlockIdExt& listed, const BlockIdExt& prev, bool chk_chain_len) {
   if (listed.seqno() > prev.seqno()) {
     return reject_query(PSTRING() << "cannot generate a shardchain block after previous block " << prev.to_str()
                                   << " because masterchain configuration already contains a newer block "
@@ -801,7 +802,7 @@ bool ContestValidateQuery::check_prev_block(const BlockIdExt& listed, const Bloc
  *
  * @returns True if the previous block is equal to the one registered in the masterchain, false otherwise.
  */
-bool ContestValidateQuery::check_prev_block_exact(const BlockIdExt& listed, const BlockIdExt& prev) {
+inline bool ContestValidateQuery::check_prev_block_exact(const BlockIdExt& listed, const BlockIdExt& prev) {
   if (listed != prev) {
     return reject_query(PSTRING() << "cannot generate shardchain block for shard " << shard_.to_str()
                                   << " after previous block " << prev.to_str()
@@ -817,7 +818,7 @@ bool ContestValidateQuery::check_prev_block_exact(const BlockIdExt& listed, cons
  *
  * @returns True if the shard's configuration is valid, False otherwise.
  */
-bool ContestValidateQuery::check_this_shard_mc_info() {
+inline bool ContestValidateQuery::check_this_shard_mc_info() {
   wc_info_ = config_->get_workchain_info(workchain());
   if (wc_info_.is_null()) {
     return reject_query(PSTRING() << "cannot create new block for workchain " << workchain()
@@ -966,7 +967,7 @@ bool ContestValidateQuery::check_this_shard_mc_info() {
  *
  * @returns True if the previous state is computed successfully, false otherwise.
  */
-bool ContestValidateQuery::compute_prev_state() {
+inline bool ContestValidateQuery::compute_prev_state() {
   CHECK(prev_states.size() == 1u + after_merge_);
 
   prev_state_root_ = prev_states[0]->root_cell();
@@ -990,7 +991,7 @@ bool ContestValidateQuery::compute_prev_state() {
  *
  * @returns True if the unpacking and merging was successful, false otherwise.
  */
-bool ContestValidateQuery::unpack_merge_prev_state() {
+inline bool ContestValidateQuery::unpack_merge_prev_state() {
   LOG(DEBUG) << "unpack/merge previous states";
   CHECK(prev_states.size() == 2);
   // 2. extract the two previous states
@@ -1024,7 +1025,7 @@ bool ContestValidateQuery::unpack_merge_prev_state() {
  *
  * @returns True if the unpacking is successful, false otherwise.
  */
-bool ContestValidateQuery::unpack_prev_state() {
+inline bool ContestValidateQuery::unpack_prev_state() {
   LOG(DEBUG) << "unpacking previous state(s)";
   CHECK(prev_state_root_.not_null());
   if (after_merge_) {
@@ -1048,7 +1049,7 @@ bool ContestValidateQuery::unpack_prev_state() {
  *
  * @returns True if the unpacking and checks are successful, false otherwise.
  */
-bool ContestValidateQuery::unpack_one_prev_state(block::ShardState& ss, BlockIdExt blkid,
+inline bool ContestValidateQuery::unpack_one_prev_state(block::ShardState& ss, BlockIdExt blkid,
                                                  Ref<vm::Cell> prev_state_root) {
   auto res = ss.unpack_state_ext(blkid, std::move(prev_state_root), global_id_, mc_seqno_, after_split_,
                                  after_split_ | after_merge_, [this](ton::BlockSeqno mc_seqno) {
@@ -1074,7 +1075,7 @@ bool ContestValidateQuery::unpack_one_prev_state(block::ShardState& ss, BlockIdE
  *
  * @returns True if the split operation is successful, false otherwise.
  */
-bool ContestValidateQuery::split_prev_state(block::ShardState& ss) {
+inline bool ContestValidateQuery::split_prev_state(block::ShardState& ss) {
   LOG(INFO) << "Splitting previous state " << ss.id_.to_str() << " to subshard " << shard_.to_str();
   CHECK(after_split_);
   auto sib_shard = ton::shard_sibling(shard_);
@@ -1120,6 +1121,7 @@ bool ContestValidateQuery::request_neighbor_queues() {
   CHECK(new_shard_conf_);
   auto neighbor_list = new_shard_conf_->get_neighbor_shard_hash_ids(shard_);
   LOG(DEBUG) << "got a preliminary list of " << neighbor_list.size() << " neighbors for " << shard_.to_str();
+  neighbors_.reserve(neighbor_list.size());
   for (ton::BlockId blk_id : neighbor_list) {
     if (blk_id.seqno == 0 && blk_id.shard_full() != shard_) {
       continue;
@@ -1227,7 +1229,7 @@ void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQ
  *
  * @returns True if the registration is successful, false otherwise.
  */
-bool ContestValidateQuery::register_mc_state(Ref<MasterchainStateQ> other_mc_state) {
+inline bool ContestValidateQuery::register_mc_state(Ref<MasterchainStateQ> other_mc_state) {
   if (other_mc_state.is_null() || mc_state_.is_null()) {
     return false;
   }
@@ -1261,7 +1263,7 @@ bool ContestValidateQuery::register_mc_state(Ref<MasterchainStateQ> other_mc_sta
  *
  * @returns True if the auxiliary masterchain state is successfully requested, false otherwise.
  */
-bool ContestValidateQuery::request_aux_mc_state(BlockSeqno seqno, Ref<MasterchainStateQ>& state) {
+inline bool ContestValidateQuery::request_aux_mc_state(BlockSeqno seqno, Ref<MasterchainStateQ>& state) {
   if (mc_state_.is_null()) {
     return fatal_error(PSTRING() << "cannot find masterchain block with seqno " << seqno
                                  << " to load corresponding state because no masterchain state is known yet");
@@ -1314,7 +1316,7 @@ Ref<MasterchainStateQ> ContestValidateQuery::get_aux_mc_state(BlockSeqno seqno) 
  * @param blkid The BlockIdExt of the shard state.
  * @param res The result of retrieving the shard state.
  */
-void ContestValidateQuery::after_get_aux_shard_state(ton::BlockIdExt blkid, td::Result<Ref<ShardState>> res) {
+inline void ContestValidateQuery::after_get_aux_shard_state(ton::BlockIdExt blkid, td::Result<Ref<ShardState>> res) {
   LOG(DEBUG) << "in ContestValidateQuery::after_get_aux_shard_state(" << blkid.to_str() << ")";
   --pending;
   if (res.is_error()) {
@@ -1344,7 +1346,7 @@ void ContestValidateQuery::after_get_aux_shard_state(ton::BlockIdExt blkid, td::
  *
  * @returns True if the utime and logical time pass checks, False otherwise.
  */
-bool ContestValidateQuery::check_utime_lt() {
+inline bool ContestValidateQuery::check_utime_lt() {
   if (start_lt_ <= ps_.lt_) {
     return reject_query(PSTRING() << "block has start_lt " << start_lt_ << " less than or equal to lt " << ps_.lt_
                                   << " of the previous state");
@@ -1380,7 +1382,7 @@ bool ContestValidateQuery::check_utime_lt() {
  *
  * @returns True if the request was successful, false otherwise.
  */
-bool ContestValidateQuery::prepare_out_msg_queue_size() {
+inline bool ContestValidateQuery::prepare_out_msg_queue_size() {
   if (ps_.out_msg_queue_size_) {
     // if after_split then out_msg_queue_size is always present, since it is calculated during split
     old_out_msg_queue_size_ = ps_.out_msg_queue_size_.value();
@@ -1410,7 +1412,7 @@ bool ContestValidateQuery::prepare_out_msg_queue_size() {
  * @param i The index of the previous block (0 or 1).
  * @param res The result object containing the size of the queue.
  */
-void ContestValidateQuery::got_out_queue_size(size_t i, td::Result<td::uint64> res) {
+inline void ContestValidateQuery::got_out_queue_size(size_t i, td::Result<td::uint64> res) {
   --pending;
   if (res.is_error()) {
     fatal_error(
@@ -1439,7 +1441,7 @@ void ContestValidateQuery::got_out_queue_size(size_t i, td::Result<td::uint64> r
  *
  * @returns True if the processed up to information was successfully adjusted, false otherwise.
  */
-bool ContestValidateQuery::fix_one_processed_upto(block::MsgProcessedUpto& proc, ton::ShardIdFull owner,
+inline bool ContestValidateQuery::fix_one_processed_upto(block::MsgProcessedUpto& proc, ton::ShardIdFull owner,
                                                   bool allow_cur) {
   if (proc.compute_shard_end_lt) {
     return true;
@@ -1467,7 +1469,7 @@ bool ContestValidateQuery::fix_one_processed_upto(block::MsgProcessedUpto& proc,
  *
  * @returns True if all entries were successfully adjusted, False otherwise.
  */
-bool ContestValidateQuery::fix_processed_upto(block::MsgProcessedUptoCollection& upto, bool allow_cur) {
+inline bool ContestValidateQuery::fix_processed_upto(block::MsgProcessedUptoCollection& upto, bool allow_cur) {
   for (auto& entry : upto.list) {
     if (!fix_one_processed_upto(entry, upto.owner, allow_cur)) {
       return false;
@@ -1481,7 +1483,7 @@ bool ContestValidateQuery::fix_processed_upto(block::MsgProcessedUptoCollection&
  *
  * @returns True if all processed_upto values were successfully adjusted, false otherwise.
  */
-bool ContestValidateQuery::fix_all_processed_upto() {
+inline bool ContestValidateQuery::fix_all_processed_upto() {
   CHECK(ps_.processed_upto_);
   if (!fix_processed_upto(*ps_.processed_upto_)) {
     return fatal_error("Cannot adjust old ProcessedUpto of our shard state");
@@ -1508,7 +1510,7 @@ bool ContestValidateQuery::fix_all_processed_upto() {
  *
  * @returns True if the operation is successful, false otherwise.
  */
-bool ContestValidateQuery::add_trivial_neighbor_after_merge() {
+inline bool ContestValidateQuery::add_trivial_neighbor_after_merge() {
   LOG(DEBUG) << "in add_trivial_neighbor_after_merge()";
   CHECK(prev_blocks.size() == 2);
   int found = 0;
@@ -1841,11 +1843,11 @@ bool ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_r
  *
  * @returns True if the computation is successful, false otherwise.
  */
-bool ContestValidateQuery::compute_minted_amount(block::CurrencyCollection& to_mint) {
+inline bool ContestValidateQuery::compute_minted_amount(block::CurrencyCollection& to_mint) {
   return to_mint.set_zero();
 }
 
-bool ContestValidateQuery::postcheck_one_account_update(td::ConstBitPtr acc_id, Ref<vm::CellSlice> old_value,
+inline bool ContestValidateQuery::postcheck_one_account_update(td::ConstBitPtr acc_id, Ref<vm::CellSlice> old_value,
                                                         Ref<vm::CellSlice> new_value) {
   LOG(DEBUG) << "checking update of account " << acc_id.to_hex(256);
   old_value = ps_.account_dict_->extract_value(std::move(old_value));
@@ -1893,7 +1895,7 @@ bool ContestValidateQuery::postcheck_one_account_update(td::ConstBitPtr acc_id, 
  *
  * @returns True if the pre-check is successful, False otherwise.
  */
-bool ContestValidateQuery::postcheck_account_updates() {
+inline bool ContestValidateQuery::postcheck_account_updates() {
   LOG(INFO) << "pre-checking all Account updates between the old and the new state";
   try {
     CHECK(ps_.account_dict_ && ns_.account_dict_);
@@ -2120,7 +2122,7 @@ Ref<vm::Cell> ContestValidateQuery::lookup_transaction(const ton::StdSmcAddress&
  *
  * @returns True if the transaction reference is valid, False otherwise.
  */
-bool ContestValidateQuery::is_valid_transaction_ref(Ref<vm::Cell> trans_ref) const {
+inline bool ContestValidateQuery::is_valid_transaction_ref(Ref<vm::Cell> trans_ref) const {
   ton::StdSmcAddress addr;
   ton::LogicalTime lt;
   if (!block::get_transaction_id(trans_ref, addr, lt)) {
@@ -2632,7 +2634,7 @@ bool ContestValidateQuery::precheck_one_message_queue_update(td::ConstBitPtr out
  *
  * @returns True if the pre-check is successful, false otherwise.
  */
-bool ContestValidateQuery::precheck_message_queue_update() {
+inline bool ContestValidateQuery::precheck_message_queue_update() {
   LOG(INFO) << "pre-checking the difference between the old and the new outbound message queues";
   try {
     CHECK(ps_.out_msg_queue_ && ns_.out_msg_queue_);
@@ -2830,7 +2832,7 @@ bool ContestValidateQuery::unpack_dispatch_queue_update() {
  *
  * @returns True if the update was successful, false otherwise.
  */
-bool ContestValidateQuery::update_max_processed_lt_hash(ton::LogicalTime lt, const ton::Bits256& hash) {
+inline bool ContestValidateQuery::update_max_processed_lt_hash(ton::LogicalTime lt, const ton::Bits256& hash) {
   if (proc_lt_ < lt || (proc_lt_ == lt && proc_hash_ < hash)) {
     proc_lt_ = lt;
     proc_hash_ = hash;
@@ -2846,7 +2848,7 @@ bool ContestValidateQuery::update_max_processed_lt_hash(ton::LogicalTime lt, con
  *
  * @returns True if the update was successful, false otherwise.
  */
-bool ContestValidateQuery::update_min_enqueued_lt_hash(ton::LogicalTime lt, const ton::Bits256& hash) {
+inline bool ContestValidateQuery::update_min_enqueued_lt_hash(ton::LogicalTime lt, const ton::Bits256& hash) {
   if (lt < min_enq_lt_ || (lt == min_enq_lt_ && hash < min_enq_hash_)) {
     min_enq_lt_ = lt;
     min_enq_hash_ = hash;
@@ -2928,7 +2930,7 @@ bool ContestValidateQuery::check_imported_message(Ref<vm::Cell> msg_env) {
  *
  * @returns True if the input message is special, False otherwise.
  */
-bool ContestValidateQuery::is_special_in_msg(const vm::CellSlice& in_msg) const {
+inline bool ContestValidateQuery::is_special_in_msg(const vm::CellSlice& in_msg) const {
   return (recover_create_msg_.not_null() && vm::load_cell_slice(recover_create_msg_).contents_equal(in_msg)) ||
          (mint_msg_.not_null() && vm::load_cell_slice(mint_msg_).contents_equal(in_msg));
 }
@@ -3472,7 +3474,7 @@ bool ContestValidateQuery::check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> 
  *
  * @returns True if the inbound messages dictionary is valid, false otherwise.
  */
-bool ContestValidateQuery::check_in_msg_descr() {
+inline bool ContestValidateQuery::check_in_msg_descr() {
   LOG(INFO) << "checking inbound messages listed in InMsgDescr";
   try {
     CHECK(in_msg_dict_);
@@ -4117,7 +4119,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
  *
  * @returns True if the outbound messages dictionary is valid, false otherwise.
  */
-bool ContestValidateQuery::check_out_msg_descr() {
+inline bool ContestValidateQuery::check_out_msg_descr() {
   LOG(INFO) << "checking outbound messages listed in OutMsgDescr";
   try {
     CHECK(out_msg_dict_);
@@ -4202,7 +4204,7 @@ bool ContestValidateQuery::check_processed_upto() {
  *
  * @returns True if the check is successful, false otherwise.
  */
-bool ContestValidateQuery::check_dispatch_queue_update() {
+inline bool ContestValidateQuery::check_dispatch_queue_update() {
   if (!new_dispatch_queue_messages_.empty()) {
     auto it = new_dispatch_queue_messages_.begin();
     return reject_query(PSTRING() << "DispatchQueue has a new message with src_addr=" << it->first.first.to_hex()
@@ -5398,7 +5400,7 @@ bool ContestValidateQuery::build_state_update() {
  *
  * @returns True if the reference is successfully stored, false otherwise.
  */
-bool ContestValidateQuery::store_master_ref(vm::CellBuilder& cb) {
+inline bool ContestValidateQuery::store_master_ref(vm::CellBuilder& cb) {
   return cb.store_long_bool(mc_state_->get_logical_time(), 64)  // end_lt:uint64
          && cb.store_long_bool(mc_blkid_.seqno(), 32)           // seq_no:uint32
          && cb.store_bits_bool(mc_blkid_.root_hash)             // root_hash:bits256

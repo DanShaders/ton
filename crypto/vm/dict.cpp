@@ -22,7 +22,6 @@
 #include "vm/stack.hpp"
 #include "common/bitstring.h"
 #include "td/utils/Random.h"
-
 #include "td/utils/bits.h"
 
 namespace vm {
@@ -120,14 +119,19 @@ Ref<Cell> DictionaryBase::construct_root_from(const CellSlice& root_node_cs) {
   }
 }
 
-void DictionaryBase::force_validate() {
+inline void DictionaryBase::force_validate() {
   if (!is_valid() && !validate()) {
     throw VmError{Excno::dict_err, "invalid dictionary"};
   }
 }
 
-bool DictionaryBase::validate() {
+inline bool DictionaryBase::validate() {
+  if (already_validated_) {
+    return true;
+  }
+
   if (is_valid()) {
+    already_validated_ = true;
     return true;
   }
   if (flags & f_invalid) {
@@ -154,6 +158,7 @@ bool DictionaryBase::validate() {
     return invalidate();
   }
   flags |= f_valid;
+  already_validated_ = true;
   return true;
 }
 
@@ -201,25 +206,25 @@ bool DictionaryBase::compute_root() const {
   return true;
 }
 
-Ref<CellSlice> DictionaryBase::get_empty_dictionary() {
+inline Ref<CellSlice> DictionaryBase::get_empty_dictionary() {
   static Ref<CellSlice> empty_dict{new_empty_dictionary()};
   return empty_dict;
 }
 
-Ref<CellSlice> DictionaryBase::new_empty_dictionary() {
+inline Ref<CellSlice> DictionaryBase::new_empty_dictionary() {
   CellBuilder cb;  // Builder
   cb.store_long(0, 1);
   return Ref<CellSlice>{true, cb.finalize()};
 }
 
-Ref<Cell> DictionaryFixed::finish_create_leaf(CellBuilder& cb, const CellSlice& value) const {
+inline Ref<Cell> DictionaryFixed::finish_create_leaf(CellBuilder& cb, const CellSlice& value) const {
   if (!cb.append_cellslice_bool(value)) {
     throw VmError{Excno::dict_err, "cannot store new value into a dictionary leaf cell"};
   }
   return cb.finalize();
 }
 
-Ref<Cell> DictionaryFixed::finish_create_fork(CellBuilder& cb, Ref<Cell> c1, Ref<Cell> c2, int n) const {
+inline Ref<Cell> DictionaryFixed::finish_create_fork(CellBuilder& cb, Ref<Cell> c1, Ref<Cell> c2, int n) const {
   assert(n > 0);
   if (!(cb.store_ref_bool(std::move(c1)) && cb.store_ref_bool(std::move(c2)))) {
     throw VmError{Excno::dict_err, "cannot store branch references into a dictionary fork cell"};
@@ -227,7 +232,7 @@ Ref<Cell> DictionaryFixed::finish_create_fork(CellBuilder& cb, Ref<Cell> c1, Ref
   return cb.finalize();
 }
 
-bool DictionaryFixed::check_fork_raw(Ref<CellSlice> cs_ref, int n) const {
+inline bool DictionaryFixed::check_fork_raw(Ref<CellSlice> cs_ref, int n) const {
   if (cs_ref.is_null()) {
     return false;
   }
@@ -243,6 +248,8 @@ bool DictionaryFixed::check_fork_raw(Ref<CellSlice> cs_ref, int n) const {
  */
 
 namespace dict {
+
+LabelParser::LabelParser() : remainder(), l_offs(0), l_same(0) {}
 
 LabelParser::LabelParser(Ref<CellSlice> cs, int max_label_len, int auto_validate) : remainder(), l_offs(0), l_same(0) {
   if (!parse_label(cs.write(), max_label_len)) {
@@ -512,7 +519,7 @@ bool DictionaryFixed::key_exists(td::ConstBitPtr key, int key_len) {
   return lookup(key, key_len).not_null();
 }
 
-bool DictionaryFixed::int_key_exists(long long key) {
+inline bool DictionaryFixed::int_key_exists(long long key) {
   force_validate();
   int l = get_key_bits();
   if (is_empty() || l > 64) {
@@ -529,7 +536,7 @@ bool DictionaryFixed::int_key_exists(long long key) {
   return key_exists(a.cbits(), l);
 }
 
-bool DictionaryFixed::uint_key_exists(unsigned long long key) {
+inline bool DictionaryFixed::uint_key_exists(unsigned long long key) {
   force_validate();
   int l = get_key_bits();
   if (is_empty() || l > 64) {
@@ -545,7 +552,7 @@ bool DictionaryFixed::uint_key_exists(unsigned long long key) {
 
 namespace {
 
-void append_dict_label_same(CellBuilder& cb, bool same, int len, int max_len) {
+inline void append_dict_label_same(CellBuilder& cb, bool same, int len, int max_len) {
   int k = 32 - td::count_leading_zeroes32(max_len);
   assert(len >= 0 && len <= max_len && max_len <= 1023);
   // options: mode '0', requires 2n+2 bits (always for n=0)
@@ -563,7 +570,7 @@ void append_dict_label_same(CellBuilder& cb, bool same, int len, int max_len) {
   }
 }
 
-void append_dict_label(CellBuilder& cb, td::ConstBitPtr label, int len, int max_len) {
+inline void append_dict_label(CellBuilder& cb, td::ConstBitPtr label, int len, int max_len) {
   assert(len <= max_len && max_len <= 1023);
   if (len > 0 && (int)td::bitstring::bits_memscan(label, len, *label) == len) {
     return append_dict_label_same(cb, *label, len, max_len);
@@ -1543,51 +1550,51 @@ bool DictIterator::lookup(td::ConstBitPtr pos, int pos_bits, bool strict_after, 
   return dive(mode);
 }
 
-DictIterator DictionaryFixed::null_iterator() {
+inline DictIterator DictionaryFixed::null_iterator() {
   force_validate();
   return DictIterator{*this};
 }
 
-DictIterator DictionaryFixed::make_iterator(int mode) {
+inline DictIterator DictionaryFixed::make_iterator(int mode) {
   force_validate();
   DictIterator it{*this, mode};
   it.rewind();
   return it;
 }
 
-DictIterator DictionaryFixed::init_iterator(bool backw, bool invert_first) {
+inline DictIterator DictionaryFixed::init_iterator(bool backw, bool invert_first) {
   return make_iterator((int)backw + 2 * (int)invert_first);
 }
 
-DictIterator DictionaryFixed::begin() {
+inline DictIterator DictionaryFixed::begin() {
   return init_iterator();
 }
 
-DictIterator DictionaryFixed::end() {
+inline DictIterator DictionaryFixed::end() {
   return null_iterator();
 }
 
-DictIterator DictionaryFixed::cbegin() {
+inline DictIterator DictionaryFixed::cbegin() {
   return begin();
 }
 
-DictIterator DictionaryFixed::cend() {
+inline DictIterator DictionaryFixed::cend() {
   return end();
 }
 
-DictIterator DictionaryFixed::rbegin() {
+inline DictIterator DictionaryFixed::rbegin() {
   return init_iterator(true);
 }
 
-DictIterator DictionaryFixed::rend() {
+inline DictIterator DictionaryFixed::rend() {
   return null_iterator();
 }
 
-DictIterator DictionaryFixed::crbegin() {
+inline DictIterator DictionaryFixed::crbegin() {
   return rbegin();
 }
 
-DictIterator DictionaryFixed::crend() {
+inline DictIterator DictionaryFixed::crend() {
   return rend();
 }
 
@@ -1758,7 +1765,7 @@ int DictionaryFixed::filter(DictionaryFixed::filter_func_t check_leaf) {
   return res.second;
 }
 
-void Dictionary::map(const map_func_t& map_func) {
+inline void Dictionary::map(const map_func_t& map_func) {
   force_validate();
   int key_len = get_key_bits();
   unsigned char key_buffer[max_key_bytes];
@@ -1766,7 +1773,7 @@ void Dictionary::map(const map_func_t& map_func) {
   set_root_cell(std::move(res));
 }
 
-void Dictionary::map(const simple_map_func_t& simple_map_func) {
+inline void Dictionary::map(const simple_map_func_t& simple_map_func) {
   using namespace std::placeholders;
   map_func_t map_func = std::bind(simple_map_func, _1, _2);
   map(map_func);
@@ -2006,50 +2013,167 @@ bool DictionaryFixed::combine_with(DictionaryFixed& dict2) {
                       });
 }
 
-bool DictionaryFixed::dict_check_for_each(Ref<Cell> dict, td::BitPtr key_buffer, int n, int total_key_len,
-                                          const DictionaryFixed::foreach_func_t& foreach_func,
-                                          bool invert_first, bool shuffle) const {
-  if (dict.is_null()) {
-    return true;
+bool DictionaryFixed::dict_check_for_each(
+    Ref<Cell> dict,
+    td::BitPtr key_buffer,
+    int n,
+    int total_key_len,
+    const foreach_func_t &foreach_func,
+    bool invert_first
+) const {
+  // We store frames for an explicit stack-based approach
+  struct Frame {
+    // The sub-dictionary we are traversing:
+    Ref<Cell> d;
+
+    // The current position in the key buffer
+    td::BitPtr kb;
+
+    // The number of bits left in the key for this sub-tree
+    int n;
+
+    // The total key length (used to offset final leaf calls)
+    int total_len;
+
+    // Whether we do the “inversion” trick for the first child
+    bool inv_first;
+
+    Frame(Ref<Cell> d, td::BitPtr kb, int n, int total_len, bool inv_first) : d(d), kb(kb), n(n), total_len(total_len), inv_first(inv_first) {}
+
+    // A small stage machine:
+    bool done_init{false};
+    bool done_left{false};
+    bool done_right{false};
+
+    // For forks:
+    LabelParser label;  // to parse label
+    int l;              // label length
+    bool invert;        // the chosen invert
+    Ref<Cell> c1, c2;   // subtrees
+  };
+
+  // We'll keep our own stack of frames
+  std::vector<Frame> stack;
+  stack.reserve(64);
+
+  // Initialize the root call
+  stack.push_back({dict, key_buffer, n, total_key_len, invert_first});
+
+  while (!stack.empty()) {
+    Frame &f = stack.back();
+
+    // If we haven't done the "init" step for this frame, do it now
+    if (!f.done_init) {
+      f.done_init = true;
+
+      // If dictionary is empty => no further processing
+      if (f.d.is_null()) {
+        stack.pop_back();
+        continue;
+      }
+
+      // Parse the dictionary label
+      LabelParser label{f.d, f.n, label_mode()};
+      f.label = std::move(label);
+      f.l = f.label.l_bits;
+
+      // Extract the label bits into the key buffer
+      f.label.extract_label_to(f.kb);
+
+      if (f.l == f.n) {
+        // This is a leaf node: call the foreach_func
+        // The value is in label.remainder
+        bool ok = foreach_func(std::move(f.label.remainder), f.kb + f.n - f.total_len, f.total_len);
+        stack.pop_back();
+        if (!ok) {
+          return false;
+        }
+        continue;
+      }
+
+      // Otherwise, it is a fork node: we have two children
+      assert(f.l >= 0 && f.l < f.n);
+
+      // The next bits in label.remainder contain two references
+      f.c1 = f.label.remainder->prefetch_ref(0);
+      f.c2 = f.label.remainder->prefetch_ref(1);
+      f.label.remainder.clear();
+
+      // Advance the key buffer by (l + 1)
+      f.kb += (f.l + 1);
+
+      // If l>0, we override invert_first = false
+      if (f.l > 0) {
+        f.inv_first = false;
+      }
+
+      // The logic “bool invert = invert_first;”
+      f.invert = f.inv_first;
+
+      // If invert is true => swap c1 & c2
+      if (f.invert) {
+        std::swap(f.c1, f.c2);
+      }
+
+      // Put a bit in key_buffer[-1] to indicate “invert or not”
+      f.kb[-1] = f.invert;
+
+      // We will next handle c1 => then c2
+      f.done_left = false;
+      f.done_right = false;
+    }
+
+    // If we haven't visited the left child yet
+    if (!f.done_left) {
+      f.done_left = true;
+
+      // We push a frame for the left child
+      // The key is f.c1, the new n is (f.n - f.l - 1)
+      Frame child_frame {
+        f.c1,                 // child dictionary
+        f.kb,                 // same key_buffer pointer
+        (f.n - f.l - 1),      // we used (l+1) bits
+        f.total_len,
+        false // no further invert on child
+      };
+      stack.push_back(std::move(child_frame));
+      continue;
+    }
+
+    // If we finished the left child but not the right child
+    if (!f.done_right) {
+      f.done_right = true;
+      // The code sets key_buffer[-1] = !invert
+      f.kb[-1] = !f.invert;
+
+      // push a frame for the right child
+      Frame child_frame {
+        f.c2,
+        f.kb,
+        (f.n - f.l - 1),
+        f.total_len,
+        false // no invert
+      };
+      stack.push_back(std::move(child_frame));
+      continue;
+    }
+
+    // If both children are done => pop
+    stack.pop_back();
   }
-  LabelParser label{std::move(dict), n, label_mode()};
-  int l = label.l_bits;
-  label.extract_label_to(key_buffer);
-  if (l == n) {
-    // leaf node, value left in label.remainder
-    return foreach_func(std::move(label.remainder), key_buffer + n - total_key_len, total_key_len);
-  }
-  assert(l >= 0 && l < n);
-  // a fork with two children, c1 and c2
-  auto c1 = label.remainder->prefetch_ref(0);
-  auto c2 = label.remainder->prefetch_ref(1);
-  label.remainder.clear();
-  key_buffer += l + 1;
-  if (l) {
-    invert_first = false;
-  }
-  bool invert = shuffle ? td::Random::fast(0, 1) == 1: invert_first;
-  if (invert) {
-    std::swap(c1, c2);
-  }
-  key_buffer[-1] = invert;
-  // recursive check_foreach applied to both children
-  if (!dict_check_for_each(std::move(c1), key_buffer, n - l - 1, total_key_len, foreach_func, false, shuffle)) {
-    return false;
-  }
-  key_buffer[-1] = !invert;
-  return dict_check_for_each(std::move(c2), key_buffer, n - l - 1, total_key_len, foreach_func, false, shuffle);
+
+  // If we exhaust the stack => success
+  return true;
 }
 
-bool DictionaryFixed::check_for_each(const foreach_func_t& foreach_func, bool invert_first, bool shuffle) {
+bool DictionaryFixed::check_for_each(const foreach_func_t& foreach_func, bool invert_first) {
   force_validate();
   if (is_empty()) {
     return true;
   }
   int key_len = get_key_bits();
   unsigned char key_buffer[max_key_bytes];
-  return dict_check_for_each(get_root_cell(), td::BitPtr{key_buffer}, key_len, key_len, foreach_func, invert_first,
-                             shuffle);
+  return dict_check_for_each(get_root_cell(), td::BitPtr{key_buffer}, key_len, key_len, foreach_func, invert_first);
 }
 
 static inline bool set_bit(td::BitPtr ptr, bool value = true) {
@@ -2422,32 +2546,32 @@ Ref<CellSlice> PrefixDictionary::lookup_delete(td::ConstBitPtr key, int key_len)
 
 namespace dict {
 
-bool AugmentationData::check_empty(vm::CellSlice& cs) const {
+inline bool AugmentationData::check_empty(vm::CellSlice& cs) const {
   vm::CellBuilder cb;
   return eval_empty(cb) && cb.contents_equal(cs);
 }
 
-bool AugmentationData::check_leaf(vm::CellSlice& cs, vm::CellSlice& val_cs) const {
+inline bool AugmentationData::check_leaf(vm::CellSlice& cs, vm::CellSlice& val_cs) const {
   vm::CellBuilder cb;
   return eval_leaf(cb, val_cs) && cb.contents_equal(cs);
 }
 
-bool AugmentationData::check_fork(vm::CellSlice& cs, vm::CellSlice& left_cs, vm::CellSlice& right_cs) const {
+inline bool AugmentationData::check_fork(vm::CellSlice& cs, vm::CellSlice& left_cs, vm::CellSlice& right_cs) const {
   vm::CellBuilder cb;
   return eval_fork(cb, left_cs, right_cs) && cb.contents_equal(cs);
 }
 
-Ref<vm::CellSlice> AugmentationData::extract_extra(vm::CellSlice& cs) const {
+inline Ref<vm::CellSlice> AugmentationData::extract_extra(vm::CellSlice& cs) const {
   Ref<CellSlice> res{true, cs};
   return skip_extra(cs) && res.write().cut_tail(cs) ? std::move(res) : Ref<CellSlice>{};
 }
 
-Ref<vm::CellSlice> AugmentationData::extract_extra(Ref<vm::CellSlice> cs_ref) const {
+inline Ref<vm::CellSlice> AugmentationData::extract_extra(Ref<vm::CellSlice> cs_ref) const {
   CellSlice cs{*cs_ref};
   return skip_extra(cs) && cs_ref.write().cut_tail(cs) ? std::move(cs_ref) : Ref<CellSlice>{};
 }
 
-bool AugmentationData::extract_extra_to(vm::CellSlice& cs, vm::CellSlice& extra) const {
+inline bool AugmentationData::extract_extra_to(vm::CellSlice& cs, vm::CellSlice& extra) const {
   extra = cs;
   return cs.is_valid() && skip_extra(cs) && extra.cut_tail(cs);
 }
@@ -2486,7 +2610,7 @@ AugmentedDictionary::AugmentedDictionary(DictNonEmpty, Ref<CellSlice> _root, int
   }
 }
 
-bool AugmentedDictionary::validate() {
+inline bool AugmentedDictionary::validate() {
   if (is_valid()) {
     return true;
   }
@@ -2586,13 +2710,13 @@ bool AugmentedDictionary::compute_root() const {
   }
 }
 
-Ref<CellSlice> AugmentedDictionary::get_empty_dictionary() const {
+inline Ref<CellSlice> AugmentedDictionary::get_empty_dictionary() const {
   CellBuilder cb;
   cb.store_long(0, 1);
   return aug.eval_empty(cb) ? Ref<CellSlice>{true, cb.finalize()} : Ref<CellSlice>{};
 }
 
-Ref<CellSlice> AugmentedDictionary::get_node_extra(Ref<Cell> cell_ref, int n) const {
+inline Ref<CellSlice> AugmentedDictionary::get_node_extra(Ref<Cell> cell_ref, int n) const {
   if (cell_ref.is_null()) {
     CellBuilder cb;
     if (!aug.eval_empty(cb)) {
@@ -2701,12 +2825,12 @@ std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::lookup_delete_ext
   return decompose_value_extra(lookup_delete_with_extra(key, key_len));
 }
 
-bool AugmentedDictionary::check_leaf(CellSlice& cs, td::ConstBitPtr key, int key_len) const {
+inline bool AugmentedDictionary::check_leaf(CellSlice& cs, td::ConstBitPtr key, int key_len) const {
   vm::CellSlice extra;
   return aug.extract_extra_to(cs, extra) && aug.check_leaf_key_extra(cs, extra, key, key_len);
 }
 
-bool AugmentedDictionary::check_fork(CellSlice& cs, Ref<Cell> c1, Ref<Cell> c2, int n) const {
+inline bool AugmentedDictionary::check_fork(CellSlice& cs, Ref<Cell> c1, Ref<Cell> c2, int n) const {
   if (n <= 0) {
     return false;
   }
@@ -2715,7 +2839,7 @@ bool AugmentedDictionary::check_fork(CellSlice& cs, Ref<Cell> c1, Ref<Cell> c2, 
   return extra1.not_null() && extra2.not_null() && aug.check_fork(cs, extra1.write(), extra2.write());
 }
 
-Ref<Cell> AugmentedDictionary::finish_create_leaf(CellBuilder& cb, const CellSlice& value) const {
+inline Ref<Cell> AugmentedDictionary::finish_create_leaf(CellBuilder& cb, const CellSlice& value) const {
   CellSlice value_copy{value};
   if (!aug.eval_leaf(cb, value_copy)) {
     throw VmError{Excno::dict_err, "cannot compute and store extra value into an augmented dictionary cell"};
@@ -2726,7 +2850,7 @@ Ref<Cell> AugmentedDictionary::finish_create_leaf(CellBuilder& cb, const CellSli
   return cb.finalize();
 }
 
-Ref<Cell> AugmentedDictionary::finish_create_fork(CellBuilder& cb, Ref<Cell> c1, Ref<Cell> c2, int n) const {
+inline Ref<Cell> AugmentedDictionary::finish_create_fork(CellBuilder& cb, Ref<Cell> c1, Ref<Cell> c2, int n) const {
   assert(n > 0);
   if (!(cb.store_ref_bool(c1) && cb.store_ref_bool(c2))) {
     throw VmError{Excno::dict_err, "cannot store branch references into an augmented dictionary cell"};
