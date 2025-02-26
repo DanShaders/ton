@@ -1,0 +1,25 @@
+----------------------------------------------------------------------------------------------------
+state_->account_expected_defer_all_messages_ -- this is set where we place deferred accounts. can be paralleled, but should be under mutex
+state_->action_phase_cfg_ -- const config, can be accessed without mutex
+state_->after_merge_ -- const flag, can be accessed without mutex
+state_->before_split_ -- const flag, can be accessed without mutex
+state_->block_limit_status_ -- struct to limit usage tracker. should be under mutex
+state_->compute_phase_cfg_ --
+state_->deferring_messages_enabled_
+state_->in_msg_dict_
+state_->is_special_in_msg
+state_->msg_metadata_enabled_
+state_->msg_proc_lt_
+state_->now_
+state_->ns_
+state_->out_msg_dict_
+state_->ps_
+state_->shard_
+state_->start_lt_
+state_->storage_phase_cfg_
+state_->total_burned_
+state_->total_gas_used_
+state_->total_special_gas_used_
+
+
+const state_->block_limits_ -- limits, can be accessed without mutex

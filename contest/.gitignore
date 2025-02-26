@@ -1,0 +1,5 @@
+tests/*
+.ipynb_checkpoints
+data/*
+gcov/*
+

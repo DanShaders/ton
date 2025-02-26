@@ -21,6 +21,11 @@
 #include "td/actor/core/CpuWorker.h"
 #include "td/actor/core/IoWorker.h"
 
+#ifdef __linux__
+#include <pthread.h>
+#include <sched.h>
+#endif
+
 namespace td {
 namespace actor {
 namespace core {
@@ -78,6 +83,14 @@ Scheduler::~Scheduler() {
 void Scheduler::start() {
   for (size_t i = 0; i < cpu_threads_.size(); i++) {
     cpu_threads_[i] = td::thread([this, i] {
+#ifdef __linux__
+      // Pin this thread to core i on Linux
+      cpu_set_t cpuset;
+      CPU_ZERO(&cpuset);
+      CPU_SET(i, &cpuset);
+      pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+#endif
+
       this->run_in_context_impl(*this->info_->cpu_workers[i], [this, i] {
         CpuWorker(*info_->cpu_queue, *info_->cpu_queue_waiter, i, info_->cpu_local_queue).run();
       });

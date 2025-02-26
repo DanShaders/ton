@@ -1,0 +1,1605 @@
+-- Could NOT find uring (missing: uring_LIBRARIES uring_INCLUDE_DIR) 
+-- Enabling RTTI in Debug builds only (default)
+-- ROCKSDB_PLUGINS: 
+-- ROCKSDB PLUGINS TO BUILD 
+-- JNI library is disabled
+-- Could NOT find ccache
+-- Could NOT find LATEX (missing: LATEX_COMPILER) 
+-- Could NOT find LATEX (this is NOT an error)
+-- Found ZLIB: /usr/include /usr/lib/x86_64-linux-gnu/libz.so
+-- Found LZ4 lz4 /usr/include
+-- Could NOT find Readline (missing: READLINE_INCLUDE_DIR READLINE_LIBRARY) 
+-- Could NOT find Readline (this is NOT an error)
+-- Could NOT find GSL (missing: GSL_INCLUDE_DIR GSL_LIBRARY GSL_CBLAS_LIBRARY) (found version "")
+-- Could NOT find BLAS (missing: BLAS_LIBRARIES) 
+-- Found MHD: /usr/lib/x86_64-linux-gnu/libmicrohttpd.so
+-- Configuring done (0.2s)
+-- Generating done (0.3s)
+-- Build files have been written to: /home/evgenstf/ton/build
+[  0%] Built target crc32c_sse42
+[  0%] Built target secp256k1
+[  0%] Built target absl_civil_time
+[  0%] Built target absl_log_severity
+[  0%] Built target absl_spinlock_wait
+[  0%] Built target absl_exponential_biased
+[  0%] Built target crc32c_arm64
+[  0%] Built target blst
+[  0%] Checking the git repository for changes...
+[  0%] Built target absl_int128
+[  2%] Built target absl_time_zone
+[  2%] Built target tdtl
+[  2%] Built target crc32c
+[  2%] Built target absl_raw_logging_internal
+[  2%] Built target absl_throw_delegate
+[  2%] Built target absl_bad_optional_access
+[  2%] Built target absl_bad_variant_access
+[  2%] Built target absl_cordz_functions
+[  2%] Built target absl_debugging_internal
+[  2%] Built target absl_base
+[  2%] Built target absl_demangle_internal
+[  2%] Built target absl_stacktrace
+[  2%] Built target absl_city
+[  2%] Built target absl_low_level_hash
+[  2%] Built target absl_strings_internal
+[  2%] Built target absl_malloc_internal
+[  2%] Built target check_git
+[  4%] Built target absl_strings
+[  4%] Built target absl_graphcycles_internal
+[  4%] Built target git
+[  4%] Built target absl_symbolize
+[  4%] Built target absl_hash
+[  4%] Built target absl_time
+[  4%] Built target absl_cord_internal
+[  6%] Built target absl_synchronization
+[  6%] Built target absl_cordz_handle
+[  6%] Built target absl_hashtablez_sampler
+[  8%] Built target absl_cordz_info
+[ 10%] Built target absl_raw_hash_set
+[ 12%] Built target absl_cord
+[ 20%] Built target tdutils
+[ 22%] Built target generate_common
+[ 22%] Built target tdactor
+[ 22%] Generate common tl source files
+[ 25%] Built target tdfec
+[ 25%] Built target terminal
+[ 27%] Built target tdnet
+[ 27%] Built target tddb_utils
+[ 27%] Built target tl_generate_common
+[ 27%] Built target tl_api
+[ 27%] Built target tl_lite_api
+[ 31%] Built target ton_crypto_core
+[ 31%] Built target fec
+[ 31%] Built target src_parser
+[ 33%] Built target tlbc
+[ 33%] Generate block tlb source files
+[ 77%] Built target rocksdb
+[ 79%] Built target tddb
+[ 79%] Built target tlb_generate_block
+[ 79%] Generate block tlb source files
+[ 79%] Generate block tlb source files
+[ 81%] Built target ton_block
+[ 83%] Built target ton_crypto
+[ 85%] Built target tl-lite-utils
+[ 85%] Built target tl-utils
+[ 85%] Built target common
+[ 85%] Built target ton_db
+[ 85%] Built target keyring
+[ 85%] Built target keys
+[ 87%] Built target adnl
+[ 87%] Built target rldp
+[ 89%] Built target dht
+[ 89%] Built target overlay
+[ 89%] Built target catchain
+[ 91%] Built target validatorsession
+[ 93%] Built target ton_validator
+[ 97%] Built target validator
+[100%] Built target contest-solution
+[100%] Built target contest-grader
+Executing 300 tests
+==============================================================================
+  #  Name                Time      CPU  Status Comment
+==============================================================================
+  1  invalid-001.bin  0.00864  0.00769  OK     block is INVALID
+  2  invalid-002.bin  0.00981  0.00959  OK     block is INVALID
+  3  invalid-003.bin  0.00756  0.00619  OK     block is INVALID
+  4  invalid-004.bin  0.00862  0.00806  OK     block is INVALID
+  5  invalid-005.bin  0.00763  0.00581  OK     block is INVALID
+  6  invalid-006.bin  0.01194  0.01127  OK     block is INVALID
+  7  invalid-007.bin  0.00871  0.00729  OK     block is INVALID
+  8  invalid-008.bin  0.00872  0.00820  OK     block is INVALID
+  9  invalid-009.bin  0.00965  0.00672  OK     block is INVALID
+ 10  invalid-010.bin  0.01590  0.01375  OK     block is INVALID
+ 11  invalid-011.bin  0.00128  0.00040  OK     block is INVALID
+ 12  invalid-012.bin  0.00762  0.00760  OK     block is INVALID
+ 13  invalid-013.bin  0.00442  0.00365  OK     block is INVALID
+ 14  invalid-014.bin  0.00653  0.00586  OK     block is INVALID
+ 15  invalid-015.bin  0.00128  0.00080  OK     block is INVALID
+ 16  invalid-016.bin  0.00117  0.00049  OK     block is INVALID
+ 17  invalid-017.bin  0.01114  0.01082  OK     block is INVALID
+ 18  invalid-018.bin  0.00870  0.00838  OK     block is INVALID
+ 19  invalid-019.bin  0.00785  0.00786  OK     block is INVALID
+ 20  invalid-020.bin  0.00773  0.00759  OK     block is INVALID
+ 21  invalid-021.bin  0.00750  0.00602  OK     block is INVALID
+ 22  invalid-022.bin  0.00761  0.00630  OK     block is INVALID
+ 23  invalid-023.bin  0.00794  0.00739  OK     block is INVALID
+ 24  invalid-024.bin  0.00660  0.00658  OK     block is INVALID
+ 25  invalid-025.bin  0.00761  0.00701  OK     block is INVALID
+ 26  invalid-026.bin  0.00758  0.00711  OK     block is INVALID
+ 27  invalid-027.bin  0.00965  0.00940  OK     block is INVALID
+ 28  invalid-028.bin  0.00123  0.00043  OK     block is INVALID
+ 29  invalid-029.bin  0.00874  0.00809  OK     block is INVALID
+ 30  invalid-030.bin  0.00441  0.00396  OK     block is INVALID
+ 31  invalid-031.bin  0.00549  0.00491  OK     block is INVALID
+ 32  invalid-032.bin  0.00125  0.00053  OK     block is INVALID
+ 33  invalid-033.bin  0.00136  0.00073  OK     block is INVALID
+ 34  invalid-034.bin  0.00764  0.00720  OK     block is INVALID
+ 35  invalid-035.bin  0.00866  0.00875  OK     block is INVALID
+ 36  invalid-036.bin  0.00777  0.00741  OK     block is INVALID
+ 37  invalid-037.bin  0.00765  0.00727  OK     block is INVALID
+ 38  invalid-038.bin  0.00546  0.00545  OK     block is INVALID
+ 39  invalid-039.bin  0.00860  0.00783  OK     block is INVALID
+ 40  invalid-040.bin  0.00759  0.00708  OK     block is INVALID
+ 41  invalid-041.bin  0.00775  0.00749  OK     block is INVALID
+ 42  invalid-042.bin  0.00979  0.00970  OK     block is INVALID
+ 43  invalid-043.bin  0.00756  0.00752  OK     block is INVALID
+ 44  invalid-044.bin  0.00755  0.01082  OK     block is INVALID
+ 45  invalid-045.bin  0.00546  0.00517  OK     block is INVALID
+ 46  invalid-046.bin  0.00645  0.00578  OK     block is INVALID
+ 47  invalid-047.bin  0.00441  0.00372  OK     block is INVALID
+ 48  invalid-048.bin  0.00437  0.00354  OK     block is INVALID
+ 49  invalid-049.bin  0.00124  0.00053  OK     block is INVALID
+ 50  invalid-050.bin  0.00130  0.00063  OK     block is INVALID
+ 51  valid-001.bin    0.01074  0.01507  OK     block is VALID
+ 52  valid-002.bin    0.01175  0.01388  OK     block is VALID
+ 53  valid-003.bin    0.01235  0.01796  OK     block is VALID
+ 54  valid-004.bin    0.01180  0.01591  OK     block is VALID
+ 55  valid-005.bin    0.01192  0.01501  OK     block is VALID
+ 56  valid-006.bin    0.01294  0.01747  OK     block is VALID
+ 57  valid-007.bin    0.01408  0.02133  OK     block is VALID
+ 58  valid-008.bin    0.01142  0.01600  OK     block is VALID
+ 59  valid-009.bin    0.01839  0.02698  OK     block is VALID
+ 60  valid-010.bin    0.01828  0.02608  OK     block is VALID
+ 61  valid-011.bin    0.01732  0.02289  OK     block is VALID
+ 62  valid-012.bin    0.01185  0.01500  OK     block is VALID
+ 63  valid-013.bin    0.01288  0.01761  OK     block is VALID
+ 64  valid-014.bin    0.01290  0.01763  OK     block is VALID
+ 65  valid-015.bin    0.01179  0.01624  OK     block is VALID
+ 66  valid-016.bin    0.01186  0.01633  OK     block is VALID
+ 67  valid-017.bin    0.01291  0.01534  OK     block is VALID
+ 68  valid-018.bin    0.01389  0.01463  OK     block is VALID
+ 69  valid-019.bin    0.01510  0.02005  OK     block is VALID
+ 70  valid-020.bin    0.02436  0.03661  OK     block is VALID
+ 71  valid-021.bin    0.01309  0.01927  OK     block is VALID
+ 72  valid-022.bin    0.01936  0.02847  OK     block is VALID
+ 73  valid-023.bin    0.01294  0.01817  OK     block is VALID
+ 74  valid-024.bin    0.01293  0.01674  OK     block is VALID
+ 75  valid-025.bin    0.01733  0.02677  OK     block is VALID
+ 76  valid-026.bin    0.02166  0.03664  OK     block is VALID
+ 77  valid-027.bin    0.01090  0.01334  OK     block is VALID
+ 78  valid-028.bin    0.01297  0.01801  OK     block is VALID
+ 79  valid-029.bin    0.01287  0.01692  OK     block is VALID
+ 80  valid-030.bin    0.02239  0.04265  OK     block is VALID
+ 81  valid-031.bin    0.01291  0.02041  OK     block is VALID
+ 82  valid-032.bin    0.01183  0.01642  OK     block is VALID
+ 83  valid-033.bin    0.01081  0.01526  OK     block is VALID
+ 84  valid-034.bin    0.01299  0.01740  OK     block is VALID
+ 85  valid-035.bin    0.01109  0.01562  OK     block is VALID
+ 86  valid-036.bin    0.01176  0.01570  OK     block is VALID
+ 87  valid-037.bin    0.01396  0.01912  OK     block is VALID
+ 88  valid-038.bin    0.01069  0.01506  OK     block is VALID
+ 89  valid-039.bin    0.01174  0.01477  OK     block is VALID
+ 90  valid-040.bin    0.01396  0.01930  OK     block is VALID
+ 91  valid-041.bin    0.03411  0.04597  OK     block is VALID
+ 92  valid-042.bin    0.01070  0.01374  OK     block is VALID
+ 93  valid-043.bin    0.01182  0.01665  OK     block is VALID
+ 94  valid-044.bin    0.00973  0.01401  OK     block is VALID
+ 95  valid-045.bin    0.01385  0.01598  OK     block is VALID
+ 96  valid-046.bin    0.00970  0.01364  OK     block is VALID
+ 97  valid-047.bin    0.01514  0.02092  OK     block is VALID
+ 98  valid-048.bin    0.01074  0.01511  OK     block is VALID
+ 99  valid-049.bin    0.01200  0.01690  OK     block is VALID
+100  valid-050.bin    0.01386  0.01704  OK     block is VALID
+101  valid-051.bin    0.01077  0.01487  OK     block is VALID
+102  valid-052.bin    0.01293  0.01697  OK     block is VALID
+103  valid-053.bin    0.01510  0.02189  OK     block is VALID
+104  valid-054.bin    0.01080  0.01548  OK     block is VALID
+105  valid-055.bin    0.02383  0.04452  OK     block is VALID
+106  valid-056.bin    0.01184  0.01570  OK     block is VALID
+107  valid-057.bin    0.01284  0.01616  OK     block is VALID
+108  valid-058.bin    0.01186  0.01586  OK     block is VALID
+109  valid-059.bin    0.00968  0.01204  OK     block is VALID
+110  valid-060.bin    0.01288  0.01526  OK     block is VALID
+111  valid-061.bin    0.01077  0.01404  OK     block is VALID
+112  valid-062.bin    0.01079  0.01420  OK     block is VALID
+113  valid-063.bin    0.01293  0.01865  OK     block is VALID
+114  valid-064.bin    0.01180  0.01616  OK     block is VALID
+115  valid-065.bin    0.01288  0.01788  OK     block is VALID
+116  valid-066.bin    0.01178  0.01705  OK     block is VALID
+117  valid-067.bin    0.01182  0.01467  OK     block is VALID
+118  valid-068.bin    0.01186  0.01594  OK     block is VALID
+119  valid-069.bin    0.01395  0.01883  OK     block is VALID
+120  valid-070.bin    0.01182  0.01508  OK     block is VALID
+121  valid-071.bin    0.01304  0.01926  OK     block is VALID
+122  valid-072.bin    0.03079  0.04595  OK     block is VALID
+123  valid-073.bin    0.01086  0.01569  OK     block is VALID
+124  valid-074.bin    0.01190  0.01560  OK     block is VALID
+125  valid-075.bin    0.01300  0.01819  OK     block is VALID
+126  valid-076.bin    0.01404  0.01930  OK     block is VALID
+127  valid-077.bin    0.01612  0.02092  OK     block is VALID
+128  valid-078.bin    0.01305  0.01656  OK     block is VALID
+129  valid-079.bin    0.01832  0.02520  OK     block is VALID
+130  valid-080.bin    0.03414  0.04524  OK     block is VALID
+131  valid-081.bin    0.01506  0.02085  OK     block is VALID
+132  valid-082.bin    0.01192  0.01410  OK     block is VALID
+133  valid-083.bin    0.01185  0.01517  OK     block is VALID
+134  valid-084.bin    0.01416  0.02108  OK     block is VALID
+135  valid-085.bin    0.01068  0.01339  OK     block is VALID
+136  valid-086.bin    0.01195  0.01856  OK     block is VALID
+137  valid-087.bin    0.02164  0.03308  OK     block is VALID
+138  valid-088.bin    0.02306  0.03574  OK     block is VALID
+139  valid-089.bin    0.02263  0.03152  OK     block is VALID
+140  valid-090.bin    0.01074  0.01501  OK     block is VALID
+141  valid-091.bin    0.01080  0.01299  OK     block is VALID
+142  valid-092.bin    0.01838  0.02806  OK     block is VALID
+143  valid-093.bin    0.01075  0.01597  OK     block is VALID
+144  valid-094.bin    0.01190  0.01664  OK     block is VALID
+145  valid-095.bin    0.01964  0.03065  OK     block is VALID
+146  valid-096.bin    0.01421  0.01842  OK     block is VALID
+147  valid-097.bin    0.01510  0.02163  OK     block is VALID
+148  valid-098.bin    0.01286  0.01734  OK     block is VALID
+149  valid-099.bin    0.01175  0.01486  OK     block is VALID
+150  valid-100.bin    0.01186  0.01609  OK     block is VALID
+151  valid-101.bin    0.01855  0.02978  OK     block is VALID
+152  valid-102.bin    0.01095  0.01431  OK     block is VALID
+153  valid-103.bin    0.01526  0.02217  OK     block is VALID
+154  valid-104.bin    0.01082  0.01508  OK     block is VALID
+155  valid-105.bin    0.01179  0.01473  OK     block is VALID
+156  valid-106.bin    0.01718  0.02147  OK     block is VALID
+157  valid-107.bin    0.01179  0.01532  OK     block is VALID
+158  valid-108.bin    0.01503  0.02069  OK     block is VALID
+159  valid-109.bin    0.01288  0.01624  OK     block is VALID
+160  valid-110.bin    0.01528  0.02511  OK     block is VALID
+161  valid-111.bin    0.02804  0.04068  OK     block is VALID
+162  valid-112.bin    0.02071  0.02974  OK     block is VALID
+163  valid-113.bin    0.01716  0.02253  OK     block is VALID
+164  valid-114.bin    0.01070  0.01434  OK     block is VALID
+165  valid-115.bin    0.01522  0.02204  OK     block is VALID
+166  valid-116.bin    0.00859  0.01119  OK     block is VALID
+167  valid-117.bin    0.01183  0.01515  OK     block is VALID
+168  valid-118.bin    0.01511  0.02334  OK     block is VALID
+169  valid-119.bin    0.01290  0.01818  OK     block is VALID
+170  valid-120.bin    0.00964  0.01314  OK     block is VALID
+171  valid-121.bin    0.01280  0.01710  OK     block is VALID
+172  valid-122.bin    0.01180  0.01616  OK     block is VALID
+173  valid-123.bin    0.01285  0.01595  OK     block is VALID
+174  valid-124.bin    0.01720  0.02429  OK     block is VALID
+175  valid-125.bin    0.03830  0.05481  OK     block is VALID
+176  valid-126.bin    0.01503  0.02082  OK     block is VALID
+177  valid-127.bin    0.01288  0.02007  OK     block is VALID
+178  valid-128.bin    0.00861  0.01134  OK     block is VALID
+179  valid-129.bin    0.01285  0.01669  OK     block is VALID
+180  valid-130.bin    0.01497  0.01810  OK     block is VALID
+181  valid-131.bin    0.01320  0.01757  OK     block is VALID
+182  valid-132.bin    0.01194  0.01762  OK     block is VALID
+183  valid-133.bin    0.01084  0.01535  OK     block is VALID
+184  valid-134.bin    0.01942  0.02735  OK     block is VALID
+185  valid-135.bin    0.01506  0.02020  OK     block is VALID
+186  valid-136.bin    0.01293  0.01947  OK     block is VALID
+187  valid-137.bin    0.00968  0.01286  OK     block is VALID
+188  valid-138.bin    0.01285  0.01585  OK     block is VALID
+189  valid-139.bin    0.01070  0.01462  OK     block is VALID
+190  valid-140.bin    0.00974  0.01297  OK     block is VALID
+191  valid-141.bin    0.01726  0.02653  OK     block is VALID
+192  valid-142.bin    0.00968  0.01248  OK     block is VALID
+193  valid-143.bin    0.01616  0.02324  OK     block is VALID
+194  valid-144.bin    0.01077  0.01528  OK     block is VALID
+195  valid-145.bin    0.01402  0.01735  OK     block is VALID
+196  valid-146.bin    0.01185  0.01618  OK     block is VALID
+197  valid-147.bin    0.01296  0.01879  OK     block is VALID
+198  valid-148.bin    0.01533  0.02288  OK     block is VALID
+199  valid-149.bin    0.01733  0.02648  OK     block is VALID
+200  valid-150.bin    0.02647  0.03698  OK     block is VALID
+201  valid-151.bin    0.01290  0.01679  OK     block is VALID
+202  valid-152.bin    0.01075  0.01460  OK     block is VALID
+203  valid-153.bin    0.01296  0.01913  OK     block is VALID
+204  valid-154.bin    0.01073  0.01298  OK     block is VALID
+205  valid-155.bin    0.01301  0.01776  OK     block is VALID
+206  valid-156.bin    0.01616  0.02419  OK     block is VALID
+207  valid-157.bin    0.01072  0.01524  OK     block is VALID
+208  valid-158.bin    0.01072  0.01382  OK     block is VALID
+209  valid-159.bin    0.01080  0.01382  OK     block is VALID
+210  valid-160.bin    0.01076  0.01643  OK     block is VALID
+211  valid-161.bin    0.01713  0.02270  OK     block is VALID
+212  valid-162.bin    0.01187  0.01544  OK     block is VALID
+213  valid-163.bin    0.01298  0.01589  OK     block is VALID
+214  valid-164.bin    0.01071  0.01296  OK     block is VALID
+215  valid-165.bin    0.01182  0.01498  OK     block is VALID
+216  valid-166.bin    0.03198  0.04735  OK     block is VALID
+217  valid-167.bin    0.01509  0.01992  OK     block is VALID
+218  valid-168.bin    0.00987  0.01376  OK     block is VALID
+219  valid-169.bin    0.01317  0.01980  OK     block is VALID
+220  valid-170.bin    0.01072  0.01284  OK     block is VALID
+221  valid-171.bin    0.01075  0.01553  OK     block is VALID
+222  valid-172.bin    0.01185  0.01728  OK     block is VALID
+223  valid-173.bin    0.01287  0.01686  OK     block is VALID
+224  valid-174.bin    0.01188  0.01842  OK     block is VALID
+225  valid-175.bin    0.01504  0.01850  OK     block is VALID
+226  valid-176.bin    0.01212  0.01663  OK     block is VALID
+227  valid-177.bin    0.01388  0.03602  OK     block is VALID
+228  valid-178.bin    0.01185  0.01545  OK     block is VALID
+229  valid-179.bin    0.01289  0.01569  OK     block is VALID
+230  valid-180.bin    0.01192  0.01691  OK     block is VALID
+231  valid-181.bin    0.00961  0.01052  OK     block is VALID
+232  valid-182.bin    0.00970  0.01150  OK     block is VALID
+233  valid-183.bin    0.01281  0.01572  OK     block is VALID
+234  valid-184.bin    0.01389  0.01853  OK     block is VALID
+235  valid-185.bin    0.01188  0.01707  OK     block is VALID
+236  valid-186.bin    0.01079  0.01639  OK     block is VALID
+237  valid-187.bin    0.01623  0.02341  OK     block is VALID
+238  valid-188.bin    0.01839  0.02287  OK     block is VALID
+239  valid-189.bin    0.01073  0.01419  OK     block is VALID
+240  valid-190.bin    0.01074  0.01453  OK     block is VALID
+241  valid-191.bin    0.01383  0.01733  OK     block is VALID
+242  valid-192.bin    0.01176  0.01761  OK     block is VALID
+243  valid-193.bin    0.01517  0.02323  OK     block is VALID
+244  valid-194.bin    0.01607  0.02041  OK     block is VALID
+245  valid-195.bin    0.02996  0.04587  OK     block is VALID
+246  valid-196.bin    0.01074  0.01434  OK     block is VALID
+247  valid-197.bin    0.01073  0.01378  OK     block is VALID
+248  valid-198.bin    0.01189  0.01727  OK     block is VALID
+249  valid-199.bin    0.01073  0.01458  OK     block is VALID
+250  valid-200.bin    0.01072  0.01409  OK     block is VALID
+251  valid-201.bin    0.02976  0.04428  OK     block is VALID
+252  valid-202.bin    0.26842  0.51282  OK     block is VALID
+253  valid-203.bin    0.04376  0.06589  OK     block is VALID
+254  valid-204.bin    0.03086  0.04513  OK     block is VALID
+255  valid-205.bin    0.04805  0.07424  OK     block is VALID
+256  valid-206.bin    0.03655  0.05221  OK     block is VALID
+257  valid-207.bin    0.05523  0.10483  OK     block is VALID
+258  valid-208.bin    0.04503  0.06733  OK     block is VALID
+259  valid-209.bin    0.04305  0.07102  OK     block is VALID
+260  valid-210.bin    0.04372  0.07093  OK     block is VALID
+261  valid-211.bin    0.02862  0.04235  OK     block is VALID
+262  valid-212.bin    0.05017  0.07419  OK     block is VALID
+263  valid-213.bin    0.03131  0.04574  OK     block is VALID
+264  valid-214.bin    0.06110  0.10733  OK     block is VALID
+265  valid-215.bin    0.07806  0.12868  OK     block is VALID
+266  valid-216.bin    0.03555  0.05384  OK     block is VALID
+267  valid-217.bin    0.02978  0.04740  OK     block is VALID
+268  valid-218.bin    0.02915  0.04312  OK     block is VALID
+269  valid-219.bin    0.03631  0.05393  OK     block is VALID
+270  valid-220.bin    0.05506  0.08426  OK     block is VALID
+271  valid-221.bin    0.05366  0.09622  OK     block is VALID
+272  valid-222.bin    0.04720  0.06817  OK     block is VALID
+273  valid-223.bin    0.03201  0.04582  OK     block is VALID
+274  valid-224.bin    0.03142  0.04768  OK     block is VALID
+275  valid-225.bin    0.05151  0.08077  OK     block is VALID
+276  valid-226.bin    0.03334  0.04811  OK     block is VALID
+277  valid-227.bin    0.03930  0.06565  OK     block is VALID
+278  valid-228.bin    0.06220  0.10185  OK     block is VALID
+279  valid-229.bin    0.05424  0.08368  OK     block is VALID
+280  valid-230.bin    0.04137  0.06430  OK     block is VALID
+281  valid-231.bin    0.02981  0.04051  OK     block is VALID
+282  valid-232.bin    0.04687  0.07289  OK     block is VALID
+283  valid-233.bin    0.04801  0.08375  OK     block is VALID
+284  valid-234.bin    0.03853  0.05556  OK     block is VALID
+285  valid-235.bin    0.03749  0.05997  OK     block is VALID
+286  valid-236.bin    0.04254  0.06167  OK     block is VALID
+287  valid-237.bin    0.06954  0.11962  OK     block is VALID
+288  valid-238.bin    0.05950  0.11403  OK     block is VALID
+289  valid-239.bin    0.04488  0.07563  OK     block is VALID
+290  valid-240.bin    0.03757  0.06503  OK     block is VALID
+291  valid-241.bin    0.03094  0.04812  OK     block is VALID
+292  valid-242.bin    0.05413  0.10189  OK     block is VALID
+293  valid-243.bin    0.02890  0.04546  OK     block is VALID
+294  valid-244.bin    0.03629  0.05768  OK     block is VALID
+295  valid-245.bin    0.05872  0.09214  OK     block is VALID
+296  valid-246.bin    0.04668  0.07383  OK     block is VALID
+297  valid-247.bin    0.04026  0.06020  OK     block is VALID
+298  valid-248.bin    0.03305  0.05072  OK     block is VALID
+299  valid-249.bin    0.03547  0.05525  OK     block is VALID
+300  valid-250.bin    0.04702  0.06524  OK     block is VALID
+  1  invalid-001.bin  0.00759  0.00757  OK     block is INVALID
+  2  invalid-002.bin  0.00661  0.00676  OK     block is INVALID
+  3  invalid-003.bin  0.00654  0.00583  OK     block is INVALID
+  4  invalid-004.bin  0.00760  0.00712  OK     block is INVALID
+  5  invalid-005.bin  0.00871  0.00875  OK     block is INVALID
+  6  invalid-006.bin  0.00875  0.00756  OK     block is INVALID
+  7  invalid-007.bin  0.00659  0.00594  OK     block is INVALID
+  8  invalid-008.bin  0.00763  0.00719  OK     block is INVALID
+  9  invalid-009.bin  0.00860  0.00806  OK     block is INVALID
+ 10  invalid-010.bin  0.01490  0.01382  OK     block is INVALID
+ 11  invalid-011.bin  0.00124  0.00042  OK     block is INVALID
+ 12  invalid-012.bin  0.00869  0.00826  OK     block is INVALID
+ 13  invalid-013.bin  0.00331  0.00309  OK     block is INVALID
+ 14  invalid-014.bin  0.00543  0.00495  OK     block is INVALID
+ 15  invalid-015.bin  0.00124  0.00055  OK     block is INVALID
+ 16  invalid-016.bin  0.00118  0.00040  OK     block is INVALID
+ 17  invalid-017.bin  0.00821  0.00825  OK     block is INVALID
+ 18  invalid-018.bin  0.00764  0.00706  OK     block is INVALID
+ 19  invalid-019.bin  0.00785  0.00717  OK     block is INVALID
+ 20  invalid-020.bin  0.00768  0.00737  OK     block is INVALID
+ 21  invalid-021.bin  0.00746  0.00667  OK     block is INVALID
+ 22  invalid-022.bin  0.00757  0.00699  OK     block is INVALID
+ 23  invalid-023.bin  0.00886  0.00861  OK     block is INVALID
+ 24  invalid-024.bin  0.00762  0.00756  OK     block is INVALID
+ 25  invalid-025.bin  0.00865  0.00833  OK     block is INVALID
+ 26  invalid-026.bin  0.00867  0.00797  OK     block is INVALID
+ 27  invalid-027.bin  0.00748  0.00685  OK     block is INVALID
+ 28  invalid-028.bin  0.00123  0.00039  OK     block is INVALID
+ 29  invalid-029.bin  0.00763  0.00701  OK     block is INVALID
+ 30  invalid-030.bin  0.00333  0.00314  OK     block is INVALID
+ 31  invalid-031.bin  0.00547  0.00485  OK     block is INVALID
+ 32  invalid-032.bin  0.00121  0.00042  OK     block is INVALID
+ 33  invalid-033.bin  0.00130  0.00072  OK     block is INVALID
+ 34  invalid-034.bin  0.00660  0.00575  OK     block is INVALID
+ 35  invalid-035.bin  0.00972  0.00920  OK     block is INVALID
+ 36  invalid-036.bin  0.00884  0.00848  OK     block is INVALID
+ 37  invalid-037.bin  0.00765  0.00771  OK     block is INVALID
+ 38  invalid-038.bin  0.00546  0.00533  OK     block is INVALID
+ 39  invalid-039.bin  0.00964  0.00938  OK     block is INVALID
+ 40  invalid-040.bin  0.00866  0.00862  OK     block is INVALID
+ 41  invalid-041.bin  0.00810  0.00765  OK     block is INVALID
+ 42  invalid-042.bin  0.00977  0.00925  OK     block is INVALID
+ 43  invalid-043.bin  0.00652  0.00638  OK     block is INVALID
+ 44  invalid-044.bin  0.00861  0.01266  OK     block is INVALID
+ 45  invalid-045.bin  0.00756  0.00714  OK     block is INVALID
+ 46  invalid-046.bin  0.00649  0.00598  OK     block is INVALID
+ 47  invalid-047.bin  0.00338  0.00293  OK     block is INVALID
+ 48  invalid-048.bin  0.00440  0.00410  OK     block is INVALID
+ 49  invalid-049.bin  0.00124  0.00050  OK     block is INVALID
+ 50  invalid-050.bin  0.00128  0.00055  OK     block is INVALID
+ 51  valid-001.bin    0.01182  0.01632  OK     block is VALID
+ 52  valid-002.bin    0.00968  0.01308  OK     block is VALID
+ 53  valid-003.bin    0.01198  0.01670  OK     block is VALID
+ 54  valid-004.bin    0.01072  0.01510  OK     block is VALID
+ 55  valid-005.bin    0.01181  0.01507  OK     block is VALID
+ 56  valid-006.bin    0.01187  0.01555  OK     block is VALID
+ 57  valid-007.bin    0.01320  0.02010  OK     block is VALID
+ 58  valid-008.bin    0.01082  0.01549  OK     block is VALID
+ 59  valid-009.bin    0.01724  0.02718  OK     block is VALID
+ 60  valid-010.bin    0.01936  0.02773  OK     block is VALID
+ 61  valid-011.bin    0.01625  0.02237  OK     block is VALID
+ 62  valid-012.bin    0.01068  0.01313  OK     block is VALID
+ 63  valid-013.bin    0.01609  0.01931  OK     block is VALID
+ 64  valid-014.bin    0.01177  0.01569  OK     block is VALID
+ 65  valid-015.bin    0.01072  0.01471  OK     block is VALID
+ 66  valid-016.bin    0.01190  0.01683  OK     block is VALID
+ 67  valid-017.bin    0.01072  0.01365  OK     block is VALID
+ 68  valid-018.bin    0.01496  0.01734  OK     block is VALID
+ 69  valid-019.bin    0.01506  0.01993  OK     block is VALID
+ 70  valid-020.bin    0.02538  0.03732  OK     block is VALID
+ 71  valid-021.bin    0.01188  0.01801  OK     block is VALID
+ 72  valid-022.bin    0.03127  0.06156  OK     block is VALID
+ 73  valid-023.bin    0.02317  0.03169  OK     block is VALID
+ 74  valid-024.bin    0.01519  0.01855  OK     block is VALID
+ 75  valid-025.bin    0.01727  0.02705  OK     block is VALID
+ 76  valid-026.bin    0.02477  0.04005  OK     block is VALID
+ 77  valid-027.bin    0.01073  0.01299  OK     block is VALID
+ 78  valid-028.bin    0.01221  0.01707  OK     block is VALID
+ 79  valid-029.bin    0.01097  0.01462  OK     block is VALID
+ 80  valid-030.bin    0.01393  0.01868  OK     block is VALID
+ 81  valid-031.bin    0.01190  0.01895  OK     block is VALID
+ 82  valid-032.bin    0.01080  0.01468  OK     block is VALID
+ 83  valid-033.bin    0.01080  0.01353  OK     block is VALID
+ 84  valid-034.bin    0.01188  0.01594  OK     block is VALID
+ 85  valid-035.bin    0.00970  0.01429  OK     block is VALID
+ 86  valid-036.bin    0.01076  0.01492  OK     block is VALID
+ 87  valid-037.bin    0.01292  0.01700  OK     block is VALID
+ 88  valid-038.bin    0.01073  0.01482  OK     block is VALID
+ 89  valid-039.bin    0.01074  0.01404  OK     block is VALID
+ 90  valid-040.bin    0.01296  0.01719  OK     block is VALID
+ 91  valid-041.bin    0.03200  0.04258  OK     block is VALID
+ 92  valid-042.bin    0.00862  0.01239  OK     block is VALID
+ 93  valid-043.bin    0.01182  0.01653  OK     block is VALID
+ 94  valid-044.bin    0.01074  0.01463  OK     block is VALID
+ 95  valid-045.bin    0.01172  0.01404  OK     block is VALID
+ 96  valid-046.bin    0.00968  0.01403  OK     block is VALID
+ 97  valid-047.bin    0.01295  0.01853  OK     block is VALID
+ 98  valid-048.bin    0.01075  0.01447  OK     block is VALID
+ 99  valid-049.bin    0.00964  0.01415  OK     block is VALID
+100  valid-050.bin    0.01075  0.01410  OK     block is VALID
+101  valid-051.bin    0.01076  0.01495  OK     block is VALID
+102  valid-052.bin    0.01076  0.01528  OK     block is VALID
+103  valid-053.bin    0.01393  0.02202  OK     block is VALID
+104  valid-054.bin    0.01085  0.01507  OK     block is VALID
+105  valid-055.bin    0.02370  0.04199  OK     block is VALID
+106  valid-056.bin    0.01397  0.01709  OK     block is VALID
+107  valid-057.bin    0.01183  0.01638  OK     block is VALID
+108  valid-058.bin    0.01190  0.01628  OK     block is VALID
+109  valid-059.bin    0.01073  0.01376  OK     block is VALID
+110  valid-060.bin    0.01288  0.01680  OK     block is VALID
+111  valid-061.bin    0.01184  0.01560  OK     block is VALID
+112  valid-062.bin    0.01180  0.01490  OK     block is VALID
+113  valid-063.bin    0.01223  0.01764  OK     block is VALID
+114  valid-064.bin    0.01074  0.01497  OK     block is VALID
+115  valid-065.bin    0.01290  0.01665  OK     block is VALID
+116  valid-066.bin    0.01287  0.01792  OK     block is VALID
+117  valid-067.bin    0.01183  0.01513  OK     block is VALID
+118  valid-068.bin    0.01078  0.01538  OK     block is VALID
+119  valid-069.bin    0.01280  0.01645  OK     block is VALID
+120  valid-070.bin    0.01174  0.01490  OK     block is VALID
+121  valid-071.bin    0.01294  0.01759  OK     block is VALID
+122  valid-072.bin    0.03190  0.04458  OK     block is VALID
+123  valid-073.bin    0.01230  0.01700  OK     block is VALID
+124  valid-074.bin    0.01177  0.01442  OK     block is VALID
+125  valid-075.bin    0.01188  0.01628  OK     block is VALID
+126  valid-076.bin    0.01609  0.02060  OK     block is VALID
+127  valid-077.bin    0.01399  0.01960  OK     block is VALID
+128  valid-078.bin    0.01184  0.01654  OK     block is VALID
+129  valid-079.bin    0.01719  0.02402  OK     block is VALID
+130  valid-080.bin    0.03079  0.04730  OK     block is VALID
+131  valid-081.bin    0.01503  0.02063  OK     block is VALID
+132  valid-082.bin    0.01196  0.01577  OK     block is VALID
+133  valid-083.bin    0.01188  0.01515  OK     block is VALID
+134  valid-084.bin    0.01307  0.01930  OK     block is VALID
+135  valid-085.bin    0.01286  0.01574  OK     block is VALID
+136  valid-086.bin    0.01302  0.01967  OK     block is VALID
+137  valid-087.bin    0.01951  0.03084  OK     block is VALID
+138  valid-088.bin    0.02527  0.03919  OK     block is VALID
+139  valid-089.bin    0.02149  0.02945  OK     block is VALID
+140  valid-090.bin    0.01077  0.01499  OK     block is VALID
+141  valid-091.bin    0.00968  0.01314  OK     block is VALID
+142  valid-092.bin    0.01615  0.02550  OK     block is VALID
+143  valid-093.bin    0.01288  0.01713  OK     block is VALID
+144  valid-094.bin    0.01079  0.01573  OK     block is VALID
+145  valid-095.bin    0.01852  0.02873  OK     block is VALID
+146  valid-096.bin    0.01179  0.01541  OK     block is VALID
+147  valid-097.bin    0.01401  0.02046  OK     block is VALID
+148  valid-098.bin    0.01180  0.01614  OK     block is VALID
+149  valid-099.bin    0.01068  0.01382  OK     block is VALID
+150  valid-100.bin    0.01183  0.01500  OK     block is VALID
+151  valid-101.bin    0.01883  0.02902  OK     block is VALID
+152  valid-102.bin    0.01074  0.01451  OK     block is VALID
+153  valid-103.bin    0.01410  0.02129  OK     block is VALID
+154  valid-104.bin    0.01190  0.01578  OK     block is VALID
+155  valid-105.bin    0.01392  0.01599  OK     block is VALID
+156  valid-106.bin    0.01402  0.01967  OK     block is VALID
+157  valid-107.bin    0.01182  0.01603  OK     block is VALID
+158  valid-108.bin    0.01717  0.02254  OK     block is VALID
+159  valid-109.bin    0.01072  0.01500  OK     block is VALID
+160  valid-110.bin    0.01080  0.01456  OK     block is VALID
+161  valid-111.bin    0.02033  0.04025  OK     block is VALID
+162  valid-112.bin    0.01612  0.02199  OK     block is VALID
+163  valid-113.bin    0.01499  0.02068  OK     block is VALID
+164  valid-114.bin    0.01080  0.01465  OK     block is VALID
+165  valid-115.bin    0.01410  0.02091  OK     block is VALID
+166  valid-116.bin    0.00867  0.01124  OK     block is VALID
+167  valid-117.bin    0.01183  0.01464  OK     block is VALID
+168  valid-118.bin    0.01621  0.02308  OK     block is VALID
+169  valid-119.bin    0.01286  0.01851  OK     block is VALID
+170  valid-120.bin    0.00962  0.01255  OK     block is VALID
+171  valid-121.bin    0.01180  0.01635  OK     block is VALID
+172  valid-122.bin    0.01313  0.01714  OK     block is VALID
+173  valid-123.bin    0.01075  0.01415  OK     block is VALID
+174  valid-124.bin    0.01297  0.02087  OK     block is VALID
+175  valid-125.bin    0.03615  0.05502  OK     block is VALID
+176  valid-126.bin    0.01502  0.02153  OK     block is VALID
+177  valid-127.bin    0.01391  0.02073  OK     block is VALID
+178  valid-128.bin    0.01079  0.01393  OK     block is VALID
+179  valid-129.bin    0.01287  0.01639  OK     block is VALID
+180  valid-130.bin    0.01386  0.01715  OK     block is VALID
+181  valid-131.bin    0.01305  0.01641  OK     block is VALID
+182  valid-132.bin    0.01287  0.01865  OK     block is VALID
+183  valid-133.bin    0.01185  0.01566  OK     block is VALID
+184  valid-134.bin    0.01628  0.02416  OK     block is VALID
+185  valid-135.bin    0.01293  0.01934  OK     block is VALID
+186  valid-136.bin    0.01296  0.01888  OK     block is VALID
+187  valid-137.bin    0.01075  0.01437  OK     block is VALID
+188  valid-138.bin    0.01179  0.01594  OK     block is VALID
+189  valid-139.bin    0.01070  0.01432  OK     block is VALID
+190  valid-140.bin    0.01179  0.01471  OK     block is VALID
+191  valid-141.bin    0.01829  0.02881  OK     block is VALID
+192  valid-142.bin    0.00963  0.01318  OK     block is VALID
+193  valid-143.bin    0.01402  0.02130  OK     block is VALID
+194  valid-144.bin    0.01202  0.01672  OK     block is VALID
+195  valid-145.bin    0.01182  0.01665  OK     block is VALID
+196  valid-146.bin    0.01606  0.03196  OK     block is VALID
+197  valid-147.bin    0.01288  0.01917  OK     block is VALID
+198  valid-148.bin    0.01520  0.02220  OK     block is VALID
+199  valid-149.bin    0.01837  0.02760  OK     block is VALID
+200  valid-150.bin    0.02648  0.03796  OK     block is VALID
+201  valid-151.bin    0.01288  0.01764  OK     block is VALID
+202  valid-152.bin    0.00974  0.01159  OK     block is VALID
+203  valid-153.bin    0.01186  0.01760  OK     block is VALID
+204  valid-154.bin    0.01070  0.01435  OK     block is VALID
+205  valid-155.bin    0.01295  0.01622  OK     block is VALID
+206  valid-156.bin    0.01519  0.02264  OK     block is VALID
+207  valid-157.bin    0.01076  0.01523  OK     block is VALID
+208  valid-158.bin    0.00960  0.01282  OK     block is VALID
+209  valid-159.bin    0.01073  0.01519  OK     block is VALID
+210  valid-160.bin    0.01071  0.01346  OK     block is VALID
+211  valid-161.bin    0.01402  0.01926  OK     block is VALID
+212  valid-162.bin    0.01292  0.01634  OK     block is VALID
+213  valid-163.bin    0.01286  0.01682  OK     block is VALID
+214  valid-164.bin    0.01178  0.01430  OK     block is VALID
+215  valid-165.bin    0.01076  0.01442  OK     block is VALID
+216  valid-166.bin    0.02981  0.04671  OK     block is VALID
+217  valid-167.bin    0.01413  0.02009  OK     block is VALID
+218  valid-168.bin    0.01075  0.01421  OK     block is VALID
+219  valid-169.bin    0.01401  0.02158  OK     block is VALID
+220  valid-170.bin    0.01075  0.01482  OK     block is VALID
+221  valid-171.bin    0.01072  0.01472  OK     block is VALID
+222  valid-172.bin    0.01289  0.01825  OK     block is VALID
+223  valid-173.bin    0.01179  0.01577  OK     block is VALID
+224  valid-174.bin    0.01184  0.01877  OK     block is VALID
+225  valid-175.bin    0.01397  0.01942  OK     block is VALID
+226  valid-176.bin    0.01197  0.01488  OK     block is VALID
+227  valid-177.bin    0.00968  0.01290  OK     block is VALID
+228  valid-178.bin    0.01289  0.01656  OK     block is VALID
+229  valid-179.bin    0.01179  0.01598  OK     block is VALID
+230  valid-180.bin    0.01186  0.01363  OK     block is VALID
+231  valid-181.bin    0.00860  0.00993  OK     block is VALID
+232  valid-182.bin    0.00968  0.01283  OK     block is VALID
+233  valid-183.bin    0.00966  0.01273  OK     block is VALID
+234  valid-184.bin    0.01293  0.01741  OK     block is VALID
+235  valid-185.bin    0.01183  0.01657  OK     block is VALID
+236  valid-186.bin    0.01187  0.01628  OK     block is VALID
+237  valid-187.bin    0.01625  0.02249  OK     block is VALID
+238  valid-188.bin    0.01735  0.02172  OK     block is VALID
+239  valid-189.bin    0.00974  0.01382  OK     block is VALID
+240  valid-190.bin    0.01076  0.01480  OK     block is VALID
+241  valid-191.bin    0.01279  0.01612  OK     block is VALID
+242  valid-192.bin    0.01172  0.01703  OK     block is VALID
+243  valid-193.bin    0.01513  0.02335  OK     block is VALID
+244  valid-194.bin    0.01299  0.01564  OK     block is VALID
+245  valid-195.bin    0.02977  0.04892  OK     block is VALID
+246  valid-196.bin    0.01075  0.01501  OK     block is VALID
+247  valid-197.bin    0.01186  0.01413  OK     block is VALID
+248  valid-198.bin    0.01093  0.01644  OK     block is VALID
+249  valid-199.bin    0.01281  0.01688  OK     block is VALID
+250  valid-200.bin    0.01177  0.01641  OK     block is VALID
+251  valid-201.bin    0.02867  0.04240  OK     block is VALID
+252  valid-202.bin    0.26543  0.51060  OK     block is VALID
+253  valid-203.bin    0.04407  0.06803  OK     block is VALID
+254  valid-204.bin    0.03314  0.04889  OK     block is VALID
+255  valid-205.bin    0.05442  0.08609  OK     block is VALID
+256  valid-206.bin    0.04044  0.06090  OK     block is VALID
+257  valid-207.bin    0.05616  0.10080  OK     block is VALID
+258  valid-208.bin    0.04279  0.06533  OK     block is VALID
+259  valid-209.bin    0.04183  0.07159  OK     block is VALID
+260  valid-210.bin    0.04366  0.07058  OK     block is VALID
+261  valid-211.bin    0.02757  0.04025  OK     block is VALID
+262  valid-212.bin    0.04459  0.06774  OK     block is VALID
+263  valid-213.bin    0.03187  0.04641  OK     block is VALID
+264  valid-214.bin    0.06186  0.10944  OK     block is VALID
+265  valid-215.bin    0.07006  0.13013  OK     block is VALID
+266  valid-216.bin    0.03222  0.05531  OK     block is VALID
+267  valid-217.bin    0.03135  0.04877  OK     block is VALID
+268  valid-218.bin    0.03329  0.04951  OK     block is VALID
+269  valid-219.bin    0.04252  0.06714  OK     block is VALID
+270  valid-220.bin    0.04277  0.06409  OK     block is VALID
+271  valid-221.bin    0.05787  0.09372  OK     block is VALID
+272  valid-222.bin    0.04312  0.07164  OK     block is VALID
+273  valid-223.bin    0.03017  0.04637  OK     block is VALID
+274  valid-224.bin    0.03118  0.04727  OK     block is VALID
+275  valid-225.bin    0.05062  0.08360  OK     block is VALID
+276  valid-226.bin    0.03131  0.04553  OK     block is VALID
+277  valid-227.bin    0.05198  0.08865  OK     block is VALID
+278  valid-228.bin    0.04796  0.07392  OK     block is VALID
+279  valid-229.bin    0.04784  0.06866  OK     block is VALID
+280  valid-230.bin    0.05008  0.07715  OK     block is VALID
+281  valid-231.bin    0.03712  0.05397  OK     block is VALID
+282  valid-232.bin    0.03959  0.05651  OK     block is VALID
+283  valid-233.bin    0.04790  0.08094  OK     block is VALID
+284  valid-234.bin    0.03942  0.06227  OK     block is VALID
+285  valid-235.bin    0.04487  0.07158  OK     block is VALID
+286  valid-236.bin    0.04776  0.07363  OK     block is VALID
+287  valid-237.bin    0.06170  0.10442  OK     block is VALID
+288  valid-238.bin    0.06264  0.11781  OK     block is VALID
+289  valid-239.bin    0.05007  0.07958  OK     block is VALID
+290  valid-240.bin    0.03815  0.06312  OK     block is VALID
+291  valid-241.bin    0.03300  0.04794  OK     block is VALID
+292  valid-242.bin    0.05574  0.10726  OK     block is VALID
+293  valid-243.bin    0.02879  0.04392  OK     block is VALID
+294  valid-244.bin    0.03832  0.06022  OK     block is VALID
+295  valid-245.bin    0.05562  0.08271  OK     block is VALID
+296  valid-246.bin    0.04576  0.07066  OK     block is VALID
+297  valid-247.bin    0.03955  0.06084  OK     block is VALID
+298  valid-248.bin    0.03242  0.04925  OK     block is VALID
+299  valid-249.bin    0.03782  0.05966  OK     block is VALID
+300  valid-250.bin    0.04457  0.06742  OK     block is VALID
+  1  invalid-001.bin  0.00897  0.00871  OK     block is INVALID
+  2  invalid-002.bin  0.00766  0.00681  OK     block is INVALID
+  3  invalid-003.bin  0.00759  0.00688  OK     block is INVALID
+  4  invalid-004.bin  0.00760  0.00647  OK     block is INVALID
+  5  invalid-005.bin  0.00871  0.00849  OK     block is INVALID
+  6  invalid-006.bin  0.00874  0.00816  OK     block is INVALID
+  7  invalid-007.bin  0.00656  0.00659  OK     block is INVALID
+  8  invalid-008.bin  0.00871  0.00852  OK     block is INVALID
+  9  invalid-009.bin  0.00651  0.00599  OK     block is INVALID
+ 10  invalid-010.bin  0.01279  0.01147  OK     block is INVALID
+ 11  invalid-011.bin  0.00123  0.00040  OK     block is INVALID
+ 12  invalid-012.bin  0.00681  0.00641  OK     block is INVALID
+ 13  invalid-013.bin  0.00347  0.00339  OK     block is INVALID
+ 14  invalid-014.bin  0.00439  0.00406  OK     block is INVALID
+ 15  invalid-015.bin  0.00124  0.00051  OK     block is INVALID
+ 16  invalid-016.bin  0.00117  0.00029  OK     block is INVALID
+ 17  invalid-017.bin  0.00791  0.00799  OK     block is INVALID
+ 18  invalid-018.bin  0.00873  0.00665  OK     block is INVALID
+ 19  invalid-019.bin  0.00888  0.00844  OK     block is INVALID
+ 20  invalid-020.bin  0.00772  0.00719  OK     block is INVALID
+ 21  invalid-021.bin  0.00747  0.00712  OK     block is INVALID
+ 22  invalid-022.bin  0.00862  0.00817  OK     block is INVALID
+ 23  invalid-023.bin  0.00781  0.00652  OK     block is INVALID
+ 24  invalid-024.bin  0.00765  0.00744  OK     block is INVALID
+ 25  invalid-025.bin  0.00661  0.00654  OK     block is INVALID
+ 26  invalid-026.bin  0.00759  0.00681  OK     block is INVALID
+ 27  invalid-027.bin  0.00858  0.00784  OK     block is INVALID
+ 28  invalid-028.bin  0.00123  0.00037  OK     block is INVALID
+ 29  invalid-029.bin  0.00764  0.00710  OK     block is INVALID
+ 30  invalid-030.bin  0.00331  0.00320  OK     block is INVALID
+ 31  invalid-031.bin  0.00547  0.00492  OK     block is INVALID
+ 32  invalid-032.bin  0.00122  0.00044  OK     block is INVALID
+ 33  invalid-033.bin  0.00129  0.00055  OK     block is INVALID
+ 34  invalid-034.bin  0.00765  0.00732  OK     block is INVALID
+ 35  invalid-035.bin  0.00867  0.00869  OK     block is INVALID
+ 36  invalid-036.bin  0.00777  0.00725  OK     block is INVALID
+ 37  invalid-037.bin  0.00762  0.00755  OK     block is INVALID
+ 38  invalid-038.bin  0.00652  0.00616  OK     block is INVALID
+ 39  invalid-039.bin  0.00860  0.00781  OK     block is INVALID
+ 40  invalid-040.bin  0.00762  0.00768  OK     block is INVALID
+ 41  invalid-041.bin  0.00876  0.00845  OK     block is INVALID
+ 42  invalid-042.bin  0.00874  0.00826  OK     block is INVALID
+ 43  invalid-043.bin  0.00755  0.00719  OK     block is INVALID
+ 44  invalid-044.bin  0.00864  0.01272  OK     block is INVALID
+ 45  invalid-045.bin  0.00649  0.00581  OK     block is INVALID
+ 46  invalid-046.bin  0.00541  0.00530  OK     block is INVALID
+ 47  invalid-047.bin  0.00338  0.00303  OK     block is INVALID
+ 48  invalid-048.bin  0.00541  0.00490  OK     block is INVALID
+ 49  invalid-049.bin  0.00124  0.00052  OK     block is INVALID
+ 50  invalid-050.bin  0.00126  0.00058  OK     block is INVALID
+ 51  valid-001.bin    0.01074  0.01454  OK     block is VALID
+ 52  valid-002.bin    0.01071  0.01479  OK     block is VALID
+ 53  valid-003.bin    0.01188  0.01648  OK     block is VALID
+ 54  valid-004.bin    0.01182  0.01611  OK     block is VALID
+ 55  valid-005.bin    0.01073  0.01487  OK     block is VALID
+ 56  valid-006.bin    0.01181  0.01657  OK     block is VALID
+ 57  valid-007.bin    0.01409  0.02136  OK     block is VALID
+ 58  valid-008.bin    0.01088  0.01528  OK     block is VALID
+ 59  valid-009.bin    0.01724  0.02816  OK     block is VALID
+ 60  valid-010.bin    0.01722  0.02451  OK     block is VALID
+ 61  valid-011.bin    0.01516  0.02153  OK     block is VALID
+ 62  valid-012.bin    0.01080  0.01455  OK     block is VALID
+ 63  valid-013.bin    0.01290  0.01814  OK     block is VALID
+ 64  valid-014.bin    0.01073  0.01538  OK     block is VALID
+ 65  valid-015.bin    0.01283  0.01704  OK     block is VALID
+ 66  valid-016.bin    0.01186  0.01500  OK     block is VALID
+ 67  valid-017.bin    0.01073  0.01312  OK     block is VALID
+ 68  valid-018.bin    0.01175  0.01311  OK     block is VALID
+ 69  valid-019.bin    0.01606  0.02071  OK     block is VALID
+ 70  valid-020.bin    0.02865  0.04379  OK     block is VALID
+ 71  valid-021.bin    0.01205  0.01741  OK     block is VALID
+ 72  valid-022.bin    0.01832  0.02460  OK     block is VALID
+ 73  valid-023.bin    0.01204  0.01782  OK     block is VALID
+ 74  valid-024.bin    0.01499  0.01821  OK     block is VALID
+ 75  valid-025.bin    0.01734  0.02634  OK     block is VALID
+ 76  valid-026.bin    0.02065  0.03478  OK     block is VALID
+ 77  valid-027.bin    0.00973  0.01237  OK     block is VALID
+ 78  valid-028.bin    0.01195  0.01571  OK     block is VALID
+ 79  valid-029.bin    0.01073  0.01403  OK     block is VALID
+ 80  valid-030.bin    0.01397  0.01886  OK     block is VALID
+ 81  valid-031.bin    0.01200  0.02064  OK     block is VALID
+ 82  valid-032.bin    0.01074  0.01497  OK     block is VALID
+ 83  valid-033.bin    0.01089  0.01524  OK     block is VALID
+ 84  valid-034.bin    0.01186  0.01586  OK     block is VALID
+ 85  valid-035.bin    0.01076  0.01453  OK     block is VALID
+ 86  valid-036.bin    0.00984  0.01219  OK     block is VALID
+ 87  valid-037.bin    0.01290  0.01768  OK     block is VALID
+ 88  valid-038.bin    0.01073  0.01451  OK     block is VALID
+ 89  valid-039.bin    0.01070  0.01429  OK     block is VALID
+ 90  valid-040.bin    0.01400  0.01929  OK     block is VALID
+ 91  valid-041.bin    0.03095  0.04644  OK     block is VALID
+ 92  valid-042.bin    0.00962  0.01314  OK     block is VALID
+ 93  valid-043.bin    0.01289  0.01597  OK     block is VALID
+ 94  valid-044.bin    0.00968  0.01388  OK     block is VALID
+ 95  valid-045.bin    0.01279  0.01465  OK     block is VALID
+ 96  valid-046.bin    0.01075  0.01441  OK     block is VALID
+ 97  valid-047.bin    0.01310  0.01828  OK     block is VALID
+ 98  valid-048.bin    0.01078  0.01473  OK     block is VALID
+ 99  valid-049.bin    0.00967  0.01406  OK     block is VALID
+100  valid-050.bin    0.01278  0.01612  OK     block is VALID
+101  valid-051.bin    0.01082  0.01374  OK     block is VALID
+102  valid-052.bin    0.01079  0.01499  OK     block is VALID
+103  valid-053.bin    0.01395  0.02037  OK     block is VALID
+104  valid-054.bin    0.01078  0.01461  OK     block is VALID
+105  valid-055.bin    0.02470  0.04405  OK     block is VALID
+106  valid-056.bin    0.01180  0.01512  OK     block is VALID
+107  valid-057.bin    0.01288  0.01680  OK     block is VALID
+108  valid-058.bin    0.01078  0.01547  OK     block is VALID
+109  valid-059.bin    0.00966  0.01299  OK     block is VALID
+110  valid-060.bin    0.01282  0.01655  OK     block is VALID
+111  valid-061.bin    0.01072  0.01445  OK     block is VALID
+112  valid-062.bin    0.01071  0.01482  OK     block is VALID
+113  valid-063.bin    0.01187  0.01726  OK     block is VALID
+114  valid-064.bin    0.01182  0.01423  OK     block is VALID
+115  valid-065.bin    0.01295  0.01638  OK     block is VALID
+116  valid-066.bin    0.01290  0.01684  OK     block is VALID
+117  valid-067.bin    0.01177  0.01474  OK     block is VALID
+118  valid-068.bin    0.01184  0.01639  OK     block is VALID
+119  valid-069.bin    0.01283  0.01770  OK     block is VALID
+120  valid-070.bin    0.01072  0.01406  OK     block is VALID
+121  valid-071.bin    0.01186  0.01723  OK     block is VALID
+122  valid-072.bin    0.02762  0.04148  OK     block is VALID
+123  valid-073.bin    0.01183  0.01660  OK     block is VALID
+124  valid-074.bin    0.01178  0.01548  OK     block is VALID
+125  valid-075.bin    0.01192  0.01747  OK     block is VALID
+126  valid-076.bin    0.01291  0.01850  OK     block is VALID
+127  valid-077.bin    0.01296  0.01824  OK     block is VALID
+128  valid-078.bin    0.01295  0.01744  OK     block is VALID
+129  valid-079.bin    0.01512  0.02171  OK     block is VALID
+130  valid-080.bin    0.02871  0.04289  OK     block is VALID
+131  valid-081.bin    0.01538  0.02123  OK     block is VALID
+132  valid-082.bin    0.01289  0.01690  OK     block is VALID
+133  valid-083.bin    0.01081  0.01387  OK     block is VALID
+134  valid-084.bin    0.01302  0.01929  OK     block is VALID
+135  valid-085.bin    0.01070  0.01361  OK     block is VALID
+136  valid-086.bin    0.01192  0.01819  OK     block is VALID
+137  valid-087.bin    0.02067  0.03275  OK     block is VALID
+138  valid-088.bin    0.02307  0.03669  OK     block is VALID
+139  valid-089.bin    0.01764  0.02728  OK     block is VALID
+140  valid-090.bin    0.01181  0.01639  OK     block is VALID
+141  valid-091.bin    0.01181  0.01533  OK     block is VALID
+142  valid-092.bin    0.01733  0.02693  OK     block is VALID
+143  valid-093.bin    0.01077  0.01466  OK     block is VALID
+144  valid-094.bin    0.01298  0.01826  OK     block is VALID
+145  valid-095.bin    0.01977  0.03049  OK     block is VALID
+146  valid-096.bin    0.01181  0.01553  OK     block is VALID
+147  valid-097.bin    0.01527  0.02239  OK     block is VALID
+148  valid-098.bin    0.01185  0.01623  OK     block is VALID
+149  valid-099.bin    0.01179  0.01451  OK     block is VALID
+150  valid-100.bin    0.01391  0.01810  OK     block is VALID
+151  valid-101.bin    0.01844  0.02856  OK     block is VALID
+152  valid-102.bin    0.01178  0.01510  OK     block is VALID
+153  valid-103.bin    0.01523  0.02168  OK     block is VALID
+154  valid-104.bin    0.01083  0.01426  OK     block is VALID
+155  valid-105.bin    0.01399  0.01739  OK     block is VALID
+156  valid-106.bin    0.01528  0.02084  OK     block is VALID
+157  valid-107.bin    0.01179  0.01633  OK     block is VALID
+158  valid-108.bin    0.01507  0.02141  OK     block is VALID
+159  valid-109.bin    0.01075  0.01420  OK     block is VALID
+160  valid-110.bin    0.01293  0.01747  OK     block is VALID
+161  valid-111.bin    0.01714  0.02365  OK     block is VALID
+162  valid-112.bin    0.01623  0.02299  OK     block is VALID
+163  valid-113.bin    0.01533  0.02076  OK     block is VALID
+164  valid-114.bin    0.01076  0.01401  OK     block is VALID
+165  valid-115.bin    0.01420  0.02127  OK     block is VALID
+166  valid-116.bin    0.00867  0.01091  OK     block is VALID
+167  valid-117.bin    0.01182  0.01540  OK     block is VALID
+168  valid-118.bin    0.02911  0.04510  OK     block is VALID
+169  valid-119.bin    0.02051  0.02795  OK     block is VALID
+170  valid-120.bin    0.01180  0.01606  OK     block is VALID
+171  valid-121.bin    0.01281  0.01711  OK     block is VALID
+172  valid-122.bin    0.01284  0.01744  OK     block is VALID
+173  valid-123.bin    0.01177  0.01550  OK     block is VALID
+174  valid-124.bin    0.01399  0.02173  OK     block is VALID
+175  valid-125.bin    0.04243  0.06798  OK     block is VALID
+176  valid-126.bin    0.01503  0.02107  OK     block is VALID
+177  valid-127.bin    0.01287  0.01892  OK     block is VALID
+178  valid-128.bin    0.01073  0.01355  OK     block is VALID
+179  valid-129.bin    0.00973  0.01181  OK     block is VALID
+180  valid-130.bin    0.01284  0.01586  OK     block is VALID
+181  valid-131.bin    0.01509  0.01975  OK     block is VALID
+182  valid-132.bin    0.01290  0.01842  OK     block is VALID
+183  valid-133.bin    0.01195  0.01572  OK     block is VALID
+184  valid-134.bin    0.01742  0.02476  OK     block is VALID
+185  valid-135.bin    0.01400  0.01810  OK     block is VALID
+186  valid-136.bin    0.01297  0.01779  OK     block is VALID
+187  valid-137.bin    0.00968  0.01356  OK     block is VALID
+188  valid-138.bin    0.01290  0.01597  OK     block is VALID
+189  valid-139.bin    0.01074  0.01350  OK     block is VALID
+190  valid-140.bin    0.00969  0.01177  OK     block is VALID
+191  valid-141.bin    0.01955  0.02928  OK     block is VALID
+192  valid-142.bin    0.00973  0.01295  OK     block is VALID
+193  valid-143.bin    0.01406  0.02161  OK     block is VALID
+194  valid-144.bin    0.01283  0.01738  OK     block is VALID
+195  valid-145.bin    0.01180  0.01560  OK     block is VALID
+196  valid-146.bin    0.01189  0.01607  OK     block is VALID
+197  valid-147.bin    0.01300  0.01898  OK     block is VALID
+198  valid-148.bin    0.01626  0.02301  OK     block is VALID
+199  valid-149.bin    0.01844  0.02808  OK     block is VALID
+200  valid-150.bin    0.02748  0.03868  OK     block is VALID
+201  valid-151.bin    0.01180  0.01517  OK     block is VALID
+202  valid-152.bin    0.00973  0.01352  OK     block is VALID
+203  valid-153.bin    0.01294  0.01818  OK     block is VALID
+204  valid-154.bin    0.01179  0.01518  OK     block is VALID
+205  valid-155.bin    0.01293  0.01712  OK     block is VALID
+206  valid-156.bin    0.01727  0.02442  OK     block is VALID
+207  valid-157.bin    0.01186  0.01569  OK     block is VALID
+208  valid-158.bin    0.00965  0.01166  OK     block is VALID
+209  valid-159.bin    0.01077  0.01435  OK     block is VALID
+210  valid-160.bin    0.01069  0.01518  OK     block is VALID
+211  valid-161.bin    0.01308  0.01827  OK     block is VALID
+212  valid-162.bin    0.01188  0.01660  OK     block is VALID
+213  valid-163.bin    0.01413  0.01866  OK     block is VALID
+214  valid-164.bin    0.01075  0.01324  OK     block is VALID
+215  valid-165.bin    0.01178  0.01540  OK     block is VALID
+216  valid-166.bin    0.02983  0.04439  OK     block is VALID
+217  valid-167.bin    0.01406  0.01923  OK     block is VALID
+218  valid-168.bin    0.01178  0.01515  OK     block is VALID
+219  valid-169.bin    0.01397  0.02110  OK     block is VALID
+220  valid-170.bin    0.01080  0.01344  OK     block is VALID
+221  valid-171.bin    0.01179  0.01624  OK     block is VALID
+222  valid-172.bin    0.01298  0.01850  OK     block is VALID
+223  valid-173.bin    0.01186  0.01544  OK     block is VALID
+224  valid-174.bin    0.01408  0.02049  OK     block is VALID
+225  valid-175.bin    0.01395  0.01886  OK     block is VALID
+226  valid-176.bin    0.01216  0.01651  OK     block is VALID
+227  valid-177.bin    0.01177  0.01422  OK     block is VALID
+228  valid-178.bin    0.01189  0.01616  OK     block is VALID
+229  valid-179.bin    0.01183  0.01574  OK     block is VALID
+230  valid-180.bin    0.01185  0.01639  OK     block is VALID
+231  valid-181.bin    0.00857  0.01095  OK     block is VALID
+232  valid-182.bin    0.00968  0.01247  OK     block is VALID
+233  valid-183.bin    0.01071  0.01344  OK     block is VALID
+234  valid-184.bin    0.01287  0.01789  OK     block is VALID
+235  valid-185.bin    0.01186  0.01625  OK     block is VALID
+236  valid-186.bin    0.01078  0.01593  OK     block is VALID
+237  valid-187.bin    0.01516  0.02085  OK     block is VALID
+238  valid-188.bin    0.01627  0.02088  OK     block is VALID
+239  valid-189.bin    0.00967  0.01389  OK     block is VALID
+240  valid-190.bin    0.01389  0.01735  OK     block is VALID
+241  valid-191.bin    0.01279  0.01586  OK     block is VALID
+242  valid-192.bin    0.01179  0.01648  OK     block is VALID
+243  valid-193.bin    0.01525  0.02087  OK     block is VALID
+244  valid-194.bin    0.01290  0.01742  OK     block is VALID
+245  valid-195.bin    0.02876  0.04162  OK     block is VALID
+246  valid-196.bin    0.01076  0.01412  OK     block is VALID
+247  valid-197.bin    0.00967  0.01296  OK     block is VALID
+248  valid-198.bin    0.01081  0.01643  OK     block is VALID
+249  valid-199.bin    0.01180  0.01447  OK     block is VALID
+250  valid-200.bin    0.01073  0.01509  OK     block is VALID
+251  valid-201.bin    0.03177  0.04959  OK     block is VALID
+252  valid-202.bin    0.25810  0.49909  OK     block is VALID
+253  valid-203.bin    0.04592  0.07150  OK     block is VALID
+254  valid-204.bin    0.03094  0.04876  OK     block is VALID
+255  valid-205.bin    0.05247  0.08665  OK     block is VALID
+256  valid-206.bin    0.03746  0.05802  OK     block is VALID
+257  valid-207.bin    0.04820  0.09137  OK     block is VALID
+258  valid-208.bin    0.04368  0.06672  OK     block is VALID
+259  valid-209.bin    0.03938  0.06152  OK     block is VALID
+260  valid-210.bin    0.04486  0.06805  OK     block is VALID
+261  valid-211.bin    0.02891  0.04075  OK     block is VALID
+262  valid-212.bin    0.04362  0.06658  OK     block is VALID
+263  valid-213.bin    0.03408  0.04824  OK     block is VALID
+264  valid-214.bin    0.05960  0.09942  OK     block is VALID
+265  valid-215.bin    0.07336  0.13578  OK     block is VALID
+266  valid-216.bin    0.02993  0.05080  OK     block is VALID
+267  valid-217.bin    0.03612  0.05768  OK     block is VALID
+268  valid-218.bin    0.02982  0.04535  OK     block is VALID
+269  valid-219.bin    0.03416  0.05358  OK     block is VALID
+270  valid-220.bin    0.04386  0.06535  OK     block is VALID
+271  valid-221.bin    0.05775  0.10454  OK     block is VALID
+272  valid-222.bin    0.04705  0.07639  OK     block is VALID
+273  valid-223.bin    0.02984  0.04736  OK     block is VALID
+274  valid-224.bin    0.03295  0.04697  OK     block is VALID
+275  valid-225.bin    0.04865  0.07727  OK     block is VALID
+276  valid-226.bin    0.03493  0.04997  OK     block is VALID
+277  valid-227.bin    0.04924  0.08078  OK     block is VALID
+278  valid-228.bin    0.05206  0.07853  OK     block is VALID
+279  valid-229.bin    0.04995  0.07359  OK     block is VALID
+280  valid-230.bin    0.04260  0.06597  OK     block is VALID
+281  valid-231.bin    0.03930  0.05756  OK     block is VALID
+282  valid-232.bin    0.03952  0.05981  OK     block is VALID
+283  valid-233.bin    0.04897  0.08160  OK     block is VALID
+284  valid-234.bin    0.03587  0.05399  OK     block is VALID
+285  valid-235.bin    0.04185  0.07015  OK     block is VALID
+286  valid-236.bin    0.04019  0.05810  OK     block is VALID
+287  valid-237.bin    0.06411  0.11003  OK     block is VALID
+288  valid-238.bin    0.06591  0.11889  OK     block is VALID
+289  valid-239.bin    0.05340  0.08412  OK     block is VALID
+290  valid-240.bin    0.04405  0.07176  OK     block is VALID
+291  valid-241.bin    0.03633  0.05549  OK     block is VALID
+292  valid-242.bin    0.05733  0.11461  OK     block is VALID
+293  valid-243.bin    0.02977  0.04514  OK     block is VALID
+294  valid-244.bin    0.03539  0.05525  OK     block is VALID
+295  valid-245.bin    0.05441  0.09256  OK     block is VALID
+296  valid-246.bin    0.04845  0.07247  OK     block is VALID
+297  valid-247.bin    0.04243  0.06330  OK     block is VALID
+298  valid-248.bin    0.03349  0.05095  OK     block is VALID
+299  valid-249.bin    0.03425  0.05730  OK     block is VALID
+300  valid-250.bin    0.05228  0.07566  OK     block is VALID
+  1  invalid-001.bin  0.00752  0.00749  OK     block is INVALID
+  2  invalid-002.bin  0.00764  0.00596  OK     block is INVALID
+  3  invalid-003.bin  0.00653  0.00576  OK     block is INVALID
+  4  invalid-004.bin  0.00759  0.00725  OK     block is INVALID
+  5  invalid-005.bin  0.00766  0.00769  OK     block is INVALID
+  6  invalid-006.bin  0.00872  0.00868  OK     block is INVALID
+  7  invalid-007.bin  0.00658  0.00594  OK     block is INVALID
+  8  invalid-008.bin  0.00764  0.00731  OK     block is INVALID
+  9  invalid-009.bin  0.00650  0.00595  OK     block is INVALID
+ 10  invalid-010.bin  0.01378  0.01346  OK     block is INVALID
+ 11  invalid-011.bin  0.00124  0.00043  OK     block is INVALID
+ 12  invalid-012.bin  0.00657  0.00595  OK     block is INVALID
+ 13  invalid-013.bin  0.00332  0.00330  OK     block is INVALID
+ 14  invalid-014.bin  0.00441  0.00425  OK     block is INVALID
+ 15  invalid-015.bin  0.00124  0.00052  OK     block is INVALID
+ 16  invalid-016.bin  0.00119  0.00000  OK     block is INVALID
+ 17  invalid-017.bin  0.00894  0.00844  OK     block is INVALID
+ 18  invalid-018.bin  0.00760  0.00709  OK     block is INVALID
+ 19  invalid-019.bin  0.00890  0.00792  OK     block is INVALID
+ 20  invalid-020.bin  0.00770  0.00730  OK     block is INVALID
+ 21  invalid-021.bin  0.00853  0.00810  OK     block is INVALID
+ 22  invalid-022.bin  0.00758  0.00744  OK     block is INVALID
+ 23  invalid-023.bin  0.00780  0.00741  OK     block is INVALID
+ 24  invalid-024.bin  0.00762  0.00727  OK     block is INVALID
+ 25  invalid-025.bin  0.00656  0.00627  OK     block is INVALID
+ 26  invalid-026.bin  0.00651  0.00614  OK     block is INVALID
+ 27  invalid-027.bin  0.00856  0.00814  OK     block is INVALID
+ 28  invalid-028.bin  0.00121  0.00038  OK     block is INVALID
+ 29  invalid-029.bin  0.00659  0.00666  OK     block is INVALID
+ 30  invalid-030.bin  0.00332  0.00302  OK     block is INVALID
+ 31  invalid-031.bin  0.00547  0.00546  OK     block is INVALID
+ 32  invalid-032.bin  0.00121  0.00043  OK     block is INVALID
+ 33  invalid-033.bin  0.00131  0.00100  OK     block is INVALID
+ 34  invalid-034.bin  0.00553  0.00374  OK     block is INVALID
+ 35  invalid-035.bin  0.00971  0.00826  OK     block is INVALID
+ 36  invalid-036.bin  0.00778  0.00765  OK     block is INVALID
+ 37  invalid-037.bin  0.00762  0.00715  OK     block is INVALID
+ 38  invalid-038.bin  0.00653  0.00649  OK     block is INVALID
+ 39  invalid-039.bin  0.00970  0.00945  OK     block is INVALID
+ 40  invalid-040.bin  0.00972  0.00924  OK     block is INVALID
+ 41  invalid-041.bin  0.00879  0.00819  OK     block is INVALID
+ 42  invalid-042.bin  0.00875  0.00848  OK     block is INVALID
+ 43  invalid-043.bin  0.00648  0.00625  OK     block is INVALID
+ 44  invalid-044.bin  0.00761  0.01115  OK     block is INVALID
+ 45  invalid-045.bin  0.00543  0.00550  OK     block is INVALID
+ 46  invalid-046.bin  0.00645  0.00579  OK     block is INVALID
+ 47  invalid-047.bin  0.00337  0.00326  OK     block is INVALID
+ 48  invalid-048.bin  0.00544  0.00476  OK     block is INVALID
+ 49  invalid-049.bin  0.00126  0.00055  OK     block is INVALID
+ 50  invalid-050.bin  0.00127  0.00059  OK     block is INVALID
+ 51  valid-001.bin    0.01074  0.01398  OK     block is VALID
+ 52  valid-002.bin    0.01068  0.01470  OK     block is VALID
+ 53  valid-003.bin    0.01185  0.01763  OK     block is VALID
+ 54  valid-004.bin    0.01186  0.01664  OK     block is VALID
+ 55  valid-005.bin    0.01070  0.01484  OK     block is VALID
+ 56  valid-006.bin    0.01187  0.01655  OK     block is VALID
+ 57  valid-007.bin    0.01302  0.01983  OK     block is VALID
+ 58  valid-008.bin    0.01191  0.01338  OK     block is VALID
+ 59  valid-009.bin    0.02044  0.03013  OK     block is VALID
+ 60  valid-010.bin    0.01832  0.02643  OK     block is VALID
+ 61  valid-011.bin    0.01515  0.02191  OK     block is VALID
+ 62  valid-012.bin    0.00969  0.01369  OK     block is VALID
+ 63  valid-013.bin    0.01291  0.01846  OK     block is VALID
+ 64  valid-014.bin    0.01072  0.01538  OK     block is VALID
+ 65  valid-015.bin    0.01075  0.01483  OK     block is VALID
+ 66  valid-016.bin    0.01502  0.01899  OK     block is VALID
+ 67  valid-017.bin    0.01071  0.01333  OK     block is VALID
+ 68  valid-018.bin    0.01385  0.01603  OK     block is VALID
+ 69  valid-019.bin    0.01504  0.02029  OK     block is VALID
+ 70  valid-020.bin    0.02227  0.03348  OK     block is VALID
+ 71  valid-021.bin    0.01221  0.01801  OK     block is VALID
+ 72  valid-022.bin    0.01946  0.02782  OK     block is VALID
+ 73  valid-023.bin    0.01193  0.01754  OK     block is VALID
+ 74  valid-024.bin    0.01196  0.01448  OK     block is VALID
+ 75  valid-025.bin    0.01771  0.02624  OK     block is VALID
+ 76  valid-026.bin    0.02483  0.04039  OK     block is VALID
+ 77  valid-027.bin    0.01078  0.01339  OK     block is VALID
+ 78  valid-028.bin    0.01197  0.01650  OK     block is VALID
+ 79  valid-029.bin    0.01081  0.01247  OK     block is VALID
+ 80  valid-030.bin    0.01403  0.01904  OK     block is VALID
+ 81  valid-031.bin    0.01299  0.02050  OK     block is VALID
+ 82  valid-032.bin    0.01184  0.01632  OK     block is VALID
+ 83  valid-033.bin    0.01084  0.01537  OK     block is VALID
+ 84  valid-034.bin    0.01190  0.01652  OK     block is VALID
+ 85  valid-035.bin    0.01081  0.01276  OK     block is VALID
+ 86  valid-036.bin    0.00972  0.01307  OK     block is VALID
+ 87  valid-037.bin    0.01297  0.01712  OK     block is VALID
+ 88  valid-038.bin    0.00966  0.01359  OK     block is VALID
+ 89  valid-039.bin    0.01069  0.01354  OK     block is VALID
+ 90  valid-040.bin    0.01293  0.01770  OK     block is VALID
+ 91  valid-041.bin    0.03406  0.05455  OK     block is VALID
+ 92  valid-042.bin    0.00862  0.01315  OK     block is VALID
+ 93  valid-043.bin    0.01296  0.01722  OK     block is VALID
+ 94  valid-044.bin    0.00974  0.01350  OK     block is VALID
+ 95  valid-045.bin    0.01177  0.01312  OK     block is VALID
+ 96  valid-046.bin    0.00969  0.01412  OK     block is VALID
+ 97  valid-047.bin    0.01404  0.01991  OK     block is VALID
+ 98  valid-048.bin    0.01179  0.01528  OK     block is VALID
+ 99  valid-049.bin    0.00973  0.01485  OK     block is VALID
+100  valid-050.bin    0.01173  0.01500  OK     block is VALID
+101  valid-051.bin    0.01076  0.01459  OK     block is VALID
+102  valid-052.bin    0.01188  0.01522  OK     block is VALID
+103  valid-053.bin    0.01285  0.01913  OK     block is VALID
+104  valid-054.bin    0.01078  0.01525  OK     block is VALID
+105  valid-055.bin    0.02791  0.04461  OK     block is VALID
+106  valid-056.bin    0.01188  0.01478  OK     block is VALID
+107  valid-057.bin    0.01285  0.01709  OK     block is VALID
+108  valid-058.bin    0.01190  0.01656  OK     block is VALID
+109  valid-059.bin    0.01076  0.01361  OK     block is VALID
+110  valid-060.bin    0.01290  0.01647  OK     block is VALID
+111  valid-061.bin    0.01077  0.01333  OK     block is VALID
+112  valid-062.bin    0.01184  0.01493  OK     block is VALID
+113  valid-063.bin    0.01294  0.01906  OK     block is VALID
+114  valid-064.bin    0.01193  0.01588  OK     block is VALID
+115  valid-065.bin    0.01287  0.01745  OK     block is VALID
+116  valid-066.bin    0.01411  0.01943  OK     block is VALID
+117  valid-067.bin    0.01180  0.01603  OK     block is VALID
+118  valid-068.bin    0.01185  0.01623  OK     block is VALID
+119  valid-069.bin    0.01289  0.01697  OK     block is VALID
+120  valid-070.bin    0.01285  0.01587  OK     block is VALID
+121  valid-071.bin    0.01291  0.01920  OK     block is VALID
+122  valid-072.bin    0.02970  0.04347  OK     block is VALID
+123  valid-073.bin    0.01292  0.01647  OK     block is VALID
+124  valid-074.bin    0.01175  0.01583  OK     block is VALID
+125  valid-075.bin    0.01297  0.01846  OK     block is VALID
+126  valid-076.bin    0.01396  0.01928  OK     block is VALID
+127  valid-077.bin    0.01402  0.01954  OK     block is VALID
+128  valid-078.bin    0.01212  0.01689  OK     block is VALID
+129  valid-079.bin    0.01519  0.02084  OK     block is VALID
+130  valid-080.bin    0.03415  0.05185  OK     block is VALID
+131  valid-081.bin    0.01400  0.01925  OK     block is VALID
+132  valid-082.bin    0.01191  0.01501  OK     block is VALID
+133  valid-083.bin    0.01074  0.01392  OK     block is VALID
+134  valid-084.bin    0.01303  0.01943  OK     block is VALID
+135  valid-085.bin    0.01174  0.01499  OK     block is VALID
+136  valid-086.bin    0.01309  0.02015  OK     block is VALID
+137  valid-087.bin    0.02162  0.03497  OK     block is VALID
+138  valid-088.bin    0.02275  0.03638  OK     block is VALID
+139  valid-089.bin    0.01841  0.02842  OK     block is VALID
+140  valid-090.bin    0.01813  0.02874  OK     block is VALID
+141  valid-091.bin    0.01827  0.02350  OK     block is VALID
+142  valid-092.bin    0.02066  0.03391  OK     block is VALID
+143  valid-093.bin    0.01078  0.01568  OK     block is VALID
+144  valid-094.bin    0.01089  0.01647  OK     block is VALID
+145  valid-095.bin    0.01885  0.02923  OK     block is VALID
+146  valid-096.bin    0.01191  0.01573  OK     block is VALID
+147  valid-097.bin    0.01405  0.02019  OK     block is VALID
+148  valid-098.bin    0.01290  0.01709  OK     block is VALID
+149  valid-099.bin    0.01069  0.01404  OK     block is VALID
+150  valid-100.bin    0.01182  0.01652  OK     block is VALID
+151  valid-101.bin    0.01839  0.02803  OK     block is VALID
+152  valid-102.bin    0.01181  0.01468  OK     block is VALID
+153  valid-103.bin    0.01515  0.02132  OK     block is VALID
+154  valid-104.bin    0.01189  0.01601  OK     block is VALID
+155  valid-105.bin    0.01282  0.01563  OK     block is VALID
+156  valid-106.bin    0.01409  0.01949  OK     block is VALID
+157  valid-107.bin    0.01283  0.01708  OK     block is VALID
+158  valid-108.bin    0.01295  0.01910  OK     block is VALID
+159  valid-109.bin    0.01181  0.01541  OK     block is VALID
+160  valid-110.bin    0.01071  0.01498  OK     block is VALID
+161  valid-111.bin    0.01607  0.02294  OK     block is VALID
+162  valid-112.bin    0.01610  0.02359  OK     block is VALID
+163  valid-113.bin    0.01604  0.02042  OK     block is VALID
+164  valid-114.bin    0.01083  0.01374  OK     block is VALID
+165  valid-115.bin    0.01331  0.01955  OK     block is VALID
+166  valid-116.bin    0.00961  0.01213  OK     block is VALID
+167  valid-117.bin    0.01175  0.01451  OK     block is VALID
+168  valid-118.bin    0.01619  0.02373  OK     block is VALID
+169  valid-119.bin    0.01390  0.01926  OK     block is VALID
+170  valid-120.bin    0.00859  0.01247  OK     block is VALID
+171  valid-121.bin    0.01494  0.01918  OK     block is VALID
+172  valid-122.bin    0.01178  0.01549  OK     block is VALID
+173  valid-123.bin    0.01174  0.01567  OK     block is VALID
+174  valid-124.bin    0.01299  0.02048  OK     block is VALID
+175  valid-125.bin    0.03825  0.06001  OK     block is VALID
+176  valid-126.bin    0.01401  0.02016  OK     block is VALID
+177  valid-127.bin    0.01296  0.01955  OK     block is VALID
+178  valid-128.bin    0.00965  0.01219  OK     block is VALID
+179  valid-129.bin    0.01075  0.01447  OK     block is VALID
+180  valid-130.bin    0.01175  0.01485  OK     block is VALID
+181  valid-131.bin    0.01304  0.01811  OK     block is VALID
+182  valid-132.bin    0.01211  0.01791  OK     block is VALID
+183  valid-133.bin    0.01189  0.01385  OK     block is VALID
+184  valid-134.bin    0.01555  0.02287  OK     block is VALID
+185  valid-135.bin    0.02572  0.08505  OK     block is VALID
+186  valid-136.bin    0.01221  0.01786  OK     block is VALID
+187  valid-137.bin    0.00861  0.01180  OK     block is VALID
+188  valid-138.bin    0.01088  0.01424  OK     block is VALID
+189  valid-139.bin    0.01070  0.01382  OK     block is VALID
+190  valid-140.bin    0.00970  0.01291  OK     block is VALID
+191  valid-141.bin    0.01840  0.02963  OK     block is VALID
+192  valid-142.bin    0.00967  0.01316  OK     block is VALID
+193  valid-143.bin    0.01413  0.01997  OK     block is VALID
+194  valid-144.bin    0.01390  0.01680  OK     block is VALID
+195  valid-145.bin    0.01183  0.01749  OK     block is VALID
+196  valid-146.bin    0.01403  0.01797  OK     block is VALID
+197  valid-147.bin    0.01606  0.02149  OK     block is VALID
+198  valid-148.bin    0.01511  0.02249  OK     block is VALID
+199  valid-149.bin    0.01728  0.02711  OK     block is VALID
+200  valid-150.bin    0.02644  0.03788  OK     block is VALID
+201  valid-151.bin    0.01402  0.01894  OK     block is VALID
+202  valid-152.bin    0.00972  0.01361  OK     block is VALID
+203  valid-153.bin    0.01204  0.01772  OK     block is VALID
+204  valid-154.bin    0.01074  0.01430  OK     block is VALID
+205  valid-155.bin    0.02046  0.02453  OK     block is VALID
+206  valid-156.bin    0.01786  0.02733  OK     block is VALID
+207  valid-157.bin    0.01441  0.01874  OK     block is VALID
+208  valid-158.bin    0.00932  0.01279  OK     block is VALID
+209  valid-159.bin    0.01195  0.01602  OK     block is VALID
+210  valid-160.bin    0.01183  0.01730  OK     block is VALID
+211  valid-161.bin    0.01613  0.02149  OK     block is VALID
+212  valid-162.bin    0.01503  0.01880  OK     block is VALID
+213  valid-163.bin    0.01397  0.01819  OK     block is VALID
+214  valid-164.bin    0.00970  0.01215  OK     block is VALID
+215  valid-165.bin    0.01287  0.01522  OK     block is VALID
+216  valid-166.bin    0.02976  0.04463  OK     block is VALID
+217  valid-167.bin    0.01400  0.01917  OK     block is VALID
+218  valid-168.bin    0.01289  0.01676  OK     block is VALID
+219  valid-169.bin    0.01300  0.01982  OK     block is VALID
+220  valid-170.bin    0.01091  0.01461  OK     block is VALID
+221  valid-171.bin    0.01077  0.01525  OK     block is VALID
+222  valid-172.bin    0.01295  0.01872  OK     block is VALID
+223  valid-173.bin    0.01389  0.01789  OK     block is VALID
+224  valid-174.bin    0.01289  0.01929  OK     block is VALID
+225  valid-175.bin    0.01404  0.01950  OK     block is VALID
+226  valid-176.bin    0.01292  0.01776  OK     block is VALID
+227  valid-177.bin    0.01074  0.01478  OK     block is VALID
+228  valid-178.bin    0.01076  0.01536  OK     block is VALID
+229  valid-179.bin    0.01180  0.01489  OK     block is VALID
+230  valid-180.bin    0.01181  0.01643  OK     block is VALID
+231  valid-181.bin    0.00861  0.01092  OK     block is VALID
+232  valid-182.bin    0.01077  0.01461  OK     block is VALID
+233  valid-183.bin    0.01172  0.01460  OK     block is VALID
+234  valid-184.bin    0.01503  0.01988  OK     block is VALID
+235  valid-185.bin    0.01180  0.01752  OK     block is VALID
+236  valid-186.bin    0.01400  0.01951  OK     block is VALID
+237  valid-187.bin    0.01625  0.02178  OK     block is VALID
+238  valid-188.bin    0.01853  0.02348  OK     block is VALID
+239  valid-189.bin    0.00989  0.01381  OK     block is VALID
+240  valid-190.bin    0.01076  0.01398  OK     block is VALID
+241  valid-191.bin    0.01288  0.01574  OK     block is VALID
+242  valid-192.bin    0.01078  0.01518  OK     block is VALID
+243  valid-193.bin    0.01617  0.02334  OK     block is VALID
+244  valid-194.bin    0.01400  0.01862  OK     block is VALID
+245  valid-195.bin    0.03083  0.04723  OK     block is VALID
+246  valid-196.bin    0.01228  0.01527  OK     block is VALID
+247  valid-197.bin    0.00966  0.01276  OK     block is VALID
+248  valid-198.bin    0.01187  0.01559  OK     block is VALID
+249  valid-199.bin    0.01074  0.01455  OK     block is VALID
+250  valid-200.bin    0.01182  0.01595  OK     block is VALID
+251  valid-201.bin    0.02870  0.04328  OK     block is VALID
+252  valid-202.bin    0.27115  0.52768  OK     block is VALID
+253  valid-203.bin    0.04490  0.06600  OK     block is VALID
+254  valid-204.bin    0.03308  0.04938  OK     block is VALID
+255  valid-205.bin    0.05311  0.08771  OK     block is VALID
+256  valid-206.bin    0.03427  0.05236  OK     block is VALID
+257  valid-207.bin    0.04893  0.09167  OK     block is VALID
+258  valid-208.bin    0.04397  0.06853  OK     block is VALID
+259  valid-209.bin    0.03421  0.05821  OK     block is VALID
+260  valid-210.bin    0.04510  0.07367  OK     block is VALID
+261  valid-211.bin    0.03305  0.04840  OK     block is VALID
+262  valid-212.bin    0.05328  0.08283  OK     block is VALID
+263  valid-213.bin    0.02979  0.04425  OK     block is VALID
+264  valid-214.bin    0.06112  0.10171  OK     block is VALID
+265  valid-215.bin    0.07142  0.13538  OK     block is VALID
+266  valid-216.bin    0.02941  0.05247  OK     block is VALID
+267  valid-217.bin    0.03445  0.04998  OK     block is VALID
+268  valid-218.bin    0.03321  0.05047  OK     block is VALID
+269  valid-219.bin    0.03519  0.05339  OK     block is VALID
+270  valid-220.bin    0.04242  0.06320  OK     block is VALID
+271  valid-221.bin    0.05581  0.09921  OK     block is VALID
+272  valid-222.bin    0.04183  0.06778  OK     block is VALID
+273  valid-223.bin    0.03534  0.05516  OK     block is VALID
+274  valid-224.bin    0.02915  0.04311  OK     block is VALID
+275  valid-225.bin    0.05182  0.08824  OK     block is VALID
+276  valid-226.bin    0.03603  0.05434  OK     block is VALID
+277  valid-227.bin    0.04126  0.06563  OK     block is VALID
+278  valid-228.bin    0.05885  0.09029  OK     block is VALID
+279  valid-229.bin    0.04258  0.06536  OK     block is VALID
+280  valid-230.bin    0.05136  0.07364  OK     block is VALID
+281  valid-231.bin    0.02766  0.04210  OK     block is VALID
+282  valid-232.bin    0.04138  0.06333  OK     block is VALID
+283  valid-233.bin    0.04689  0.08332  OK     block is VALID
+284  valid-234.bin    0.03539  0.04956  OK     block is VALID
+285  valid-235.bin    0.04010  0.06476  OK     block is VALID
+286  valid-236.bin    0.04176  0.05849  OK     block is VALID
+287  valid-237.bin    0.06511  0.10927  OK     block is VALID
+288  valid-238.bin    0.05651  0.10837  OK     block is VALID
+289  valid-239.bin    0.04918  0.08293  OK     block is VALID
+290  valid-240.bin    0.03971  0.07159  OK     block is VALID
+291  valid-241.bin    0.03306  0.05252  OK     block is VALID
+292  valid-242.bin    0.05421  0.10829  OK     block is VALID
+293  valid-243.bin    0.03636  0.05700  OK     block is VALID
+294  valid-244.bin    0.03627  0.05544  OK     block is VALID
+295  valid-245.bin    0.05448  0.08534  OK     block is VALID
+296  valid-246.bin    0.04286  0.06474  OK     block is VALID
+297  valid-247.bin    0.04826  0.07278  OK     block is VALID
+298  valid-248.bin    0.03309  0.04707  OK     block is VALID
+299  valid-249.bin    0.03659  0.05716  OK     block is VALID
+300  valid-250.bin    0.04558  0.06707  OK     block is VALID
+  1  invalid-001.bin  0.00867  0.00868  OK     block is INVALID
+  2  invalid-002.bin  0.00659  0.00614  OK     block is INVALID
+  3  invalid-003.bin  0.00676  0.00650  OK     block is INVALID
+  4  invalid-004.bin  0.00767  0.00535  OK     block is INVALID
+  5  invalid-005.bin  0.00762  0.00747  OK     block is INVALID
+  6  invalid-006.bin  0.00874  0.00827  OK     block is INVALID
+  7  invalid-007.bin  0.00655  0.00578  OK     block is INVALID
+  8  invalid-008.bin  0.00868  0.00824  OK     block is INVALID
+  9  invalid-009.bin  0.00651  0.00589  OK     block is INVALID
+ 10  invalid-010.bin  0.01277  0.01242  OK     block is INVALID
+ 11  invalid-011.bin  0.00124  0.00043  OK     block is INVALID
+ 12  invalid-012.bin  0.00551  0.00492  OK     block is INVALID
+ 13  invalid-013.bin  0.00335  0.00314  OK     block is INVALID
+ 14  invalid-014.bin  0.00544  0.00516  OK     block is INVALID
+ 15  invalid-015.bin  0.00123  0.00049  OK     block is INVALID
+ 16  invalid-016.bin  0.00119  0.00036  OK     block is INVALID
+ 17  invalid-017.bin  0.00893  0.00868  OK     block is INVALID
+ 18  invalid-018.bin  0.00659  0.00614  OK     block is INVALID
+ 19  invalid-019.bin  0.00893  0.00829  OK     block is INVALID
+ 20  invalid-020.bin  0.00777  0.00751  OK     block is INVALID
+ 21  invalid-021.bin  0.00858  0.00820  OK     block is INVALID
+ 22  invalid-022.bin  0.00653  0.00636  OK     block is INVALID
+ 23  invalid-023.bin  0.00889  0.00897  OK     block is INVALID
+ 24  invalid-024.bin  0.00765  0.00748  OK     block is INVALID
+ 25  invalid-025.bin  0.00868  0.00832  OK     block is INVALID
+ 26  invalid-026.bin  0.00654  0.00601  OK     block is INVALID
+ 27  invalid-027.bin  0.00854  0.00800  OK     block is INVALID
+ 28  invalid-028.bin  0.00123  0.00040  OK     block is INVALID
+ 29  invalid-029.bin  0.00767  0.00709  OK     block is INVALID
+ 30  invalid-030.bin  0.00439  0.00386  OK     block is INVALID
+ 31  invalid-031.bin  0.00545  0.00511  OK     block is INVALID
+ 32  invalid-032.bin  0.00122  0.00043  OK     block is INVALID
+ 33  invalid-033.bin  0.00130  0.00067  OK     block is INVALID
+ 34  invalid-034.bin  0.00553  0.00518  OK     block is INVALID
+ 35  invalid-035.bin  0.00868  0.00862  OK     block is INVALID
+ 36  invalid-036.bin  0.00883  0.00871  OK     block is INVALID
+ 37  invalid-037.bin  0.00767  0.00606  OK     block is INVALID
+ 38  invalid-038.bin  0.00651  0.00578  OK     block is INVALID
+ 39  invalid-039.bin  0.00980  0.00921  OK     block is INVALID
+ 40  invalid-040.bin  0.00667  0.00660  OK     block is INVALID
+ 41  invalid-041.bin  0.00876  0.00836  OK     block is INVALID
+ 42  invalid-042.bin  0.00979  0.00921  OK     block is INVALID
+ 43  invalid-043.bin  0.00649  0.00641  OK     block is INVALID
+ 44  invalid-044.bin  0.00969  0.01350  OK     block is INVALID
+ 45  invalid-045.bin  0.00547  0.00486  OK     block is INVALID
+ 46  invalid-046.bin  0.00648  0.00608  OK     block is INVALID
+ 47  invalid-047.bin  0.00337  0.00278  OK     block is INVALID
+ 48  invalid-048.bin  0.00543  0.00543  OK     block is INVALID
+ 49  invalid-049.bin  0.00125  0.00053  OK     block is INVALID
+ 50  invalid-050.bin  0.00127  0.00062  OK     block is INVALID
+ 51  valid-001.bin    0.01069  0.01541  OK     block is VALID
+ 52  valid-002.bin    0.01070  0.01463  OK     block is VALID
+ 53  valid-003.bin    0.01195  0.01655  OK     block is VALID
+ 54  valid-004.bin    0.01181  0.01620  OK     block is VALID
+ 55  valid-005.bin    0.01073  0.01290  OK     block is VALID
+ 56  valid-006.bin    0.01190  0.01556  OK     block is VALID
+ 57  valid-007.bin    0.01304  0.02019  OK     block is VALID
+ 58  valid-008.bin    0.01126  0.01534  OK     block is VALID
+ 59  valid-009.bin    0.01725  0.02825  OK     block is VALID
+ 60  valid-010.bin    0.01830  0.02571  OK     block is VALID
+ 61  valid-011.bin    0.01518  0.02108  OK     block is VALID
+ 62  valid-012.bin    0.01111  0.01481  OK     block is VALID
+ 63  valid-013.bin    0.01293  0.01848  OK     block is VALID
+ 64  valid-014.bin    0.01079  0.01527  OK     block is VALID
+ 65  valid-015.bin    0.01179  0.01577  OK     block is VALID
+ 66  valid-016.bin    0.01294  0.01691  OK     block is VALID
+ 67  valid-017.bin    0.01070  0.01387  OK     block is VALID
+ 68  valid-018.bin    0.01172  0.01480  OK     block is VALID
+ 69  valid-019.bin    0.01502  0.01969  OK     block is VALID
+ 70  valid-020.bin    0.02542  0.03779  OK     block is VALID
+ 71  valid-021.bin    0.01185  0.01683  OK     block is VALID
+ 72  valid-022.bin    0.01843  0.02824  OK     block is VALID
+ 73  valid-023.bin    0.01393  0.01908  OK     block is VALID
+ 74  valid-024.bin    0.01187  0.01527  OK     block is VALID
+ 75  valid-025.bin    0.01735  0.02706  OK     block is VALID
+ 76  valid-026.bin    0.02154  0.03856  OK     block is VALID
+ 77  valid-027.bin    0.01181  0.01425  OK     block is VALID
+ 78  valid-028.bin    0.01296  0.01673  OK     block is VALID
+ 79  valid-029.bin    0.01285  0.01627  OK     block is VALID
+ 80  valid-030.bin    0.01294  0.01666  OK     block is VALID
+ 81  valid-031.bin    0.01291  0.02161  OK     block is VALID
+ 82  valid-032.bin    0.01180  0.01604  OK     block is VALID
+ 83  valid-033.bin    0.01287  0.01704  OK     block is VALID
+ 84  valid-034.bin    0.01502  0.01946  OK     block is VALID
+ 85  valid-035.bin    0.01079  0.01525  OK     block is VALID
+ 86  valid-036.bin    0.00969  0.01372  OK     block is VALID
+ 87  valid-037.bin    0.01287  0.01823  OK     block is VALID
+ 88  valid-038.bin    0.00963  0.01269  OK     block is VALID
+ 89  valid-039.bin    0.01282  0.01515  OK     block is VALID
+ 90  valid-040.bin    0.01290  0.01701  OK     block is VALID
+ 91  valid-041.bin    0.02982  0.04560  OK     block is VALID
+ 92  valid-042.bin    0.01080  0.01457  OK     block is VALID
+ 93  valid-043.bin    0.01505  0.01868  OK     block is VALID
+ 94  valid-044.bin    0.00972  0.01409  OK     block is VALID
+ 95  valid-045.bin    0.01176  0.01403  OK     block is VALID
+ 96  valid-046.bin    0.01280  0.01628  OK     block is VALID
+ 97  valid-047.bin    0.01302  0.01850  OK     block is VALID
+ 98  valid-048.bin    0.01075  0.01423  OK     block is VALID
+ 99  valid-049.bin    0.00980  0.01392  OK     block is VALID
+100  valid-050.bin    0.01282  0.01498  OK     block is VALID
+101  valid-051.bin    0.01078  0.01489  OK     block is VALID
+102  valid-052.bin    0.01075  0.01518  OK     block is VALID
+103  valid-053.bin    0.01286  0.01982  OK     block is VALID
+104  valid-054.bin    0.00971  0.01383  OK     block is VALID
+105  valid-055.bin    0.02260  0.04096  OK     block is VALID
+106  valid-056.bin    0.01500  0.01777  OK     block is VALID
+107  valid-057.bin    0.01180  0.01539  OK     block is VALID
+108  valid-058.bin    0.01077  0.01546  OK     block is VALID
+109  valid-059.bin    0.01285  0.01614  OK     block is VALID
+110  valid-060.bin    0.01601  0.01971  OK     block is VALID
+111  valid-061.bin    0.01074  0.01389  OK     block is VALID
+112  valid-062.bin    0.01075  0.01304  OK     block is VALID
+113  valid-063.bin    0.01292  0.01813  OK     block is VALID
+114  valid-064.bin    0.01390  0.01796  OK     block is VALID
+115  valid-065.bin    0.01292  0.01759  OK     block is VALID
+116  valid-066.bin    0.01294  0.01806  OK     block is VALID
+117  valid-067.bin    0.01181  0.01560  OK     block is VALID
+118  valid-068.bin    0.01085  0.01585  OK     block is VALID
+119  valid-069.bin    0.01495  0.01849  OK     block is VALID
+120  valid-070.bin    0.00965  0.01307  OK     block is VALID
+121  valid-071.bin    0.01190  0.01776  OK     block is VALID
+122  valid-072.bin    0.02757  0.03784  OK     block is VALID
+123  valid-073.bin    0.01078  0.01585  OK     block is VALID
+124  valid-074.bin    0.01385  0.01795  OK     block is VALID
+125  valid-075.bin    0.01191  0.01695  OK     block is VALID
+126  valid-076.bin    0.01287  0.01798  OK     block is VALID
+127  valid-077.bin    0.01291  0.01850  OK     block is VALID
+128  valid-078.bin    0.01503  0.01967  OK     block is VALID
+129  valid-079.bin    0.01514  0.02200  OK     block is VALID
+130  valid-080.bin    0.02754  0.03981  OK     block is VALID
+131  valid-081.bin    0.01403  0.02054  OK     block is VALID
+132  valid-082.bin    0.01395  0.01836  OK     block is VALID
+133  valid-083.bin    0.01095  0.01510  OK     block is VALID
+134  valid-084.bin    0.01301  0.01971  OK     block is VALID
+135  valid-085.bin    0.01069  0.01381  OK     block is VALID
+136  valid-086.bin    0.01192  0.01795  OK     block is VALID
+137  valid-087.bin    0.01955  0.03117  OK     block is VALID
+138  valid-088.bin    0.02518  0.03680  OK     block is VALID
+139  valid-089.bin    0.01759  0.02767  OK     block is VALID
+140  valid-090.bin    0.01201  0.01611  OK     block is VALID
+141  valid-091.bin    0.00967  0.01310  OK     block is VALID
+142  valid-092.bin    0.01619  0.02621  OK     block is VALID
+143  valid-093.bin    0.01076  0.01523  OK     block is VALID
+144  valid-094.bin    0.01091  0.01468  OK     block is VALID
+145  valid-095.bin    0.01961  0.02999  OK     block is VALID
+146  valid-096.bin    0.01180  0.01578  OK     block is VALID
+147  valid-097.bin    0.01401  0.02118  OK     block is VALID
+148  valid-098.bin    0.01396  0.01804  OK     block is VALID
+149  valid-099.bin    0.01275  0.01554  OK     block is VALID
+150  valid-100.bin    0.01180  0.01658  OK     block is VALID
+151  valid-101.bin    0.01838  0.02901  OK     block is VALID
+152  valid-102.bin    0.01393  0.01710  OK     block is VALID
+153  valid-103.bin    0.01423  0.02104  OK     block is VALID
+154  valid-104.bin    0.01091  0.01411  OK     block is VALID
+155  valid-105.bin    0.01391  0.01702  OK     block is VALID
+156  valid-106.bin    0.01398  0.01969  OK     block is VALID
+157  valid-107.bin    0.01179  0.01637  OK     block is VALID
+158  valid-108.bin    0.01401  0.02078  OK     block is VALID
+159  valid-109.bin    0.01077  0.01468  OK     block is VALID
+160  valid-110.bin    0.01193  0.01476  OK     block is VALID
+161  valid-111.bin    0.01610  0.02344  OK     block is VALID
+162  valid-112.bin    0.01826  0.02603  OK     block is VALID
+163  valid-113.bin    0.01500  0.01952  OK     block is VALID
+164  valid-114.bin    0.01080  0.01322  OK     block is VALID
+165  valid-115.bin    0.01634  0.02246  OK     block is VALID
+166  valid-116.bin    0.00856  0.01114  OK     block is VALID
+167  valid-117.bin    0.01186  0.01533  OK     block is VALID
+168  valid-118.bin    0.01630  0.02033  OK     block is VALID
+169  valid-119.bin    0.01285  0.01832  OK     block is VALID
+170  valid-120.bin    0.00966  0.01289  OK     block is VALID
+171  valid-121.bin    0.01597  0.01980  OK     block is VALID
+172  valid-122.bin    0.01177  0.01620  OK     block is VALID
+173  valid-123.bin    0.01308  0.01663  OK     block is VALID
+174  valid-124.bin    0.01400  0.02256  OK     block is VALID
+175  valid-125.bin    0.03858  0.06060  OK     block is VALID
+176  valid-126.bin    0.01500  0.02133  OK     block is VALID
+177  valid-127.bin    0.01285  0.01802  OK     block is VALID
+178  valid-128.bin    0.01179  0.01517  OK     block is VALID
+179  valid-129.bin    0.00993  0.01401  OK     block is VALID
+180  valid-130.bin    0.01285  0.01565  OK     block is VALID
+181  valid-131.bin    0.01202  0.01729  OK     block is VALID
+182  valid-132.bin    0.01405  0.01996  OK     block is VALID
+183  valid-133.bin    0.01189  0.01605  OK     block is VALID
+184  valid-134.bin    0.01736  0.02583  OK     block is VALID
+185  valid-135.bin    0.01309  0.01822  OK     block is VALID
+186  valid-136.bin    0.01328  0.01820  OK     block is VALID
+187  valid-137.bin    0.00965  0.01362  OK     block is VALID
+188  valid-138.bin    0.01075  0.01446  OK     block is VALID
+189  valid-139.bin    0.01286  0.01568  OK     block is VALID
+190  valid-140.bin    0.00965  0.01285  OK     block is VALID
+191  valid-141.bin    0.01826  0.02772  OK     block is VALID
+192  valid-142.bin    0.00964  0.01269  OK     block is VALID
+193  valid-143.bin    0.01402  0.02123  OK     block is VALID
+194  valid-144.bin    0.01178  0.01621  OK     block is VALID
+195  valid-145.bin    0.01181  0.01598  OK     block is VALID
+196  valid-146.bin    0.01294  0.01754  OK     block is VALID
+197  valid-147.bin    0.01290  0.01901  OK     block is VALID
+198  valid-148.bin    0.01636  0.02355  OK     block is VALID
+199  valid-149.bin    0.01843  0.02652  OK     block is VALID
+200  valid-150.bin    0.02645  0.03689  OK     block is VALID
+201  valid-151.bin    0.01505  0.01778  OK     block is VALID
+202  valid-152.bin    0.00977  0.01296  OK     block is VALID
+203  valid-153.bin    0.01512  0.01991  OK     block is VALID
+204  valid-154.bin    0.01069  0.01400  OK     block is VALID
+205  valid-155.bin    0.01400  0.01857  OK     block is VALID
+206  valid-156.bin    0.01508  0.02259  OK     block is VALID
+207  valid-157.bin    0.01292  0.01715  OK     block is VALID
+208  valid-158.bin    0.00965  0.01319  OK     block is VALID
+209  valid-159.bin    0.01078  0.01497  OK     block is VALID
+210  valid-160.bin    0.01073  0.01603  OK     block is VALID
+211  valid-161.bin    0.01401  0.01966  OK     block is VALID
+212  valid-162.bin    0.01293  0.01795  OK     block is VALID
+213  valid-163.bin    0.01289  0.01649  OK     block is VALID
+214  valid-164.bin    0.01180  0.01306  OK     block is VALID
+215  valid-165.bin    0.01395  0.01635  OK     block is VALID
+216  valid-166.bin    0.03007  0.04824  OK     block is VALID
+217  valid-167.bin    0.01535  0.02083  OK     block is VALID
+218  valid-168.bin    0.01082  0.01484  OK     block is VALID
+219  valid-169.bin    0.01409  0.02043  OK     block is VALID
+220  valid-170.bin    0.01075  0.01417  OK     block is VALID
+221  valid-171.bin    0.01075  0.01505  OK     block is VALID
+222  valid-172.bin    0.01297  0.01782  OK     block is VALID
+223  valid-173.bin    0.01184  0.01562  OK     block is VALID
+224  valid-174.bin    0.01296  0.02022  OK     block is VALID
+225  valid-175.bin    0.01407  0.02042  OK     block is VALID
+226  valid-176.bin    0.01188  0.01702  OK     block is VALID
+227  valid-177.bin    0.01074  0.01484  OK     block is VALID
+228  valid-178.bin    0.01395  0.01805  OK     block is VALID
+229  valid-179.bin    0.01179  0.01540  OK     block is VALID
+230  valid-180.bin    0.01290  0.01740  OK     block is VALID
+231  valid-181.bin    0.00862  0.01082  OK     block is VALID
+232  valid-182.bin    0.01176  0.01475  OK     block is VALID
+233  valid-183.bin    0.00965  0.01289  OK     block is VALID
+234  valid-184.bin    0.01391  0.01727  OK     block is VALID
+235  valid-185.bin    0.01290  0.01799  OK     block is VALID
+236  valid-186.bin    0.01193  0.01734  OK     block is VALID
+237  valid-187.bin    0.01730  0.02283  OK     block is VALID
+238  valid-188.bin    0.02050  0.02452  OK     block is VALID
+239  valid-189.bin    0.01182  0.01604  OK     block is VALID
+240  valid-190.bin    0.01075  0.01328  OK     block is VALID
+241  valid-191.bin    0.01496  0.01839  OK     block is VALID
+242  valid-192.bin    0.01075  0.01640  OK     block is VALID
+243  valid-193.bin    0.01619  0.02282  OK     block is VALID
+244  valid-194.bin    0.01290  0.01595  OK     block is VALID
+245  valid-195.bin    0.02877  0.04560  OK     block is VALID
+246  valid-196.bin    0.01111  0.01531  OK     block is VALID
+247  valid-197.bin    0.01173  0.01516  OK     block is VALID
+248  valid-198.bin    0.01185  0.01617  OK     block is VALID
+249  valid-199.bin    0.01077  0.01491  OK     block is VALID
+250  valid-200.bin    0.01070  0.01565  OK     block is VALID
+251  valid-201.bin    0.02973  0.04434  OK     block is VALID
+252  valid-202.bin    0.25970  0.50155  OK     block is VALID
+253  valid-203.bin    0.03979  0.06351  OK     block is VALID
+254  valid-204.bin    0.02993  0.04653  OK     block is VALID
+255  valid-205.bin    0.05335  0.08757  OK     block is VALID
+256  valid-206.bin    0.03839  0.05916  OK     block is VALID
+257  valid-207.bin    0.05336  0.09888  OK     block is VALID
+258  valid-208.bin    0.04498  0.06749  OK     block is VALID
+259  valid-209.bin    0.03604  0.06184  OK     block is VALID
+260  valid-210.bin    0.04572  0.07374  OK     block is VALID
+261  valid-211.bin    0.03203  0.05060  OK     block is VALID
+262  valid-212.bin    0.06835  0.09758  OK     block is VALID
+263  valid-213.bin    0.03398  0.05017  OK     block is VALID
+264  valid-214.bin    0.06089  0.10139  OK     block is VALID
+265  valid-215.bin    0.07812  0.14857  OK     block is VALID
+266  valid-216.bin    0.03403  0.05081  OK     block is VALID
+267  valid-217.bin    0.03721  0.05665  OK     block is VALID
+268  valid-218.bin    0.02969  0.04578  OK     block is VALID
+269  valid-219.bin    0.03626  0.05553  OK     block is VALID
+270  valid-220.bin    0.05232  0.08096  OK     block is VALID
+271  valid-221.bin    0.05705  0.10484  OK     block is VALID
+272  valid-222.bin    0.04597  0.07351  OK     block is VALID
+273  valid-223.bin    0.03095  0.04813  OK     block is VALID
+274  valid-224.bin    0.03124  0.04428  OK     block is VALID
+275  valid-225.bin    0.04859  0.07479  OK     block is VALID
+276  valid-226.bin    0.02878  0.04262  OK     block is VALID
+277  valid-227.bin    0.04144  0.06613  OK     block is VALID
+278  valid-228.bin    0.05215  0.07901  OK     block is VALID
+279  valid-229.bin    0.05221  0.07393  OK     block is VALID
+280  valid-230.bin    0.04272  0.06407  OK     block is VALID
+281  valid-231.bin    0.03078  0.04448  OK     block is VALID
+282  valid-232.bin    0.04363  0.06568  OK     block is VALID
+283  valid-233.bin    0.04904  0.08082  OK     block is VALID
+284  valid-234.bin    0.03412  0.04932  OK     block is VALID
+285  valid-235.bin    0.04383  0.07340  OK     block is VALID
+286  valid-236.bin    0.05291  0.07289  OK     block is VALID
+287  valid-237.bin    0.06296  0.10910  OK     block is VALID
+288  valid-238.bin    0.06178  0.11780  OK     block is VALID
+289  valid-239.bin    0.05006  0.08471  OK     block is VALID
+290  valid-240.bin    0.04309  0.07053  OK     block is VALID
+291  valid-241.bin    0.03037  0.04700  OK     block is VALID
+292  valid-242.bin    0.05547  0.11224  OK     block is VALID
+293  valid-243.bin    0.03505  0.05540  OK     block is VALID
+294  valid-244.bin    0.03760  0.05878  OK     block is VALID
+295  valid-245.bin    0.05339  0.08635  OK     block is VALID
+296  valid-246.bin    0.04558  0.06827  OK     block is VALID
+297  valid-247.bin    0.04470  0.06534  OK     block is VALID
+298  valid-248.bin    0.03087  0.04738  OK     block is VALID
+299  valid-249.bin    0.03630  0.05975  OK     block is VALID
+300  valid-250.bin    0.04627  0.07054  OK     block is VALID
+==============================================================================
+Passed 1500/300 tests
+Total time (only passed valid tests): 25.68297
+Total CPU time (only passed valid tests): 38.77590

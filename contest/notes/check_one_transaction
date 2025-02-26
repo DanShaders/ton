@@ -1,0 +1,3 @@
+* how one transaction check mutates state?
+
+* prev/next hashes not used in transaction check

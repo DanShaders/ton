@@ -16,10 +16,25 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
-#include "vm/cells/CellUsageTree.h"
+#pragma once
 
-namespace vm {
+// Cross-platform branch prediction hints
+#if defined(__GNUC__) || defined(__clang__)
+#define TD_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#define TD_LIKELY(x) __builtin_expect(!!(x), 1)
+#elif defined(_MSC_VER)
+#define TD_UNLIKELY(x) (x)
+#define TD_LIKELY(x) (x)
+#else
+#define TD_UNLIKELY(x) (x)
+#define TD_LIKELY(x) (x)
+#endif
 
-bool CellUsageTree::ENABLE_THREAD_SAFE = false;
-
-}  // namespace vm
+// Cross-platform force inline
+#if defined(__GNUC__) || defined(__clang__)
+#define TD_FORCE_INLINE __attribute__((always_inline)) inline
+#elif defined(_MSC_VER)
+#define TD_FORCE_INLINE __forceinline
+#else
+#define TD_FORCE_INLINE inline
+#endif 

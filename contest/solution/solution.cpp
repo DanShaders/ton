@@ -1,8 +1,11 @@
+#include "perf/perf_flags.hpp"
+
 #include "solution.hpp"
 
 #include "vm/boc.h"
 #include "block-auto.h"
-#include "contest-validate-query.hpp"
+#include "ContestValidator.hpp"
+#include "State.hpp"
 
 void run_contest_solution(ton::BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice colldated_data,
                           td::Promise<td::BufferSlice> promise) {
@@ -12,6 +15,6 @@ void run_contest_solution(ton::BlockIdExt block_id, td::BufferSlice block_data, 
     return promise.set_error(td::Status::Error("failed to unpack block"));
   }
   TRY_RESULT_PROMISE(promise, res, vm::std_boc_serialize(rec.state_update));
-  td::actor::create_actor<solution::ContestValidateQuery>(
-      "validate", block_id, std::move(block_data), std::move(colldated_data), std::move(promise)).release();
+  td::actor::create_actor<solution::ContestValidator>(
+      "validate", std::make_unique<solution::State>(block_id, std::move(block_data), std::move(colldated_data), std::move(promise))).release();
 }

@@ -1,0 +1,7 @@
+We cannot parallel entire account check. Possibly we can parallel transaction checks.
+
+I have to extract check of transactions together with afther that account checks.
+
+transactions check somehow affect new state hash
+
+Prepare compute state pipeline uses cellusagetree inside account, which has vector inside, which is not thread safe
