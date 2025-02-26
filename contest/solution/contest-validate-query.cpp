@@ -16,6 +16,11 @@
 #include "fabric.h"
 #include <ctime>
 
+#if 00+DISABLE_PARALLEL_CXN
+#else
+#include "td/utils/parallel.h"
+#endif
+
 namespace solution {
 
 using namespace ton;
@@ -75,12 +80,31 @@ void ContestValidateQuery::abort_query(td::Status error) {
  * @returns False indicating that the validation failed.
  */
 bool ContestValidateQuery::reject_query(std::string error, td::BufferSlice reason) {
+#if 00+DISABLE_PARALLEL_CXN
   error = error_ctx() + error;
   LOG(WARNING) << "REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
   if (main_promise) {
     main_promise.set_error(td::Status::Error(error));
   }
   stop();
+#else
+  error = error_ctx() + error;
+
+  if (running_on_worker_thread_) {
+    reject_query_comp6n_pending_++;
+
+    std::lock_guard lk(reject_query_comp6n_mx);
+    reject_query_comp6n_error_ = std::move(error);
+
+    return false;
+  }
+
+  LOG(WARNING) << "REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
+  if (main_promise) {
+    main_promise.set_error(td::Status::Error(error));
+  }
+  stop();
+#endif
   return false;
 }
 
@@ -107,6 +131,10 @@ bool ContestValidateQuery::reject_query(std::string err_msg, td::Status error, t
  * @returns False indicating that the validation failed.
  */
 bool ContestValidateQuery::soft_reject_query(std::string error, td::BufferSlice reason) {
+#if 00+DISABLE_PARALLEL_CXN
+#else
+  CHECK(!running_on_worker_thread_);
+#endif
   error = error_ctx() + error;
   LOG(WARNING) << "SOFT REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
   if (main_promise) {
@@ -124,6 +152,10 @@ bool ContestValidateQuery::soft_reject_query(std::string error, td::BufferSlice 
  * @returns False indicating that the validation failed.
  */
 bool ContestValidateQuery::fatal_error(td::Status error) {
+#if 00+DISABLE_PARALLEL_CXN
+#else
+  CHECK(!running_on_worker_thread_);
+#endif
   error.ensure_error();
   LOG(WARNING) << "aborting validation of block candidate for " << shard_.to_str() << " : " << error.to_string();
   if (main_promise) {
@@ -303,7 +335,10 @@ bool ContestValidateQuery::unpack_block_candidate() {
   CHECK(block_root_.not_null());
   // 3. initial block parse
   {
+#if 00+DISABLE_PARALLEL_CXN
     auto guard = error_ctx_add_guard("parsing block header");
+#else
+#endif
     try {
       if (!init_parse()) {
         return reject_query("invalid block header");
@@ -473,7 +508,10 @@ bool ContestValidateQuery::extract_collated_data() {
   int i = -1;
   for (auto croot : collated_roots_) {
     ++i;
+#if 00+DISABLE_PARALLEL_CXN
     auto guard = error_ctx_add_guard(PSTRING() << "collated datum #" << i);
+#else
+#endif
     try {
       if (!extract_collated_data_from(croot, i)) {
         return reject_query("cannot unpack collated datum");
@@ -574,7 +612,10 @@ bool ContestValidateQuery::process_mc_state(Ref<MasterchainState> mc_state) {
  */
 bool ContestValidateQuery::try_unpack_mc_state() {
   LOG(DEBUG) << "unpacking reference masterchain state";
+#if 00+DISABLE_PARALLEL_CXN
   auto guard = error_ctx_add_guard("unpack last mc state");
+#else
+#endif
   try {
     if (mc_state_.is_null()) {
       return fatal_error(-666, "no previous masterchain state present");
@@ -583,11 +624,11 @@ bool ContestValidateQuery::try_unpack_mc_state() {
     if (mc_state_root_.is_null()) {
       return fatal_error(-666, "latest masterchain state does not have a root cell");
     }
-    auto res = block::ConfigInfo::extract_config(
-        mc_state_root_, block::ConfigInfo::needShardHashes | block::ConfigInfo::needLibraries |
-                            block::ConfigInfo::needValidatorSet | block::ConfigInfo::needWorkchainInfo |
-                            block::ConfigInfo::needStateExtraRoot | block::ConfigInfo::needCapabilities |
-                            block::ConfigInfo::needPrevBlocks);
+    auto res = mc_state_->extract_config(
+        block::ConfigInfo::needShardHashes | block::ConfigInfo::needLibraries |
+        block::ConfigInfo::needValidatorSet | block::ConfigInfo::needWorkchainInfo |
+        block::ConfigInfo::needStateExtraRoot | block::ConfigInfo::needCapabilities |
+        block::ConfigInfo::needPrevBlocks);
     if (res.is_error()) {
       return fatal_error(-666, "cannot extract configuration from reference masterchain state "s + mc_blkid_.to_str() +
                                    " : " + res.move_as_error().to_string());
@@ -2958,7 +2999,7 @@ bool ContestValidateQuery::check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> 
   //   value:CurrencyCollection ihr_fee:Grams fwd_fee:Grams
   //   created_lt:uint64 created_at:uint32 = CommonMsgInfo;
   block::gen::CommonMsgInfo::Record_int_msg_info info;
-  ton::AccountIdPrefixFull src_prefix, dest_prefix, cur_prefix, next_prefix;
+  ton::AccountIdPrefixFull src_prefix, dest_prefix, cur_prefix{workchainInvalid, 0}, next_prefix;
   td::RefInt256 fwd_fee, orig_fwd_fee;
   bool from_dispatch_queue = false;
   // initial checks and unpack
@@ -3517,7 +3558,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
   //   value:CurrencyCollection ihr_fee:Grams fwd_fee:Grams
   //   created_lt:uint64 created_at:uint32 = CommonMsgInfo;
   block::gen::CommonMsgInfo::Record_int_msg_info info;
-  ton::AccountIdPrefixFull src_prefix, dest_prefix, cur_prefix, next_prefix;
+  ton::AccountIdPrefixFull src_prefix, dest_prefix, cur_prefix{workchainInvalid, 0}, next_prefix{workchainInvalid, 0};
   td::RefInt256 fwd_fee, orig_fwd_fee;
   ton::LogicalTime import_lt = ~0ULL;
   unsigned long long created_lt = 0;
@@ -4486,7 +4527,11 @@ std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBi
  * @returns True if the transaction is valid, false otherwise.
  */
 bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::LogicalTime lt, Ref<vm::Cell> trans_root,
+#if 00+DISABLE_PARALLEL_CXN
                                                  bool is_first, bool is_last) {
+#else
+                                                 bool is_first, bool is_last, decltype(msg_proc_lt_)& msg_proc_lt_local) {
+#endif
   LOG(DEBUG) << "checking transaction " << lt << " of account " << account.addr.to_hex();
   const StdSmcAddress& addr = account.addr;
   block::gen::Transaction::Record trans;
@@ -4551,7 +4596,11 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
         }
       }
       if (info.created_lt != start_lt_ || !is_special_tx) {
+#if 00+DISABLE_PARALLEL_CXN
         msg_proc_lt_.emplace_back(addr, lt, emitted_lt);
+#else
+        msg_proc_lt_local.emplace_back(addr, lt, emitted_lt);
+#endif
       }
       dest = std::move(info.dest);
       CHECK(money_imported.validate_unpack(info.value));
@@ -4976,12 +5025,25 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
  *
  * @returns True if the account transactions are valid, false otherwise.
  */
+#if 00+DISABLE_PARALLEL_CXN
 bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root) {
+#else
+using tail_comp6n_t = std::function<bool()>;
+
+tail_comp6n_t ContestValidateQuery::check_account_transactions(
+    const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root, std::size_t acct_index) {
+#endif
   block::gen::AccountBlock::Record acc_blk;
   CHECK(tlb::csr_unpack(std::move(acc_blk_root), acc_blk) && acc_blk.account_addr == acc_addr);
   auto account_p = unpack_account(acc_addr.cbits());
   if (!account_p) {
+#if 00+DISABLE_PARALLEL_CXN
     return reject_query("cannot unpack old state of account "s + acc_addr.to_hex());
+#else
+    return [this, acc_addr = std::move(acc_addr)]() -> bool {
+      return reject_query("cannot unpack old state of account "s + acc_addr.to_hex());
+    };
+#endif
   }
   auto& account = *account_p;
   CHECK(account.addr == acc_addr);
@@ -4990,18 +5052,50 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
   td::BitArray<64> min_trans, max_trans;
   CHECK(trans_dict.get_minmax_key(min_trans).not_null() && trans_dict.get_minmax_key(max_trans, true).not_null());
   ton::LogicalTime min_trans_lt = min_trans.to_ulong(), max_trans_lt = max_trans.to_ulong();
+
+#if 00+DISABLE_PARALLEL_CXN
   if (!trans_dict.check_for_each_extra([this, &account, min_trans_lt, max_trans_lt](Ref<vm::CellSlice> value,
+#else
+  decltype(msg_proc_lt_) msg_proc_lt_local;
+
+  int xnx = 0;
+  if (!trans_dict.check_for_each_extra(
+      [this, &account, min_trans_lt, max_trans_lt, &msg_proc_lt_local, acct_index, &xnx](
+                                                                                    Ref<vm::CellSlice> value,
+#endif
                                                                                     Ref<vm::CellSlice> extra,
                                                                                     td::ConstBitPtr key, int key_len) {
         CHECK(key_len == 64);
         ton::LogicalTime lt = key.get_uint(64);
         extra.clear();
+#if 00+DISABLE_PARALLEL_CXN
         return check_one_transaction(account, lt, value->prefetch_ref(), lt == min_trans_lt, lt == max_trans_lt);
+#else
+        return check_one_transaction(account, lt, value->prefetch_ref(), lt == min_trans_lt, lt == max_trans_lt, msg_proc_lt_local);
+        xnx++;
+#endif
       })) {
+#if 00+DISABLE_PARALLEL_CXN
     return reject_query("at least one Transaction of account "s + acc_addr.to_hex() + " is invalid");
+#else
+    return [this, acc_addr = std::move(acc_addr)]() -> bool {
+      return reject_query("at least one Transaction of account "s + acc_addr.to_hex() + " is invalid");
+    };
+#endif
   }
 
   // See Collator::combine_account_trabsactions
+
+#if 00+DISABLE_PARALLEL_CXN
+#else
+  return [this, account = std::move(account), acc_blk = std::move(acc_blk),
+                msg_proc_lt_local = std::move(msg_proc_lt_local)]() -> bool {
+
+  for (auto& mplt : msg_proc_lt_local) {
+    msg_proc_lt_.push_back(mplt);
+  }
+#endif
+
   if (account.total_state->get_hash() != account.orig_total_state->get_hash()) {
     // account changed
     if (account.orig_status == block::Account::acc_nonexist) {
@@ -5060,6 +5154,11 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
   }
 
   return true;
+
+#if 00+DISABLE_PARALLEL_CXN
+#else
+  };
+#endif
 }
 
 /**
@@ -5071,6 +5170,7 @@ bool ContestValidateQuery::check_transactions() {
   LOG(INFO) << "checking all transactions";
   ns_.account_dict_ =
       std::make_unique<vm::AugmentedDictionary>(ps_.account_dict_->get_root(), 256, block::tlb::aug_ShardAccounts);
+#if 00+DISABLE_PARALLEL_CXN
   bool ok = account_blocks_dict_->check_for_each_extra(
       [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
         CHECK(key_len == 256);
@@ -5078,6 +5178,119 @@ bool ContestValidateQuery::check_transactions() {
       });
 
   return ok;
+#else
+  using comp6n_result_t = tail_comp6n_t;
+  using comp6n_t = std::function<comp6n_result_t()>;
+  using comp6ns_t = std::vector<comp6n_t>;
+
+  comp6ns_t caxncs;
+  caxncs.reserve(1024);
+
+  CHECK(msg_proc_lt_.size() == 0);
+
+  bool ok = account_blocks_dict_->check_for_each_extra(
+      [this, &caxncs]
+      (Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
+        CHECK(key_len == 256);
+        auto acct_index = caxncs.size();
+        CHECK(caxncs.size() < caxncs.capacity());
+        caxncs.push_back(
+        [this, key = StdSmcAddress(key), value = std::move(value), acct_index]() -> tail_comp6n_t {
+          return check_account_transactions(key, value, acct_index);
+        });
+        return true;
+      });
+
+  CHECK(ok);
+
+  struct LoadGenerator : public td::parallel::LoadGenerator {
+
+    // [fyi] runs on load generator thread
+
+    WorkerComp6n next() {
+      if (comp6ns.size() <= sent) {
+         return nullptr;
+      }
+
+      auto index = laggers_sent < laggers ? comp6ns.size()-1 - laggers_sent++ : head++;
+      auto& comp6n = comp6ns[index];
+      sent++;
+
+      auto rres = [this, index](const comp6n_result_t&& ok){ receiver(index, std::move(ok)); };
+
+      return [&comp6n, rres](int tid) -> ReceiverComp6n {
+        auto ok = comp6n();
+
+        return [rres, ok](){ rres(std::move(ok)); };
+      };
+    }
+
+    // [fyi] runs serialized on caller thread
+
+    void receiver(std::size_t index, const comp6n_result_t&& final_comp6n) {
+      final_comp6ns[index] = std::move(final_comp6n);
+
+      if (reject_query_comp6n_pending) {
+        // [tbd] cancel() ?..
+      }
+    }
+
+    LoadGenerator(comp6ns_t comp6ns_, std::atomic<int>& reject_query_comp6n_pending_)
+        : comp6ns(comp6ns_), reject_query_comp6n_pending(reject_query_comp6n_pending_) {
+      final_comp6ns.resize(comp6ns.size());
+
+      enum{ laggers_range_observed = 8 };
+
+      if (laggers_range_observed < comp6ns.size()) {
+        laggers = laggers_range_observed;
+      } else {
+        laggers = comp6ns.size();
+      }
+    }
+
+    const std::vector<comp6n_result_t>& result() { return final_comp6ns; }
+
+  private:
+    comp6ns_t comp6ns;
+    unsigned head{0};
+
+    unsigned sent{0};
+    std::size_t laggers{0};
+    unsigned laggers_sent{0};
+
+    std::atomic<int>& reject_query_comp6n_pending;
+
+    std::vector<comp6n_result_t> final_comp6ns;
+
+    bool result_{!0};
+  };
+
+  CHECK(msg_proc_lt_.size() == 0);
+
+  auto load_gene_ = LoadGenerator(std::move(caxncs), reject_query_comp6n_pending_);
+
+  running_on_worker_thread_ = true;
+  reject_query_comp6n_pending_ = 0;
+#if 00
+  td::parallel::Parallel::run(load_gene_, td::parallel::Parallel::Sequentially{});
+#else
+  td::parallel::Parallel::run(load_gene_);
+#endif
+  running_on_worker_thread_ = false;
+
+  if (reject_query_comp6n_pending_) {
+    return reject_query(reject_query_comp6n_error_);
+  }
+
+  for (auto& final_comp6n : load_gene_.result()) {
+    auto ok = final_comp6n();
+    if (!ok) {
+      return ok;
+    }
+  }
+
+  return ok;
+#endif
 }
 
 /**

@@ -61,6 +61,16 @@ bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
 //
 // CellUsageTree
 //
+#if 00+DISABLE_PARALLEL_CXN
+#else
+CellUsageTree::CellUsageTree() {
+  // [tbd] use trivial sticky_vector<> 
+  nodes_.reserve(4096*4*4*4);
+}
+
+CellUsageTree::~CellUsageTree() {}
+#endif
+
 CellUsageTree::NodePtr CellUsageTree::root_ptr() {
   return {shared_from_this(), 1};
 }
@@ -123,19 +133,37 @@ void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
 
 CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_id) {
   DCHECK(ref_id < CellTraits::max_refs);
+#if 00+DISABLE_PARALLEL_CXN
   NodeId res = nodes_[node_id].children[ref_id];
   if (res) {
     return res;
   }
   res = create_node(node_id);
   nodes_[node_id].children[ref_id] = res;
+#else
+  auto &children = nodes_[node_id].children;
+  NodeId res = children[ref_id];
+  if (res) {
+    return res;
+  }
+  res = create_node(node_id);
+  children[ref_id] = res;
+#endif
   return res;
 }
 
 CellUsageTree::NodeId CellUsageTree::create_node(NodeId parent) {
+#if 00+DISABLE_PARALLEL_CXN
   NodeId res = static_cast<NodeId>(nodes_.size());
   nodes_.emplace_back();
   nodes_.back().parent = parent;
+#else
+  std::lock_guard lk(nodes_mx);
+  // [tbd] not with sticky_vector<>
+  CHECK(nodes_.size() < nodes_.capacity());
+  auto& node_ = nodes_.emplace_back();
+  node_.parent = parent;
+#endif
   return res;
 }
 

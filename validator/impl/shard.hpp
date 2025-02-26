@@ -171,6 +171,8 @@ class MasterchainStateQ : public MasterchainState, public ShardStateQ {
     return config_ ? config_->get_workchain_list() : block::WorkchainSet();
   }
 
+  td::Result<std::unique_ptr<block::ConfigInfo>> extract_config(int mode = 0) const;
+
  private:
   ZeroStateIdExt zerostate_id_;
   std::shared_ptr<block::ConfigInfo> config_;

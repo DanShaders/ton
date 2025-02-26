@@ -374,11 +374,15 @@ td::Status MasterchainStateQ::mc_init() {
   return mc_reinit();
 }
 
+td::Result<std::unique_ptr<block::ConfigInfo>> MasterchainStateQ::extract_config(int mode) const {
+  return block::ConfigInfo::extract_config(root_cell(), mode, config_);
+}
+
 td::Status MasterchainStateQ::mc_reinit() {
-  auto res = block::ConfigInfo::extract_config(
-      root_cell(), block::ConfigInfo::needStateRoot | block::ConfigInfo::needValidatorSet |
-                       block::ConfigInfo::needShardHashes | block::ConfigInfo::needPrevBlocks |
-                       block::ConfigInfo::needWorkchainInfo);
+  auto res = extract_config(
+      block::ConfigInfo::needStateRoot | block::ConfigInfo::needValidatorSet |
+      block::ConfigInfo::needShardHashes | block::ConfigInfo::needPrevBlocks |
+      block::ConfigInfo::needWorkchainInfo);
   cur_validators_.reset();
   next_validators_.reset();
   if (res.is_error()) {
@@ -388,11 +392,8 @@ td::Status MasterchainStateQ::mc_reinit() {
   CHECK(config_);
   CHECK(config_->set_block_id_ext(get_block_id()));
 
-  auto cv_root = config_->get_config_param(35, 34);
-  if (cv_root.not_null()) {
-    TRY_RESULT(validators, block::Config::unpack_validator_set(std::move(cv_root)));
-    cur_validators_ = std::move(validators);
-  }
+  auto cvs = config_->clone_cur_validator_set();
+  cur_validators_ = std::move(cvs);
   auto nv_root = config_->get_config_param(37, 36);
   if (nv_root.not_null()) {
     TRY_RESULT(validators, block::Config::unpack_validator_set(std::move(nv_root)));

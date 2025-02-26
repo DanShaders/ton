@@ -445,6 +445,13 @@ struct WorkchainInfo : public td::CntObject {
 
 using WorkchainSet = std::map<td::int32, Ref<WorkchainInfo>>;
 
+class ConfigCache {
+public:
+  std::shared_ptr<ValidatorSet> cur_validators_;
+  //:: std::unique_ptr<vm::Dictionary> workchains_dict_;
+  //:: WorkchainSet workchains_;
+};
+
 class ShardConfig {
   Ref<vm::Cell> shard_hashes_;
   Ref<McShardHash> mc_shard_hash_;
@@ -563,7 +570,7 @@ class Config {
   td::BitArray<256> config_addr;
   Ref<vm::Cell> config_root;
   std::unique_ptr<vm::Dictionary> config_dict;
-  std::unique_ptr<ValidatorSet> cur_validators_;
+  std::shared_ptr<ValidatorSet> cur_validators_;
   std::unique_ptr<vm::Dictionary> workchains_dict_;
   WorkchainSet workchains_;
   int version_{-1};
@@ -571,6 +578,9 @@ class Config {
 
  protected:
   std::unique_ptr<vm::Dictionary> special_smc_dict;
+
+ public:
+  std::shared_ptr<ConfigCache> cache_;
 
  public:
   static constexpr ton::LogicalTime get_lt_align() {
@@ -647,9 +657,10 @@ class Config {
   const WorkchainSet& get_workchain_list() const {
     return workchains_;
   }
-  const ValidatorSet* get_cur_validator_set() const {
-    return cur_validators_.get();
+  const std::shared_ptr<ValidatorSet> get_cur_validator_set() const {
+    return cur_validators_;
   }
+  std::unique_ptr<ValidatorSet> clone_cur_validator_set() const;
   std::pair<ton::UnixTime, ton::UnixTime> get_validator_set_start_stop(int next = 0) const;
   ton::ValidatorSessionConfig get_consensus_config() const;
   bool foreach_config_param(std::function<bool(int, Ref<vm::Cell>)> scan_func) const;
@@ -769,7 +780,8 @@ class ConfigInfo : public Config, public ShardConfig {
   td::Result<Ref<vm::Tuple>> get_prev_blocks_info() const;
   static td::Result<std::unique_ptr<ConfigInfo>> extract_config(std::shared_ptr<vm::StaticBagOfCellsDb> static_boc,
                                                                 int mode = 0);
-  static td::Result<std::unique_ptr<ConfigInfo>> extract_config(Ref<vm::Cell> mc_state_root, int mode = 0);
+  static td::Result<std::unique_ptr<ConfigInfo>> extract_config(Ref<vm::Cell> mc_state_root, int mode = 0,
+                                                                std::shared_ptr<block::ConfigInfo> config_ = nullptr);
 
  private:
   ConfigInfo(Ref<vm::Cell> mc_state_root, int _mode = 0);

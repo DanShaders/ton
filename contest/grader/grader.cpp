@@ -22,6 +22,8 @@
 
 #include <sys/resource.h>
 
+#include "td/utils/parallel.h"
+
 using namespace ton;
 
 static constexpr td::uint64 CPU_USAGE_PER_SEC = 1000000;
@@ -40,6 +42,7 @@ class ContestGrader : public td::actor::Actor {
   void start_up() override {
     vm::init_vm().ensure();
     scan_tests_dir();
+    td::parallel::setup();
     run_next_test();
   }
 
@@ -206,6 +209,7 @@ class ContestGrader : public td::actor::Actor {
     if (cnt_fatal_ > 0) {
       printf("FATAL ERROR %lu/%lu tests\n", cnt_fatal_, test_files_.size());
     }
+    td::parallel::cleanup();
     exit(0);
   }
 

@@ -13,6 +13,8 @@
 #include "common/global-version.h"
 #include "tonlib/tonlib/ExtClient.h"
 
+#define DISABLE_PARALLEL_CXN 01
+
 namespace solution {
 
 using namespace ton;
@@ -222,6 +224,7 @@ class ContestValidateQuery : public td::actor::Actor {
   bool fatal_error(int err_code, std::string err_msg, td::Status error);
   bool fatal_error(std::string err_msg, int err_code = -666);
 
+#if 00+DISABLE_PARALLEL_CXN
   std::string error_ctx() const {
     return error_ctx_.as_string();
   }
@@ -231,6 +234,14 @@ class ContestValidateQuery : public td::actor::Actor {
   ErrorCtxSet error_ctx_set_guard(std::string str) {
     return error_ctx_.set_guard(std::move(str));
   }
+#else
+  std::string error_ctx() const {
+    return "";
+  }
+  int error_ctx_add_guard(std::string str) {
+    return 0;
+  }
+#endif
 
   td::actor::ActorId<ContestValidateQuery> get_self() {
     return actor_id(this);
@@ -322,9 +333,16 @@ class ContestValidateQuery : public td::actor::Actor {
   bool check_in_queue();
   std::unique_ptr<block::Account> make_account_from(td::ConstBitPtr addr, Ref<vm::CellSlice> account);
   std::unique_ptr<block::Account> unpack_account(td::ConstBitPtr addr);
+#if 00+DISABLE_PARALLEL_CXN
   bool check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first,
                              bool is_last);
   bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr);
+#else
+  bool check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first,
+                             bool is_last, decltype(msg_proc_lt_)& msg_proc_lt_local);
+  std::function<bool()> check_account_transactions(const StdSmcAddress& acc_addr,
+                                                   Ref<vm::CellSlice> acc_tr, std::size_t acct_index);
+#endif
   bool check_transactions();
   bool check_message_processing_order();
   bool check_new_state();
@@ -336,6 +354,14 @@ class ContestValidateQuery : public td::actor::Actor {
 
   bool store_master_ref(vm::CellBuilder& cb);
   bool build_state_update();
+
+#if 00+DISABLE_PARALLEL_CXN
+#else
+  bool running_on_worker_thread_{false};
+  std::atomic<int> reject_query_comp6n_pending_;
+  std::string reject_query_comp6n_error_;
+  std::mutex reject_query_comp6n_mx;
+#endif
 };
 
 }  // namespace solution

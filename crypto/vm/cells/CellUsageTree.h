@@ -24,6 +24,8 @@
 #include "td/utils/logging.h"
 #include <functional>
 
+#define DISABLE_PARALLEL_CXN 01
+
 namespace vm {
 
 class DataCell;
@@ -31,6 +33,12 @@ class DataCell;
 class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
  public:
   using NodeId = td::uint32;
+
+#if 00+DISABLE_PARALLEL_CXN
+#else
+  CellUsageTree();
+  ~CellUsageTree();
+#endif
 
   struct NodePtr {
    public:
@@ -76,6 +84,10 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   };
   bool use_mark_{false};
   std::vector<Node> nodes_{2};
+#if 00+DISABLE_PARALLEL_CXN
+#else
+  std::mutex nodes_mx;
+#endif
   std::function<void(const td::Ref<vm::DataCell>&)> cell_load_callback_;
 
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);

@@ -101,11 +101,18 @@ td::Result<std::unique_ptr<ConfigInfo>> ConfigInfo::extract_config(std::shared_p
   return extract_config(std::move(root), mode);
 }
 
-td::Result<std::unique_ptr<ConfigInfo>> ConfigInfo::extract_config(Ref<vm::Cell> mc_state_root, int mode) {
+td::Result<std::unique_ptr<ConfigInfo>> ConfigInfo::extract_config(Ref<vm::Cell> mc_state_root, int mode,
+                                                                   std::shared_ptr<block::ConfigInfo> config_) {
   if (mc_state_root.is_null()) {
     return td::Status::Error("configuration state root cell is null");
   }
   auto config = std::unique_ptr<ConfigInfo>{new ConfigInfo(std::move(mc_state_root), mode)};
+  if (config_) {
+    CHECK(config_->cache_);
+    config->cache_ = config_->cache_;
+  } else {
+    config->cache_.reset(new decltype(config->cache_)::element_type{});
+  }
   TRY_STATUS(config->unpack_wrapped());
   return std::move(config);
 }
@@ -250,11 +257,14 @@ td::Status Config::unpack() {
   }
   config_dict = std::make_unique<vm::Dictionary>(config_root, 32);
   if (mode & needValidatorSet) {
-    auto vset_res = unpack_validator_set(get_config_param(35, 34));
-    if (vset_res.is_error()) {
-      return vset_res.move_as_error();
+    if (!cache_->cur_validators_) {
+      auto vset_res = unpack_validator_set(get_config_param(35, 34));
+      if (vset_res.is_error()) {
+        return vset_res.move_as_error();
+      }
+      cache_->cur_validators_ = vset_res.move_as_ok();
     }
-    cur_validators_ = vset_res.move_as_ok();
+    cur_validators_ = cache_->cur_validators_;
   }
   if (mode & needSpecialSmc) {
     LOG(DEBUG) << "needSpecialSmc flag set";
@@ -2056,6 +2066,18 @@ td::Result<std::pair<ton::UnixTime, ton::UnixTime>> Config::unpack_validator_set
     return std::pair<ton::UnixTime, ton::UnixTime>(rec0.utime_since, rec0.utime_until);
   }
   return td::Status::Error("validator set is invalid");
+}
+
+std::unique_ptr<ValidatorSet> Config::clone_cur_validator_set() const {
+  auto cvs = get_cur_validator_set();
+  CHECK(cvs);
+  auto nvs = std::make_unique<ValidatorSet>(cvs->utime_since, cvs->utime_until, cvs->total, cvs->main);
+  nvs->list.reserve(cvs->list.size());
+  for (int i = 0; i < (int)cvs->list.size(); i++) {
+    nvs->list.emplace_back(cvs->list[i]);
+  }
+  nvs->total_weight = cvs->total_weight;
+  return nvs;
 }
 
 std::pair<ton::UnixTime, ton::UnixTime> Config::get_validator_set_start_stop(int next) const {

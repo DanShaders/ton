@@ -109,6 +109,7 @@ set(TDUTILS_SOURCE
   td/utils/misc.cpp
   td/utils/MpmcQueue.cpp
   td/utils/OptionParser.cpp
+  td/utils/parallel.cpp
   td/utils/PathView.cpp
   td/utils/Random.cpp
   td/utils/SharedSlice.cpp
@@ -231,6 +232,7 @@ set(TDUTILS_SOURCE
   td/utils/OptionParser.h
   td/utils/OrderedEventsProcessor.h
   td/utils/overloaded.h
+  td/utils/parallel.h
   td/utils/Parser.h
   td/utils/PathView.h
   td/utils/queue.h
