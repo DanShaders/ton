@@ -4458,9 +4458,8 @@ std::unique_ptr<block::Account> ContestValidateQuery::make_account_from(td::Cons
  * @returns Pointer to the account if found or created successfully.
  *          Returns nullptr if an error occured.
  */
-std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBitPtr addr) {
-  auto dict_entry = ps_.account_dict_->lookup_extra(addr, 256);
-  auto new_acc = make_account_from(addr, std::move(dict_entry.first));
+std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBitPtr addr, const Ref<vm::CellSlice>& ps_account_value) {
+  auto new_acc = make_account_from(addr, ps_account_value);
   if (!new_acc) {
     reject_query("cannot load state of account "s + addr.to_hex(256) + " from previous shardchain state");
     return {};
@@ -4973,13 +4972,15 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
  *
  * @param acc_addr The address of the account.
  * @param acc_blk_root The root of the AccountBlock.
+ * @param ps_account_value
  *
  * @returns True if the account transactions are valid, false otherwise.
  */
-bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root) {
+bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root,
+                                                      const Ref<vm::CellSlice>& ps_account_value) {
   block::gen::AccountBlock::Record acc_blk;
   CHECK(tlb::csr_unpack(std::move(acc_blk_root), acc_blk) && acc_blk.account_addr == acc_addr);
-  auto account_p = unpack_account(acc_addr.cbits());
+  auto account_p = unpack_account(acc_addr.cbits(), ps_account_value);
   if (!account_p) {
     return reject_query("cannot unpack old state of account "s + acc_addr.to_hex());
   }
@@ -5046,7 +5047,7 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
     return reject_query("cannot extract (HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex());
   }
   block::tlb::ShardAccount::Record old_state, new_state;
-  if (!(old_state.unpack(ps_.account_dict_->lookup(account.addr)) &&
+  if (!(old_state.unpack(ps_account_value) &&
         new_state.unpack(ns_.account_dict_->lookup(account.addr)))) {
     return reject_query("cannot extract Account from the ShardAccount of "s + account.addr.to_hex());
   }
@@ -5072,9 +5073,9 @@ bool ContestValidateQuery::check_transactions() {
   ns_.account_dict_ =
       std::make_unique<vm::AugmentedDictionary>(ps_.account_dict_->get_root(), 256, block::tlb::aug_ShardAccounts);
   bool ok = account_blocks_dict_->check_for_each_extra(
-      [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
+      [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, StdSmcAddress key, int key_len) {
         CHECK(key_len == 256);
-        return check_account_transactions(key, std::move(value));
+        return check_account_transactions(key, std::move(value), ps_.account_dict_->lookup(key.cbits(), 256));
       });
 
   return ok;

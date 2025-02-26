@@ -321,10 +321,11 @@ class ContestValidateQuery : public td::actor::Actor {
                                        td::Bits256& msg_hash);
   bool check_in_queue();
   std::unique_ptr<block::Account> make_account_from(td::ConstBitPtr addr, Ref<vm::CellSlice> account);
-  std::unique_ptr<block::Account> unpack_account(td::ConstBitPtr addr);
+  std::unique_ptr<block::Account> unpack_account(td::ConstBitPtr addr, const Ref<vm::CellSlice>& ps_account_value);
   bool check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first,
                              bool is_last);
-  bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr);
+  bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr,
+                                  const Ref<vm::CellSlice>& ps_account_value);
   bool check_transactions();
   bool check_message_processing_order();
   bool check_new_state();
