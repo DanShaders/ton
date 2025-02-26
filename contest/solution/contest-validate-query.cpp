@@ -344,7 +344,7 @@ bool ContestValidateQuery::init_parse() {
   }
   CHECK(mc_blkid_.id.is_masterchain_ext());
   mc_seqno_ = mc_blkid_.seqno();
-  prev_blocks = prev_blks;
+  prev_blocks = std::move(prev_blks);
   after_merge_ = prev_blocks.size() == 2;
   after_split_ = !after_merge_ && prev_blocks[0].shard_full() != shard_;
   if (after_split != after_split_) {
@@ -356,10 +356,11 @@ bool ContestValidateQuery::init_parse() {
   block::gen::BlockExtra::Record extra;
   block::gen::ExtBlkRef::Record mcref;  // _ ExtBlkRef = BlkMasterInfo;
   ShardIdFull shard;
-  if (!(tlb::unpack_cell(block_root_, blk) && tlb::unpack_cell(blk.info, info) && !info.version &&
+  if (!(tlb::unpack_loaded_cell(block_root_, blk) && tlb::unpack_loaded_cell(blk.info, info) && !info.version &&
         block::tlb::t_ShardIdent.unpack(info.shard.write(), shard) &&
         block::gen::BlkPrevInfo{info.after_merge}.validate_ref(info.prev_ref) &&
-        (!info.not_master || tlb::unpack_cell(info.master_ref, mcref)) && tlb::unpack_cell(blk.extra, extra))) {
+        (!info.not_master || tlb::unpack_loaded_cell(info.master_ref, mcref)) &&
+        tlb::unpack_loaded_cell(blk.extra, extra))) {
     return reject_query("cannot unpack block header");
   }
   if (shard != shard_) {
@@ -599,13 +600,13 @@ bool ContestValidateQuery::try_unpack_mc_state() {
     create_stats_enabled_ = config_->create_stats_enabled();
     if (config_->has_capabilities() && (config_->get_capabilities() & ~supported_capabilities())) {
       LOG(INFO) << "block generation capabilities " << config_->get_capabilities()
-                   << " have been enabled in global configuration, but we support only " << supported_capabilities()
-                   << " (upgrade validator software?)";
+                << " have been enabled in global configuration, but we support only " << supported_capabilities()
+                << " (upgrade validator software?)";
     }
     if (config_->get_global_version() > supported_version()) {
       LOG(INFO) << "block version " << config_->get_global_version()
-                   << " have been enabled in global configuration, but we support only " << supported_version()
-                   << " (upgrade validator software?)";
+                << " have been enabled in global configuration, but we support only " << supported_version()
+                << " (upgrade validator software?)";
     }
 
     old_shard_conf_ = std::make_unique<block::ShardConfig>(*config_);
@@ -753,7 +754,7 @@ bool ContestValidateQuery::fetch_config_params() {
       basechain_create_fee_ = masterchain_create_fee_ = td::zero_refint();
     } else {
       block::gen::BlockCreateFees::Record create_fees;
-      if (!(tlb::unpack_cell(cell, create_fees) &&
+      if (!(tlb::unpack_loaded_cell(cell, create_fees) &&
             block::tlb::t_Grams.as_integer_to(create_fees.masterchain_block_fee, masterchain_create_fee_) &&
             block::tlb::t_Grams.as_integer_to(create_fees.basechain_block_fee, basechain_create_fee_))) {
         return fatal_error("cannot unpack BlockCreateFees from configuration parameter #14");
@@ -972,7 +973,6 @@ bool ContestValidateQuery::compute_prev_state() {
   prev_state_root_ = prev_states[0]->root_cell();
   CHECK(prev_state_root_.not_null());
   if (after_merge_) {
-    Ref<vm::Cell> aux_root = prev_states[1]->root_cell();
     if (!block::gen::t_ShardState.cell_pack_split_state(prev_state_root_, prev_states[0]->root_cell(),
                                                         prev_states[1]->root_cell())) {
       return fatal_error(-667, "cannot construct mechanically merged previously state");
@@ -1178,7 +1178,7 @@ void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQ
     return;
   }
   block::gen::OutMsgQueueInfo::Record qinfo;
-  if (!tlb::unpack_cell(outq_descr->root_cell(), qinfo)) {
+  if (!tlb::unpack_loaded_cell(outq_descr->root_cell(), qinfo)) {
     fatal_error("cannot unpack neighbor output queue info");
     return;
   }
@@ -1693,38 +1693,44 @@ bool ContestValidateQuery::unpack_block_data() {
   LOG(DEBUG) << "unpacking block structures";
   block::gen::Block::Record blk;
   block::gen::BlockExtra::Record extra;
-  if (!(tlb::unpack_cell(block_root_, blk) && tlb::unpack_cell(blk.extra, extra))) {
+  if (!(tlb::unpack_loaded_cell(block_root_, blk) && tlb::unpack_loaded_cell(blk.extra, extra))) {
     return reject_query("cannot unpack Block header");
   }
   auto inmsg_cs = vm::load_cell_slice_ref(std::move(extra.in_msg_descr));
-  auto outmsg_cs = vm::load_cell_slice_ref(std::move(extra.out_msg_descr));
   // run some hand-written checks from block::tlb::
   // (automatic tests from block::gen:: have been already run for the entire block)
   if (!block::tlb::t_InMsgDescr.validate_upto(10000000, *inmsg_cs)) {
     return reject_query("InMsgDescr of the new block failed to pass handwritten validity tests");
   }
+
+  auto outmsg_cs = vm::load_cell_slice_ref(std::move(extra.out_msg_descr));
+
   if (!block::tlb::t_OutMsgDescr.validate_upto(10000000, *outmsg_cs)) {
     return reject_query("OutMsgDescr of the new block failed to pass handwritten validity tests");
   }
   if (!block::tlb::t_ShardAccountBlocks.validate_ref(10000000, extra.account_blocks)) {
     return reject_query("ShardAccountBlocks of the new block failed to pass handwritten validity tests");
   }
+
   in_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(inmsg_cs), 256, block::tlb::aug_InMsgDescr);
-  out_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(outmsg_cs), 256, block::tlb::aug_OutMsgDescr);
-  account_blocks_dict_ = std::make_unique<vm::AugmentedDictionary>(
-      vm::load_cell_slice_ref(std::move(extra.account_blocks)), 256, block::tlb::aug_ShardAccountBlocks);
   LOG(DEBUG) << "validating InMsgDescr";
   if (!in_msg_dict_->validate_all()) {
     return reject_query("InMsgDescr dictionary is invalid");
   }
+
+  out_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(outmsg_cs), 256, block::tlb::aug_OutMsgDescr);
   LOG(DEBUG) << "validating OutMsgDescr";
   if (!out_msg_dict_->validate_all()) {
     return reject_query("OutMsgDescr dictionary is invalid");
   }
+
+  account_blocks_dict_ = std::make_unique<vm::AugmentedDictionary>(
+      vm::load_cell_slice_ref(std::move(extra.account_blocks)), 256, block::tlb::aug_ShardAccountBlocks);
   LOG(DEBUG) << "validating ShardAccountBlocks";
   if (!account_blocks_dict_->validate_all()) {
     return reject_query("ShardAccountBlocks dictionary is invalid");
   }
+
   return unpack_precheck_value_flow(std::move(blk.value_flow));
 }
 
@@ -1938,7 +1944,7 @@ bool ContestValidateQuery::precheck_one_transaction(td::ConstBitPtr acc_id, ton:
   auto trans_root = trans_csr->prefetch_ref();
   block::gen::Transaction::Record trans;
   block::gen::HASH_UPDATE::Record hash_upd;
-  if (!(tlb::unpack_cell(trans_root, trans) &&
+  if (!(tlb::unpack_loaded_cell(trans_root, trans) &&
         tlb::type_unpack_cell(std::move(trans.state_update), block::gen::t_HASH_UPDATE_Account, hash_upd))) {
     return reject_query(PSTRING() << "cannot unpack transaction " << trans_lt << " of " << acc_id.to_hex(256));
   }
@@ -2157,7 +2163,7 @@ bool ContestValidateQuery::build_new_message_queue() {
         block::tlb::MsgEnvelope::Record_std env;
         block::gen::CommonMsgInfo::Record_int_msg_info msg;
         CHECK(block::gen::csr_unpack(value, rec));
-        if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.in_msg, env) ||
+        if (!block::tlb::unpack_loaded_cell(rec.in_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
           return fatal_error("cannot unpack msg_import_deferred_fin");
         }
@@ -2177,7 +2183,7 @@ bool ContestValidateQuery::build_new_message_queue() {
         block::tlb::MsgEnvelope::Record_std env;
         block::gen::CommonMsgInfo::Record_int_msg_info msg;
         CHECK(block::gen::csr_unpack(value, rec));
-        if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.in_msg, env) ||
+        if (!block::tlb::unpack_loaded_cell(rec.in_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
           return fatal_error("cannot unpack msg_import_deferred_tr");
         }
@@ -2227,7 +2233,7 @@ bool ContestValidateQuery::build_new_message_queue() {
         block::tlb::MsgEnvelope::Record_std env;
         block::gen::CommonMsgInfo::Record_int_msg_info msg;
         CHECK(block::gen::csr_unpack(value, rec));
-        if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.out_msg, env) ||
+        if (!block::tlb::unpack_loaded_cell(rec.out_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
           return fatal_error("cannot unpack msg_export_new");
         }
@@ -2260,7 +2266,7 @@ bool ContestValidateQuery::build_new_message_queue() {
         block::tlb::MsgEnvelope::Record_std env;
         block::gen::CommonMsgInfo::Record_int_msg_info msg;
         CHECK(block::gen::csr_unpack(value, rec));
-        if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.out_msg, env) ||
+        if (!block::tlb::unpack_loaded_cell(rec.out_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
           return fatal_error("cannot unpack msg_export_tr");
         }
@@ -2289,7 +2295,7 @@ bool ContestValidateQuery::build_new_message_queue() {
         block::gen::OutMsg::Record_msg_export_deq_imm rec;
         block::tlb::MsgEnvelope::Record_std env;
         block::gen::CommonMsgInfo::Record_int_msg_info msg;
-        if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.out_msg, env) ||
+        if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_loaded_cell(rec.out_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
           return fatal_error("cannot unpack msg_export_deq_imm");
         }
@@ -2316,7 +2322,7 @@ bool ContestValidateQuery::build_new_message_queue() {
         block::tlb::MsgEnvelope::Record_std env;
         block::gen::CommonMsgInfo::Record_int_msg_info msg;
         CHECK(block::gen::csr_unpack(value, rec));
-        if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.out_msg, env) ||
+        if (!block::tlb::unpack_loaded_cell(rec.out_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
           return fatal_error("cannot unpack msg_export_new");
         }
@@ -2349,7 +2355,7 @@ bool ContestValidateQuery::build_new_message_queue() {
         block::gen::OutMsg::Record_msg_export_deferred_tr rec;
         block::tlb::MsgEnvelope::Record_std env;
         block::gen::CommonMsgInfo::Record_int_msg_info msg;
-        if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.out_msg, env) ||
+        if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_loaded_cell(rec.out_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
           return fatal_error("cannot unpack msg_export_deferred_tr");
         }
@@ -2400,7 +2406,7 @@ bool ContestValidateQuery::build_new_message_queue() {
         block::gen::OutMsg::Record_msg_export_tr_req rec;
         block::tlb::MsgEnvelope::Record_std env;
         block::gen::CommonMsgInfo::Record_int_msg_info msg;
-        if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_cell(rec.out_msg, env) ||
+        if (!block::gen::csr_unpack(value, rec) || !block::tlb::unpack_loaded_cell(rec.out_msg, env) ||
             !block::gen::csr_unpack_inexact(vm::load_cell_slice_ref(env.msg), msg)) {
           return fatal_error("cannot unpack msg_export_tr_rec");
         }
@@ -2423,11 +2429,11 @@ bool ContestValidateQuery::build_new_message_queue() {
           return fatal_error("failed to delete requeued message from out msg queue");
         }
 
+        ptr.advance(0);
         ptr.store_int(next_prefix.workchain, 32);
         ptr.advance(32);
         ptr.store_uint(next_prefix.account_id_prefix, 64);
-        ptr.advance(64);
-        ptr.copy_from(key, 256);
+
         vm::CellBuilder cb;
         CHECK(cb.store_long_bool(enqueued_lt) && cb.store_ref_bool(rec.out_msg));
         if (!ns_.out_msg_queue_->set_builder(queue_key, cb, vm::Dictionary::SetMode::Add)) {
@@ -2711,7 +2717,7 @@ bool ContestValidateQuery::check_account_dispatch_queue_update(td::Bits256 addr,
                                         << ": lt mismatch (" << lt << " != " << rec.enqueued_lt << ")");
         }
         block::tlb::MsgEnvelope::Record_std env;
-        if (!block::gen::t_MsgEnvelope.validate_ref(rec.out_msg) || !block::tlb::unpack_cell(rec.out_msg, env)) {
+        if (!block::gen::t_MsgEnvelope.validate_ref(rec.out_msg) || !block::tlb::unpack_loaded_cell(rec.out_msg, env)) {
           return reject_query(PSTRING() << "invalid EnqueuedMsg in AccountDispatchQueue for " << addr.to_hex());
         }
         if (env.emitted_lt) {
@@ -2998,7 +3004,7 @@ bool ContestValidateQuery::check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> 
       // importing and processing an internal message generated in this very block
       block::gen::InMsg::Record_msg_import_imm inp;
       unsigned long long created_lt = 0;
-      CHECK(tlb::csr_unpack(in_msg, inp) && tlb::unpack_cell(inp.in_msg, env) &&
+      CHECK(tlb::csr_unpack(in_msg, inp) && tlb::unpack_loaded_cell(inp.in_msg, env) &&
             block::tlb::t_MsgEnvelope.get_emitted_lt(vm::load_cell_slice(inp.in_msg), created_lt) &&
             (fwd_fee = block::tlb::t_Grams.as_integer(std::move(inp.fwd_fee))).not_null());
       transaction = std::move(inp.transaction);
@@ -3014,7 +3020,7 @@ bool ContestValidateQuery::check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> 
       // msg_import_fin$100 in_msg:^MsgEnvelope transaction:^Transaction fwd_fee:Grams
       // importing and processing an internal message with destination in this shard
       block::gen::InMsg::Record_msg_import_fin inp;
-      CHECK(tlb::csr_unpack(in_msg, inp) && tlb::unpack_cell(inp.in_msg, env) &&
+      CHECK(tlb::csr_unpack(in_msg, inp) && tlb::unpack_loaded_cell(inp.in_msg, env) &&
             (fwd_fee = block::tlb::t_Grams.as_integer(std::move(inp.fwd_fee))).not_null());
       transaction = std::move(inp.transaction);
       msg_env = std::move(inp.in_msg);
@@ -3026,7 +3032,7 @@ bool ContestValidateQuery::check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> 
       // msg_import_tr$101 in_msg:^MsgEnvelope out_msg:^MsgEnvelope transit_fee:Grams
       // importing and relaying a (transit) internal message with destination outside this shard
       block::gen::InMsg::Record_msg_import_tr inp;
-      CHECK(tlb::csr_unpack(in_msg, inp) && tlb::unpack_cell(inp.in_msg, env) &&
+      CHECK(tlb::csr_unpack(in_msg, inp) && tlb::unpack_loaded_cell(inp.in_msg, env) &&
             (fwd_fee = block::tlb::t_Grams.as_integer(std::move(inp.transit_fee))).not_null());
       msg_env = std::move(inp.in_msg);
       msg = env.msg;
@@ -3556,7 +3562,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
     }
     case block::gen::OutMsg::msg_export_imm: {
       block::gen::OutMsg::Record_msg_export_imm out;
-      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_cell(out.out_msg, env));
+      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_loaded_cell(out.out_msg, env));
       transaction = std::move(out.transaction);
       msg_env = std::move(out.out_msg);
       msg = env.msg;
@@ -3567,7 +3573,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
     }
     case block::gen::OutMsg::msg_export_new: {
       block::gen::OutMsg::Record_msg_export_new out;
-      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_cell(out.out_msg, env) &&
+      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_loaded_cell(out.out_msg, env) &&
             block::tlb::t_MsgEnvelope.get_emitted_lt(vm::load_cell_slice(out.out_msg), created_lt));
       transaction = std::move(out.transaction);
       msg_env = std::move(out.out_msg);
@@ -3578,7 +3584,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
     }
     case block::gen::OutMsg::msg_export_tr: {
       block::gen::OutMsg::Record_msg_export_tr out;
-      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_cell(out.out_msg, env));
+      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_loaded_cell(out.out_msg, env));
       msg_env = std::move(out.out_msg);
       msg = env.msg;
       reimport = std::move(out.imported);
@@ -3589,7 +3595,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
     }
     case block::gen::OutMsg::msg_export_deq: {
       block::gen::OutMsg::Record_msg_export_deq out;
-      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_cell(out.out_msg, env));
+      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_loaded_cell(out.out_msg, env));
       msg_env = std::move(out.out_msg);
       msg = env.msg;
       import_lt = out.import_block_lt;
@@ -3611,7 +3617,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
     }
     case block::gen::OutMsg::msg_export_tr_req: {
       block::gen::OutMsg::Record_msg_export_tr_req out;
-      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_cell(out.out_msg, env));
+      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_loaded_cell(out.out_msg, env));
       msg_env = std::move(out.out_msg);
       msg = env.msg;
       reimport = std::move(out.imported);
@@ -3622,7 +3628,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
     }
     case block::gen::OutMsg::msg_export_deq_imm: {
       block::gen::OutMsg::Record_msg_export_deq_imm out;
-      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_cell(out.out_msg, env));
+      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_loaded_cell(out.out_msg, env));
       msg_env = std::move(out.out_msg);
       msg = env.msg;
       reimport = std::move(out.reimport);
@@ -3633,7 +3639,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
     }
     case block::gen::OutMsg::msg_export_new_defer: {
       block::gen::OutMsg::Record_msg_export_new_defer out;
-      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_cell(out.out_msg, env) &&
+      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_loaded_cell(out.out_msg, env) &&
             block::tlb::t_MsgEnvelope.get_emitted_lt(vm::load_cell_slice(out.out_msg), created_lt));
       transaction = std::move(out.transaction);
       msg_env = std::move(out.out_msg);
@@ -3643,7 +3649,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
     }
     case block::gen::OutMsg::msg_export_deferred_tr: {
       block::gen::OutMsg::Record_msg_export_deferred_tr out;
-      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_cell(out.out_msg, env));
+      CHECK(tlb::csr_unpack(out_msg, out) && tlb::unpack_loaded_cell(out.out_msg, env));
       msg_env = std::move(out.out_msg);
       msg = env.msg;
       reimport = std::move(out.imported);
@@ -3880,7 +3886,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
     case block::gen::OutMsg::msg_export_imm: {
       block::gen::InMsg::Record_msg_import_imm in;
       block::tlb::MsgEnvelope::Record_std in_env;
-      if (!(tlb::unpack_cell(reimport, in) && tlb::unpack_cell(in.in_msg, in_env))) {
+      if (!(tlb::unpack_loaded_cell(reimport, in) && tlb::unpack_loaded_cell(in.in_msg, in_env))) {
         return reject_query(
             "cannot unpack msg_import_imm InMsg record corresponding to msg_export_imm OutMsg record with key "s +
             key.to_hex(256));
@@ -3937,7 +3943,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
     case block::gen::OutMsg::msg_export_tr: {
       block::gen::InMsg::Record_msg_import_tr in;
       block::tlb::MsgEnvelope::Record_std in_env;
-      if (!(tlb::unpack_cell(reimport, in) && tlb::unpack_cell(in.in_msg, in_env))) {
+      if (!(tlb::unpack_loaded_cell(reimport, in) && tlb::unpack_loaded_cell(in.in_msg, in_env))) {
         return reject_query(
             "cannot unpack msg_import_tr InMsg record corresponding to msg_export_tr OutMsg record with key "s +
             key.to_hex(256));
@@ -3961,7 +3967,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
     case block::gen::OutMsg::msg_export_deferred_tr: {
       block::gen::InMsg::Record_msg_import_deferred_tr in;
       block::tlb::MsgEnvelope::Record_std in_env;
-      if (!(tlb::unpack_cell(reimport, in) && tlb::unpack_cell(in.in_msg, in_env))) {
+      if (!(tlb::unpack_loaded_cell(reimport, in) && tlb::unpack_loaded_cell(in.in_msg, in_env))) {
         return reject_query(
             "cannot unpack msg_import_deferred_tr InMsg record corresponding to msg_export_deferred_tr OutMsg record with key "s +
             key.to_hex(256));
@@ -4004,16 +4010,16 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
       }
       if (deliver_lt != import_lt) {
         LOG(INFO) << "msg_export_deq OutMsg entry with key " << key.to_hex(256)
-                     << " claims the dequeued message with next hop "
-                     << next_prefix.to_str() + " has been delivered in block with end_lt=" << import_lt
-                     << " while the correct value is " << deliver_lt;
+                  << " claims the dequeued message with next hop "
+                  << next_prefix.to_str() + " has been delivered in block with end_lt=" << import_lt
+                  << " while the correct value is " << deliver_lt;
       }
       break;
     }
     case block::gen::OutMsg::msg_export_tr_req: {
       block::gen::InMsg::Record_msg_import_tr in;
       block::tlb::MsgEnvelope::Record_std in_env;
-      if (!(tlb::unpack_cell(reimport, in) && tlb::unpack_cell(in.in_msg, in_env))) {
+      if (!(tlb::unpack_loaded_cell(reimport, in) && tlb::unpack_loaded_cell(in.in_msg, in_env))) {
         return reject_query(
             "cannot unpack msg_import_tr InMsg record corresponding to msg_export_tr_req OutMsg record with key "s +
             key.to_hex(256));
@@ -4066,7 +4072,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
     case block::gen::OutMsg::msg_export_deq_imm: {
       block::gen::InMsg::Record_msg_import_fin in;
       block::tlb::MsgEnvelope::Record_std in_env;
-      if (!(tlb::unpack_cell(reimport, in) && tlb::unpack_cell(in.in_msg, in_env))) {
+      if (!(tlb::unpack_loaded_cell(reimport, in) && tlb::unpack_loaded_cell(in.in_msg, in_env))) {
         return reject_query(
             "cannot unpack msg_import_fin InMsg record corresponding to msg_export_deq_imm OutMsg record with key "s +
             key.to_hex(256));
@@ -4491,7 +4497,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   const StdSmcAddress& addr = account.addr;
   block::gen::Transaction::Record trans;
   block::gen::HASH_UPDATE::Record hash_upd;
-  CHECK(tlb::unpack_cell(trans_root, trans) &&
+  CHECK(tlb::unpack_loaded_cell(trans_root, trans) &&
         tlb::type_unpack_cell(std::move(trans.state_update), block::gen::t_HASH_UPDATE_Account, hash_upd));
   auto in_msg_root = trans.r1.in_msg->prefetch_ref();
   bool external{false}, ihr_delivered{false}, need_credit_phase{false};

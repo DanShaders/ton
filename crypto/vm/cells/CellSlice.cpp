@@ -1066,9 +1066,10 @@ VirtualCell::LoadedCell load_cell_slice_impl(Ref<Cell> cell, bool* can_be_specia
     if (r_loaded_cell.is_error()) {
       throw VmError{Excno::cell_und, "failed to load cell"};
     }
+
     auto loaded_cell = r_loaded_cell.move_as_ok();
     if (loaded_cell.data_cell->special_type() == DataCell::SpecialType::PrunnedBranch) {
-      auto virtualization = loaded_cell.virt.get_virtualization();
+      const auto virtualization = loaded_cell.virt.get_virtualization();
       if (virtualization != 0) {
         throw VmVirtError{virtualization};
       }
@@ -1095,9 +1096,6 @@ VirtualCell::LoadedCell load_cell_slice_impl(Ref<Cell> cell, bool* can_be_specia
           throw VmError{Excno::cell_und, "failed to load library cell"};
         }
         throw VmError{Excno::cell_und, "failed to load library cell (no vm_state_interface available)"};
-      } else if (loaded_cell.data_cell->special_type() == DataCell::SpecialType::PrunnedBranch) {
-        CHECK(loaded_cell.virt.get_virtualization() == 0);
-        throw VmError{Excno::cell_und, "trying to load prunned cell"};
       }
       throw VmError{Excno::cell_und, "unexpected special cell"};
     }

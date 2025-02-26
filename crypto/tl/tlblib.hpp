@@ -402,8 +402,14 @@ bool unpack_cell(Ref<vm::Cell> cell, R& rec, Args&... args) {
 }
 
 template <typename R, typename... Args>
+bool unpack_loaded_cell(Ref<vm::Cell> cell, R& rec, Args&... args) {
+  vm::CellSlice cs{cell->load_cell().move_as_ok()};
+  return cs.is_valid() && (typename R::type_class{}).unpack(cs, rec, args...) && cs.empty_ext();
+}
+
+template <typename R, typename... Args>
 bool unpack_cell_inexact(Ref<vm::Cell> cell, R& rec, Args&... args) {
-  vm::CellSlice cs = vm::load_cell_slice(std::move(cell));
+  vm::CellSlice cs{cell->load_cell().move_as_ok()};
   return cs.is_valid() && (typename R::type_class{}).unpack(cs, rec, args...);
 }
 

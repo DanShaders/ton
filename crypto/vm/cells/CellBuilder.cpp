@@ -393,11 +393,9 @@ CellBuilder& CellBuilder::store_ref(Ref<Cell> ref) {
 }
 
 td::uint16 CellBuilder::get_depth() const {
-  int d = 0;
-  for (unsigned i = 0; i < refs_cnt; i++) {
-    d = std::max(d, 1 + refs[i]->get_depth());
-  }
-  return static_cast<td::uint16>(d);
+  const auto max_refs = *std::max_element(refs.begin(), refs.end(),
+                                         [](const auto a, const auto& b) { return a->get_depth() < b->get_depth(); });
+  return max_refs->get_depth() + 1;
 }
 
 bool CellBuilder::append_data_cell_bool(const DataCell& cell) {
