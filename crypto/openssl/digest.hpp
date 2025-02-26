@@ -20,6 +20,7 @@
 #include <assert.h>
 
 #include <openssl/evp.h>
+#include <openssl/sha.h>
 #include <openssl/opensslv.h>
 
 #include "td/utils/Slice.h"
@@ -129,27 +130,33 @@ typedef HashCtx<OpensslEVP_SHA512> SHA512;
 
 template <typename T>
 std::size_t hash_str(unsigned char buffer[T::digest_bytes], const void *data, std::size_t size) {
-  T hasher(data, size);
+  thread_local T hasher;
+  hasher.reset();
+  hasher.feed(data, size);
   return hasher.extract(buffer);
 }
 
 template <typename T>
 std::size_t hash_two_str(unsigned char buffer[T::digest_bytes], const void *data1, std::size_t size1, const void *data2,
                          std::size_t size2) {
-  T hasher(data1, size1);
+  thread_local T hasher;
+  hasher.reset();
+  hasher.feed(data1, size1);
   hasher.feed(data2, size2);
   return hasher.extract(buffer);
 }
 
 template <typename T>
 std::string hash_str(const void *data, std::size_t size) {
-  T hasher(data, size);
+  thread_local T hasher;
+  hasher.feed(data, size);
   return hasher.extract();
 }
 
 template <typename T>
 std::string hash_two_str(const void *data1, std::size_t size1, const void *data2, std::size_t size2) {
-  T hasher(data1, size1);
+  thread_local T hasher;
+  hasher.feed(data1, size1);
   hasher.feed(data2, size2);
   return hasher.extract();
 }

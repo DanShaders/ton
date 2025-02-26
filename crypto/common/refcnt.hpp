@@ -34,6 +34,8 @@ class Ref;
 class CntObject {
  private:
   mutable std::atomic<int> cnt_;
+  bool owns_storage_{true};
+
   template <class T>
   friend class Ref;
 
@@ -51,6 +53,13 @@ class CntObject {
   }
 
  public:
+  void set_owns_storage(bool owns_storage) {
+    owns_storage_ = owns_storage;
+  }
+  bool owns_storage() const {
+    return owns_storage_;
+  }
+  
   struct WriteError {};
   CntObject() : cnt_(1) {
   }

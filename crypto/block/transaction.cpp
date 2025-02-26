@@ -2867,21 +2867,50 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
   vm::CellStorageStat storage_stat;
   storage_stat.limit_cells = size_limits.max_acc_state_cells;
   storage_stat.limit_bits = size_limits.max_acc_state_bits;
+
+  bool use_fast = [&]() -> bool {
+    try {
+      block::gen::Account::Record_account acc;
+      if (!tlb::unpack_cell(account.orig_total_state, acc)) {
+        return false;
+      }
+      block::gen::StorageInfo::Record storage_info;
+      if (!tlb::csr_unpack(acc.storage_stat, storage_info)) {
+        return false;
+      }
+      block::gen::StorageUsed::Record storage_used;
+      if (!tlb::csr_unpack(storage_info.used, storage_used)) {
+        return false;
+      }
+      block::gen::VarUInteger::Record cells;
+      if (!block::gen::VarUInteger(7).unpack(storage_used.cells.write(), cells)) {
+        return false;
+      }
+      if (cells.value.is_null()) {
+        return false;
+      }
+      return cells.value->to_double() > 10000;
+    } catch (vm::VmError& e) {
+      return false;
+    }
+  }();
+
   {
+    auto start_time = std::chrono::steady_clock::now();
     TD_PERF_COUNTER(transaction_storage_stat_a);
     td::Timer timer;
-    auto add_used_storage = [&](const td::Ref<vm::Cell>& cell) -> td::Status {
+    auto add_used_storage = [&](const td::Ref<vm::Cell>& cell, bool can_use_fast) -> td::Status {
       if (cell.not_null()) {
-        TRY_RESULT(res, storage_stat.add_used_storage(cell));
+        TRY_RESULT(res, (can_use_fast ? storage_stat.add_used_storage_fast_v2(cell) : storage_stat.add_used_storage(cell)));
         if (res.max_merkle_depth > max_allowed_merkle_depth) {
           return td::Status::Error("too big merkle depth");
         }
       }
       return td::Status::OK();
     };
-    TRY_STATUS(add_used_storage(new_code));
-    TRY_STATUS(add_used_storage(new_data));
-    TRY_STATUS(add_used_storage(new_library));
+    TRY_STATUS(add_used_storage(new_code, false));
+    TRY_STATUS(add_used_storage(new_data, use_fast));
+    TRY_STATUS(add_used_storage(new_library, false));
     if (timer.elapsed() > 0.1) {
       LOG(INFO) << "Compute used storage took " << timer.elapsed() << "s";
     }
@@ -3538,7 +3567,7 @@ Ref<vm::Cell> Transaction::commit(Account& acc) {
   acc.last_trans_end_lt_ = end_lt;
   acc.last_trans_hash_ = root->get_hash().bits();
   acc.last_paid = last_paid;
-  acc.storage_stat = new_storage_stat;
+  acc.storage_stat = std::move(new_storage_stat);
   acc.storage = new_storage;
   acc.balance = std::move(balance);
   acc.due_payment = std::move(due_payment);

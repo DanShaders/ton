@@ -15,6 +15,8 @@
 #include "common/errorlog.h"
 #include "fabric.h"
 #include <ctime>
+#include <future>
+#include "common/delay.h"
 
 namespace solution {
 
@@ -46,15 +48,18 @@ std::string ErrorCtx::as_string() const {
  * @param collated_data Collated data (proofs of shard states)
  * @param promise The Promise to return the serialized state update to
  */
-ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data,
-                                           td::BufferSlice collated_data, td::Promise<td::BufferSlice> promise)
+ContestValidateQuery::ContestValidateQuery(
+        BlockIdExt block_id, td::BufferSlice block_data,
+        td::BufferSlice collated_data, td::Promise<td::BufferSlice> promise,
+        std::unique_ptr<DestructionToken> destruction_token)
     : shard_(block_id.shard_full())
     , id_(block_id)
     , block_data(std::move(block_data))
     , collated_data(std::move(collated_data))
     , main_promise(std::move(promise))
     , shard_pfx_(shard_.shard)
-    , shard_pfx_len_(ton::shard_prefix_length(shard_)) {
+    , shard_pfx_len_(ton::shard_prefix_length(shard_))
+    , destruction_token_(std::move(destruction_token)) {
 }
 
 /**
@@ -75,12 +80,21 @@ void ContestValidateQuery::abort_query(td::Status error) {
  * @returns False indicating that the validation failed.
  */
 bool ContestValidateQuery::reject_query(std::string error, td::BufferSlice reason) {
+
+  std::unique_lock<std::mutex> lock(reject_query_mutex_);
   error = error_ctx() + error;
   LOG(WARNING) << "REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
-  if (main_promise) {
-    main_promise.set_error(td::Status::Error(error));
+
+  if (early_stop_) {
+    if (main_promise) {
+      main_promise.set_error(td::Status::Error(error));
+    }
+    stop();
+  } else {
+    std::unique_lock<std::mutex> lock(last_error_mutex_);
+    last_error_ = td::Status::Error(error);
   }
-  stop();
+
   return false;
 }
 
@@ -107,12 +121,18 @@ bool ContestValidateQuery::reject_query(std::string err_msg, td::Status error, t
  * @returns False indicating that the validation failed.
  */
 bool ContestValidateQuery::soft_reject_query(std::string error, td::BufferSlice reason) {
+  std::unique_lock<std::mutex> lock(reject_query_mutex_);
   error = error_ctx() + error;
   LOG(WARNING) << "SOFT REJECT: aborting validation of block candidate for " << shard_.to_str() << " : " << error;
-  if (main_promise) {
-    main_promise.set_error(td::Status::Error(std::move(error)));
+  if (early_stop_) {
+    if (main_promise) {
+      main_promise.set_error(td::Status::Error(error));
+    }
+    stop();
+  } else {
+    std::unique_lock<std::mutex> lock(last_error_mutex_);
+    last_error_ = td::Status::Error(error);
   }
-  stop();
   return false;
 }
 
@@ -124,12 +144,18 @@ bool ContestValidateQuery::soft_reject_query(std::string error, td::BufferSlice 
  * @returns False indicating that the validation failed.
  */
 bool ContestValidateQuery::fatal_error(td::Status error) {
+  std::unique_lock<std::mutex> lock(reject_query_mutex_);
   error.ensure_error();
   LOG(WARNING) << "aborting validation of block candidate for " << shard_.to_str() << " : " << error.to_string();
-  if (main_promise) {
-    main_promise.set_error(std::move(error));
+  if (early_stop_) {
+    if (main_promise) {
+      main_promise.set_error(std::move(error));
+    }
+    stop();
+  } else {
+    std::unique_lock<std::mutex> lock(last_error_mutex_);
+    last_error_ = std::move(error);
   }
-  stop();
   return false;
 }
 
@@ -155,6 +181,7 @@ bool ContestValidateQuery::fatal_error(int err_code, std::string err_msg) {
  * @returns False indicating that the validation failed.
  */
 bool ContestValidateQuery::fatal_error(int err_code, std::string err_msg, td::Status error) {
+  std::unique_lock<std::mutex> lock(reject_query_mutex_);
   error.ensure_error();
   return fatal_error(err_code, err_msg + " : " + error.to_string());
 }
@@ -2077,20 +2104,76 @@ bool ContestValidateQuery::precheck_one_account_block(td::ConstBitPtr acc_id, Re
  */
 bool ContestValidateQuery::precheck_account_transactions() {
   LOG(INFO) << "pre-checking all AccountBlocks, and all transactions of all accounts";
+
+  bool ok = true;
+
+  std::vector<std::pair<td::BitArray<256>, Ref<vm::CellSlice>>> accs;
+
   try {
     CHECK(account_blocks_dict_);
-    if (!account_blocks_dict_->validate_check_extra(
-            [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
+    ok = account_blocks_dict_->validate_check_extra(
+            [this, &accs](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
               CHECK(key_len == 256);
-              return precheck_one_account_block(key, std::move(value)) ||
-                     reject_query("invalid AccountBlock for account "s + key.to_hex(256) + " in the new block "s +
-                                  id_.to_str());
-            })) {
-      return reject_query("invalid ShardAccountBlock dictionary in the new block "s + id_.to_str());
-    }
+              accs.emplace_back(key, std::move(value));
+              return true;
+            });
   } catch (vm::VmError& err) {
-    return reject_query("invalid ShardAccountBlocks dictionary: "s + err.get_msg());
+    reject_query("invalid ShardAccountBlocks dictionary: "s + err.get_msg());
   }
+
+  std::vector<std::shared_ptr<std::promise<bool>>> promises;
+  early_stop_ = false;
+
+  const int kWorkersCnt = 7;
+  const int chunk_size = std::max<int>(1, (accs.size() + kWorkersCnt - 1) / kWorkersCnt);
+  for (int i = 0; i < kWorkersCnt; i++) {
+    auto begin = accs.begin() + i * chunk_size;
+    auto end = std::min(accs.begin() + (i + 1) * chunk_size, accs.end());
+    if (begin >= end) {
+      break;
+    }
+    promises.emplace_back(std::make_shared<std::promise<bool>>());
+    auto f = [&, begin = begin, end = end, promise = promises.back()]() {
+      try {
+        bool ok = true;
+        for (auto it = begin; it != end; it++) {
+          auto r = precheck_one_account_block(it->first.bits(), std::move(it->second));
+          if (!r) {
+            reject_query("invalid AccountBlock for account "s + it->first.to_hex() + " in the new block "s +
+                        id_.to_str());
+          }
+          ok &= r;
+        }
+        promise->set_value(ok);
+      } catch (vm::VmError& err) {
+        reject_query("invalid ShardAccountBlocks dictionary: "s + err.get_msg());
+        promise->set_value(false);
+      }
+    };
+    ton::delay_action(std::move(f), td::Timestamp::now());
+  }
+
+  for (auto& promise : promises) {
+    auto r = promise->get_future().get();
+    ok &= r;
+  }
+
+  early_stop_ = true;
+
+  {
+    std::unique_lock<std::mutex> lock{last_error_mutex_};
+    if (last_error_.is_error()) {
+      auto error = last_error_.move_as_error();
+      // unlock to get rid of tsan warning about inverse lock order
+      lock.unlock();
+      return reject_query("invalid ShardAccountBlocks dictionary in the new block: "s, std::move(error));
+    }
+  }
+
+  if (!ok) {
+    return reject_query("invalid ShardAccountBlock dictionary in the new block "s + id_.to_str());
+  }
+
   return true;
 }
 
@@ -2762,6 +2845,7 @@ bool ContestValidateQuery::check_account_dispatch_queue_update(td::Bits256 addr,
                                     << " was present in the queue");
     }
     if (max_removed_lt != old_max_lt.to_ulong()) {
+      std::unique_lock<std::mutex> lock{account_expected_defer_all_messages_mutex_};
       // Some old messages are still in DispatchQueue, meaning that all new messages from this account must be deferred
       account_expected_defer_all_messages_.insert(addr);
     }
@@ -2831,6 +2915,7 @@ bool ContestValidateQuery::unpack_dispatch_queue_update() {
  * @returns True if the update was successful, false otherwise.
  */
 bool ContestValidateQuery::update_max_processed_lt_hash(ton::LogicalTime lt, const ton::Bits256& hash) {
+  std::unique_lock<std::mutex> lock{proc_lt_mutex_};
   if (proc_lt_ < lt || (proc_lt_ == lt && proc_hash_ < hash)) {
     proc_lt_ = lt;
     proc_hash_ = hash;
@@ -3167,6 +3252,7 @@ bool ContestValidateQuery::check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> 
   }
 
   if (from_dispatch_queue) {
+    std::unique_lock<std::mutex> lock{removed_dispatch_queue_messages_mutex_};
     // Check that the message was removed from DispatchQueue
     LogicalTime lt = info.created_lt;
     auto it = removed_dispatch_queue_messages_.find({src_addr, lt});
@@ -3474,20 +3560,76 @@ bool ContestValidateQuery::check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> 
  */
 bool ContestValidateQuery::check_in_msg_descr() {
   LOG(INFO) << "checking inbound messages listed in InMsgDescr";
+
+  std::vector<std::pair<td::Bits256, Ref<vm::CellSlice>>> in_msgs;
+
   try {
     CHECK(in_msg_dict_);
     if (!in_msg_dict_->validate_check_extra(
-            [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
+            [this, &in_msgs](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
               CHECK(key_len == 256);
-              return check_in_msg(key, std::move(value)) ||
-                     reject_query("invalid InMsg with key (message hash) "s + key.to_hex(256) + " in the new block "s +
-                                  id_.to_str());
+              in_msgs.emplace_back(key, std::move(value));
+              return true;
             })) {
       return reject_query("invalid InMsgDescr dictionary in the new block "s + id_.to_str());
     }
+    
   } catch (vm::VmError& err) {
     return reject_query("invalid InMsgDescr dictionary: "s + err.get_msg());
   }
+
+  early_stop_ = false;
+
+  const int kWorkersCnt = 7;
+  const int chunk_size = std::max<int>(1, (in_msgs.size() + kWorkersCnt - 1) / kWorkersCnt);
+  std::vector<std::shared_ptr<std::promise<bool>>> promises;
+  for (int i = 0; i < kWorkersCnt; i++) {
+    if (i * chunk_size >= static_cast<int>(in_msgs.size())) {
+      break;
+    }
+
+    promises.push_back(std::make_shared<std::promise<bool>>());
+    auto f = [&, i=i, chunk_size, promise=promises.back()]() {
+      try {
+        for (int j = i * chunk_size; j < std::min((i + 1) * chunk_size, static_cast<int>(in_msgs.size())); j++) {
+          if (!check_in_msg(in_msgs[j].first.bits(), in_msgs[j].second)) {
+            reject_query("invalid InMsg with key (message hash) "s + in_msgs[j].first.to_hex() + " in the new block "s +
+                          id_.to_str());
+            promise->set_value(false);
+            return;
+          }
+        }
+        promise->set_value(true);
+      } catch (vm::VmError& err) {
+        reject_query("invalid InMsgDescr dictionary: "s + err.get_msg());
+        promise->set_value(false);
+      }
+    };
+    ton::delay_action(std::move(f), td::Timestamp::now());
+  }
+
+  bool ok = true;
+  for (auto& promise : promises) {
+    auto r = promise->get_future().get();
+    ok &= r;
+  }
+
+  early_stop_ = true;
+
+  {
+    std::unique_lock<std::mutex> lock{last_error_mutex_};
+    if (last_error_.is_error()) {
+      auto error = last_error_.move_as_error();
+      // unlock to get rid of tsan warning about inverse lock order
+      lock.unlock();
+      return reject_query("Error in check_in_msg_descr: "s, std::move(error));
+    }
+  }
+
+  if (!ok) {
+    return reject_query("Error in check_in_msg_descr "s + id_.to_str());
+  }
+
   return true;
 }
 
@@ -3787,6 +3929,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
   auto old_q_entry = ps_.out_msg_queue_->lookup(q_key);
 
   if (tag == block::gen::OutMsg::msg_export_new_defer) {
+    std::unique_lock<std::mutex> lock{new_dispatch_queue_messages_mutex_};
     // check the DispatchQueue update
     if (old_q_entry.not_null() || q_entry.not_null()) {
       return reject_query("OutMsg with key (message hash) "s + key.to_hex(256) +
@@ -4106,6 +4249,7 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
                                     << ", tag=" << tag);
     }
     auto emitted_lt = env.emitted_lt ? env.emitted_lt.value() : created_lt;
+    std::unique_lock<std::mutex> lock{msg_emitted_lt_mutex_};
     msg_emitted_lt_.emplace_back(src_addr, created_lt, emitted_lt);
   }
 
@@ -4119,19 +4263,73 @@ bool ContestValidateQuery::check_out_msg(td::ConstBitPtr key, Ref<vm::CellSlice>
  */
 bool ContestValidateQuery::check_out_msg_descr() {
   LOG(INFO) << "checking outbound messages listed in OutMsgDescr";
+
+  std::vector<std::pair<td::Bits256, td::Ref<vm::CellSlice>>> out_msgs;
   try {
     CHECK(out_msg_dict_);
     if (!out_msg_dict_->validate_check_extra(
-            [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
+            [this, &out_msgs](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
               CHECK(key_len == 256);
-              return check_out_msg(key, std::move(value)) ||
-                     reject_query("invalid OutMsg with key "s + key.to_hex(256) + " in the new block "s + id_.to_str());
+              out_msgs.emplace_back(key, std::move(value));
+              return true;
             })) {
       return reject_query("invalid OutMsgDescr dictionary in the new block "s + id_.to_str());
     }
   } catch (vm::VmError& err) {
     return reject_query("invalid OutMsgDescr dictionary: "s + err.get_msg());
   }
+
+  early_stop_ = false;
+
+  const int kWorkersCnt = 7;
+  const int chunk_size = std::max<int>(1, (out_msgs.size() + kWorkersCnt - 1) / kWorkersCnt);
+  std::vector<std::shared_ptr<std::promise<bool>>> promises;
+  for (int i = 0; i < kWorkersCnt; i++) {
+    if (i * chunk_size >= static_cast<int>(out_msgs.size())) {
+      break;
+    }
+
+    promises.push_back(std::make_shared<std::promise<bool>>());
+    auto f = [&, i=i, chunk_size, promise=promises.back()]() {
+      try {
+        for (int j = i * chunk_size; j < std::min((i + 1) * chunk_size, static_cast<int>(out_msgs.size())); j++) {
+          if (!check_out_msg(out_msgs[j].first.bits(), out_msgs[j].second)) {
+            reject_query("invalid OutMsg with key "s + out_msgs[j].first.to_hex() + " in the new block "s + id_.to_str());
+            promise->set_value(false);
+            return;
+          }
+        }
+        promise->set_value(true);
+      } catch (vm::VmError& err) {
+        reject_query("invalid OutMsgDescr dictionary: "s + err.get_msg());
+        promise->set_value(false);
+      }
+    };
+    ton::delay_action(std::move(f), td::Timestamp::now());
+  }
+
+  bool ok = true;
+  for (auto& promise : promises) {
+    auto r = promise->get_future().get();
+    ok &= r;
+  }
+
+  early_stop_ = true;
+
+  {
+    std::unique_lock<std::mutex> lock{last_error_mutex_};
+    if (last_error_.is_error()) {
+      auto error = last_error_.move_as_error();
+      // unlock to get rid of tsan warning about inverse lock order
+      lock.unlock();
+      return reject_query("Error in check_out_msg_descr: "s, std::move(error));
+    }
+  }
+
+  if (!ok) {
+    return reject_query("Error in check_out_msg_descr "s + id_.to_str());
+  }
+
   return true;
 }
 
@@ -4551,6 +4749,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
         }
       }
       if (info.created_lt != start_lt_ || !is_special_tx) {
+        std::unique_lock<std::mutex> lock{msg_proc_lt_mutex_};
         msg_proc_lt_.emplace_back(addr, lt, emitted_lt);
       }
       dest = std::move(info.dest);
@@ -4654,6 +4853,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
                                     << addr.to_hex() << " refers to a different processing transaction");
     }
     if (tag != block::gen::OutMsg::msg_export_ext) {
+      std::unique_lock<std::mutex> lock{account_expected_defer_all_messages_mutex_};
       bool is_deferred = tag == block::gen::OutMsg::msg_export_new_defer;
       if (account_expected_defer_all_messages_.count(ss_addr) && !is_deferred) {
         return reject_query(
@@ -4877,29 +5077,36 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     return reject_query(PSTRING() << "cannot re-create the serialization of  transaction " << lt
                                   << " for smart contract " << addr.to_hex());
   }
-  if (!trs->update_limits(*block_limit_status_, /* with_gas = */ false, /* with_size = */ false)) {
-    return fatal_error(PSTRING() << "cannot update block limit status to include transaction " << lt << " of account "
-                                 << addr.to_hex());
+
+  {
+    std::unique_lock<std::mutex> lock{block_limit_status_mutex_};
+    if (!trs->update_limits(*block_limit_status_, /* with_gas = */ false, /* with_size = */ false)) {
+      return fatal_error(PSTRING() << "cannot update block limit status to include transaction " << lt << " of account "
+                                  << addr.to_hex());
+    }
   }
 
-  // Collator should stop if total gas usage exceeds limits, including transactions on special accounts, but without
-  // ticktocks and mint/recover.
-  // Here Validator checks a weaker condition
-  if (!is_special_tx && !trs->gas_limit_overridden && trans_type == block::transaction::Transaction::tr_ord) {
-    (account.is_special ? total_special_gas_used_ : total_gas_used_) += trs->gas_used();
-  }
-  if (total_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.gas_limit) {
-    return reject_query(PSTRING() << "gas block limits are exceeded: total_gas_used > gas_limit_hard + trx_gas_limit ("
-                                  << "total_gas_used=" << total_gas_used_
-                                  << ", gas_limit_hard=" << block_limits_->gas.hard()
-                                  << ", trx_gas_limit=" << compute_phase_cfg_.gas_limit << ")");
-  }
-  if (total_special_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.special_gas_limit) {
-    return reject_query(
-        PSTRING() << "gas block limits are exceeded: total_special_gas_used > gas_limit_hard + special_gas_limit ("
-                  << "total_special_gas_used=" << total_special_gas_used_
-                  << ", gas_limit_hard=" << block_limits_->gas.hard()
-                  << ", special_gas_limit=" << compute_phase_cfg_.special_gas_limit << ")");
+  {
+    std::unique_lock<std::mutex> lock{total_gas_used_mutex_};
+    // Collator should stop if total gas usage exceeds limits, including transactions on special accounts, but without
+    // ticktocks and mint/recover.
+    // Here Validator checks a weaker condition
+    if (!is_special_tx && !trs->gas_limit_overridden && trans_type == block::transaction::Transaction::tr_ord) {
+      (account.is_special ? total_special_gas_used_ : total_gas_used_) += trs->gas_used();
+    }
+    if (total_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.gas_limit) {
+      return reject_query(PSTRING() << "gas block limits are exceeded: total_gas_used > gas_limit_hard + trx_gas_limit ("
+                                    << "total_gas_used=" << total_gas_used_
+                                    << ", gas_limit_hard=" << block_limits_->gas.hard()
+                                    << ", trx_gas_limit=" << compute_phase_cfg_.gas_limit << ")");
+    }
+    if (total_special_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.special_gas_limit) {
+      return reject_query(
+          PSTRING() << "gas block limits are exceeded: total_special_gas_used > gas_limit_hard + special_gas_limit ("
+                    << "total_special_gas_used=" << total_special_gas_used_
+                    << ", gas_limit_hard=" << block_limits_->gas.hard()
+                    << ", special_gas_limit=" << compute_phase_cfg_.special_gas_limit << ")");
+    }
   }
 
   auto trans_root2 = trs->commit(account);
@@ -4947,7 +5154,11 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
         << "transaction " << lt << " of " << addr.to_hex()
         << " is invalid: it has produced a set of outbound messages different from that listed in the transaction");
   }
-  total_burned_ += trs->blackhole_burned;
+
+  {
+    std::unique_lock<std::mutex> lock{total_burned_mutex_};
+    total_burned_ += trs->blackhole_burned;
+  }
   // check new balance and value flow
   auto new_balance = account.get_balance();
   block::CurrencyCollection total_fees;
@@ -5003,6 +5214,7 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
 
   // See Collator::combine_account_trabsactions
   if (account.total_state->get_hash() != account.orig_total_state->get_hash()) {
+    std::unique_lock<std::mutex> lock{ns_mutex_};
     // account changed
     if (account.orig_status == block::Account::acc_nonexist) {
       // account created
@@ -5046,9 +5258,12 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
     return reject_query("cannot extract (HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex());
   }
   block::tlb::ShardAccount::Record old_state, new_state;
-  if (!(old_state.unpack(ps_.account_dict_->lookup(account.addr)) &&
-        new_state.unpack(ns_.account_dict_->lookup(account.addr)))) {
-    return reject_query("cannot extract Account from the ShardAccount of "s + account.addr.to_hex());
+  {
+    std::unique_lock<std::mutex> lock{ns_mutex_};
+    if (!(old_state.unpack(ps_.account_dict_->lookup(account.addr)) &&
+          new_state.unpack(ns_.account_dict_->lookup(account.addr)))) {
+      return reject_query("cannot extract Account from the ShardAccount of "s + account.addr.to_hex());
+    }
   }
   if (hash_upd.old_hash != old_state.account->get_hash().bits()) {
     return reject_query("(HASH_UPDATE Account) from the AccountBlock of "s + account.addr.to_hex() +
@@ -5071,11 +5286,63 @@ bool ContestValidateQuery::check_transactions() {
   LOG(INFO) << "checking all transactions";
   ns_.account_dict_ =
       std::make_unique<vm::AugmentedDictionary>(ps_.account_dict_->get_root(), 256, block::tlb::aug_ShardAccounts);
+  
+  std::vector<std::pair<StdSmcAddress, Ref<vm::CellSlice>>> acc_blocks;
+
   bool ok = account_blocks_dict_->check_for_each_extra(
-      [this](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
+      [this, &acc_blocks](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) {
         CHECK(key_len == 256);
-        return check_account_transactions(key, std::move(value));
+        acc_blocks.emplace_back(StdSmcAddress{key}, std::move(value));
+        return true;
       });
+
+  std::vector<std::shared_ptr<std::promise<bool>>> promises;
+  early_stop_ = false;
+
+  const int kWorkers = 6;
+  const int chunk_size = (acc_blocks.size() + kWorkers - 1) / kWorkers;
+  for (int i = 0; i < kWorkers; i++) {
+    int start = i * chunk_size;
+    int end = std::min((i + 1) * chunk_size, static_cast<int>(acc_blocks.size()));
+    if (start >= end) {
+      continue;
+    }
+
+    auto p = std::make_shared<std::promise<bool>>();
+    promises.emplace_back(std::move(p));
+    auto f = [&, start = start, end = end,
+              promise = promises.back()]() {
+      for (int j = start; j < end; j++) {
+        auto& [key, value] = acc_blocks[j];
+        auto r = check_account_transactions(key, std::move(value));
+        if (!r) {
+          promise->set_value(false);
+          return;
+        }
+      }
+      promise->set_value(true);
+    };
+    ton::delay_action(std::move(f), td::Timestamp::now());
+  }
+
+  for (auto& promise : promises) {
+    auto r = promise->get_future().get();
+    if (!r) {
+      ok = false;
+    }
+  }
+
+  early_stop_ = true;
+
+  {
+    std::unique_lock<std::mutex> lock{last_error_mutex_};
+    if (last_error_.is_error()) {
+      auto error = last_error_.move_as_error();
+      // unlock to get rid of tsan warning about inverse lock order
+      lock.unlock();
+      return reject_query("Error in check_transactions", std::move(error));
+    }
+  }
 
   return ok;
 }

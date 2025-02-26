@@ -955,8 +955,8 @@ std::unique_ptr<DynamicBagOfCellsDb> DynamicBagOfCellsDb::create_in_memory(td::K
         [&](auto task_id) {
           td::int64 local_cell_count = 0;
           td::int64 local_desc_count = 0;
-          CHECK(!DataCell::use_arena);
-          DataCell::use_arena = use_arena;
+          CHECK(!vm::IsArenaForDataCellEnabled());
+          vm::SetArenaForDataCellEnabled(use_arena);
           kv->for_each_in_range(keys.at(task_id), keys.at(task_id + 1), [&](td::Slice key, td::Slice value) {
               if (td::begins_with(key, "desc") && key.size() != 32) {
                 local_desc_count++;
@@ -974,7 +974,7 @@ std::unique_ptr<DynamicBagOfCellsDb> DynamicBagOfCellsDb::create_in_memory(td::K
               local_cell_count++;
               return td::Status::OK();
             }).ensure();
-          DataCell::use_arena = false;
+          vm::SetArenaForDataCellEnabled(false);
           cell_count += local_cell_count;
           desc_count += local_desc_count;
         },

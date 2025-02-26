@@ -23,26 +23,23 @@ namespace vm {
 // CellUsageTree::NodePtr
 //
 bool CellUsageTree::NodePtr::on_load(const td::Ref<vm::DataCell>& cell) const {
-  auto tree = tree_weak_.lock();
-  if (!tree) {
+  if (!tree_) {
     return false;
   }
-  tree->on_load(node_id_, cell);
+  tree_->on_load(node_id_, cell);
   return true;
 }
 
 CellUsageTree::NodePtr CellUsageTree::NodePtr::create_child(unsigned ref_id) const {
-  auto tree = tree_weak_.lock();
-  if (!tree) {
+  if (!tree_) {
     return {};
   }
-  return {tree_weak_, tree->create_child(node_id_, ref_id)};
+  return {tree_, tree_->create_child(node_id_, ref_id)};
 }
 
 bool CellUsageTree::NodePtr::is_from_tree(const CellUsageTree* master_tree) const {
   DCHECK(master_tree);
-  auto tree = tree_weak_.lock();
-  if (tree.get() != master_tree) {
+  if (tree_ != master_tree) {
     return false;
   }
   return true;
@@ -50,8 +47,7 @@ bool CellUsageTree::NodePtr::is_from_tree(const CellUsageTree* master_tree) cons
 
 bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
   DCHECK(master_tree);
-  auto tree = tree_weak_.lock();
-  if (tree.get() != master_tree) {
+  if (tree_ != master_tree) {
     return false;
   }
   master_tree->mark_path(node_id_);
@@ -62,34 +58,45 @@ bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
 // CellUsageTree
 //
 CellUsageTree::NodePtr CellUsageTree::root_ptr() {
-  return {shared_from_this(), 1};
+  CHECK(root_);
+  return {this, root_};
 }
 
 CellUsageTree::NodeId CellUsageTree::root_id() const {
-  return 1;
+  CHECK(root_);
+  return root_;
 };
 
 bool CellUsageTree::is_loaded(NodeId node_id) const {
-  if (use_mark_) {
-    return nodes_[node_id].has_mark;
+  if (node_id == nullptr) {
+    return false;
   }
-  return nodes_[node_id].is_loaded;
+  if (use_mark_) {
+    return node_id->has_mark;
+  }
+  return node_id->is_loaded;
 }
 
 bool CellUsageTree::has_mark(NodeId node_id) const {
-  return nodes_[node_id].has_mark;
+  if (node_id == nullptr) {
+    return false;
+  }
+  return node_id->has_mark;
 }
 
 void CellUsageTree::set_mark(NodeId node_id, bool mark) {
-  if (node_id == 0) {
+  if (node_id == nullptr) {
     return;
   }
-  nodes_[node_id].has_mark = mark;
+  node_id->has_mark = mark;
 }
 
 void CellUsageTree::mark_path(NodeId node_id) {
+  if (node_id == nullptr) {
+    return;
+  }
   auto cur_node_id = get_parent(node_id);
-  while (cur_node_id != 0) {
+  while (cur_node_id != nullptr) {
     if (has_mark(cur_node_id)) {
       break;
     }
@@ -99,12 +106,18 @@ void CellUsageTree::mark_path(NodeId node_id) {
 }
 
 CellUsageTree::NodeId CellUsageTree::get_parent(NodeId node_id) {
-  return nodes_[node_id].parent;
+  if (node_id == nullptr) {
+    return nullptr;
+  }
+  return node_id->parent;
 }
 
 CellUsageTree::NodeId CellUsageTree::get_child(NodeId node_id, unsigned ref_id) {
   DCHECK(ref_id < CellTraits::max_refs);
-  return nodes_[node_id].children[ref_id];
+  if (node_id == nullptr) {
+    return nullptr;
+  }
+  return node_id->children[ref_id];
 }
 
 void CellUsageTree::set_use_mark_for_is_loaded(bool use_mark) {
@@ -112,31 +125,36 @@ void CellUsageTree::set_use_mark_for_is_loaded(bool use_mark) {
 }
 
 void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
-  if (nodes_[node_id].is_loaded) {
+  if (node_id == nullptr) {
     return;
   }
-  nodes_[node_id].is_loaded = true;
-  if (cell_load_callback_) {
-    cell_load_callback_(cell);
+
+  bool expected = false;
+  if (node_id->is_loaded.compare_exchange_strong(expected, true)) {
+    if (cell_load_callback_) {
+      cell_load_callback_(cell);
+    }
   }
 }
 
 CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_id) {
   DCHECK(ref_id < CellTraits::max_refs);
-  NodeId res = nodes_[node_id].children[ref_id];
-  if (res) {
-    return res;
-  }
-  res = create_node(node_id);
-  nodes_[node_id].children[ref_id] = res;
-  return res;
-}
+  CHECK(node_id);
 
-CellUsageTree::NodeId CellUsageTree::create_node(NodeId parent) {
-  NodeId res = static_cast<NodeId>(nodes_.size());
-  nodes_.emplace_back();
-  nodes_.back().parent = parent;
-  return res;
+  if (node_id->children[ref_id] != nullptr) {
+    return node_id->children[ref_id];
+  }
+
+  auto new_node = new Node();
+  new_node->parent = node_id;
+
+  Node* expected = nullptr;
+  if (!node_id->children[ref_id].compare_exchange_strong(expected, new_node)) {
+    delete new_node;
+    return expected;
+  }
+
+  return new_node;
 }
 
 }  // namespace vm

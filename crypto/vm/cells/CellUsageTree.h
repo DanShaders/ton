@@ -29,17 +29,38 @@ namespace vm {
 class DataCell;
 
 class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
+ private:
+  struct Node {
+    Node() {
+      for (auto& child : children) {
+        child = nullptr;
+      }
+    }
+
+    ~Node() {
+      for (auto& child : children) {
+        if (child) {
+          delete child;
+        }
+      }
+    }
+
+    std::atomic<bool> is_loaded{false};
+    std::atomic<bool> has_mark{false};
+    Node* parent{nullptr};
+    std::array<std::atomic<Node*>, CellTraits::max_refs> children{};
+  };
  public:
-  using NodeId = td::uint32;
+  using NodeId = Node*;
 
   struct NodePtr {
    public:
     NodePtr() = default;
-    NodePtr(std::weak_ptr<CellUsageTree> tree_weak, NodeId node_id)
-        : tree_weak_(std::move(tree_weak)), node_id_(node_id) {
+    NodePtr(CellUsageTree* tree, NodeId node_id)
+        : tree_(tree), node_id_(node_id) {
     }
     bool empty() const {
-      return node_id_ == 0 || tree_weak_.expired();
+      return node_id_ == nullptr || tree_ == nullptr;
     }
 
     bool on_load(const td::Ref<vm::DataCell>& cell) const;
@@ -48,9 +69,17 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
     bool is_from_tree(const CellUsageTree* master_tree) const;
 
    private:
-    std::weak_ptr<CellUsageTree> tree_weak_;
-    NodeId node_id_{0};
+    CellUsageTree* tree_;
+    NodeId node_id_{nullptr};
   };
+
+  CellUsageTree() 
+    : root_(new Node()) {
+  }
+
+  ~CellUsageTree() {
+    delete root_;
+  }
 
   NodePtr root_ptr();
   NodeId root_id() const;
@@ -68,17 +97,10 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   }
 
  private:
-  struct Node {
-    bool is_loaded{false};
-    bool has_mark{false};
-    NodeId parent{0};
-    std::array<td::uint32, CellTraits::max_refs> children{};
-  };
   bool use_mark_{false};
-  std::vector<Node> nodes_{2};
+  Node* root_{nullptr};
   std::function<void(const td::Ref<vm::DataCell>&)> cell_load_callback_;
 
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);
-  NodeId create_node(NodeId parent);
 };
 }  // namespace vm

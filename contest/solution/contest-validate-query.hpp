@@ -10,6 +10,7 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <future>
 #include "common/global-version.h"
 #include "tonlib/tonlib/ExtClient.h"
 
@@ -81,6 +82,18 @@ inline ErrorCtxSet ErrorCtx::set_guard(std::vector<std::string> str_list) {
   return ErrorCtxSet(*this, std::move(str_list));
 }
 
+struct DestructionToken {
+  std::shared_ptr<std::promise<bool>> promise_;
+
+  DestructionToken(std::shared_ptr<std::promise<bool>> promise) : promise_(std::move(promise)) {
+  }
+  ~DestructionToken() {
+    if (promise_) {
+      promise_->set_value(true);
+    }
+  }
+};
+
 class ContestValidateQuery : public td::actor::Actor {
   static constexpr int supported_version() {
     return SUPPORTED_VERSION;
@@ -92,9 +105,10 @@ class ContestValidateQuery : public td::actor::Actor {
 
  public:
   ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice collated_data,
-                       td::Promise<td::BufferSlice> promise);
+                       td::Promise<td::BufferSlice> promise, std::unique_ptr<DestructionToken> destruction_token);
 
  private:
+  std::unique_ptr<DestructionToken> destruction_token_;
   int verbosity{0};
   int pending{0};
   const ShardIdFull shard_;
@@ -156,7 +170,11 @@ class ContestValidateQuery : public td::actor::Actor {
   ton::BlockIdExt prev_key_block_;
   ton::LogicalTime prev_key_block_lt_;
   std::unique_ptr<block::BlockLimits> block_limits_;
+
+  std::mutex block_limit_status_mutex_;
   std::unique_ptr<block::BlockLimitStatus> block_limit_status_;
+
+  std::mutex total_gas_used_mutex_;
   td::uint64 total_gas_used_{0}, total_special_gas_used_{0};
 
   LogicalTime start_lt_, end_lt_;
@@ -173,6 +191,8 @@ class ContestValidateQuery : public td::actor::Actor {
   std::map<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
 
   block::ShardState ps_;
+
+  std::mutex ns_mutex_;
   block::ShardState ns_;
   bool processed_upto_updated_{false};
   std::unique_ptr<vm::AugmentedDictionary> sibling_out_msg_queue_;
@@ -183,17 +203,27 @@ class ContestValidateQuery : public td::actor::Actor {
 
   std::unique_ptr<vm::AugmentedDictionary> in_msg_dict_, out_msg_dict_, account_blocks_dict_;
   block::ValueFlow value_flow_;
+
+
+  std::mutex total_burned_mutex_;
   block::CurrencyCollection import_created_, transaction_fees_, total_burned_{0}, fees_burned_{0};
   td::RefInt256 import_fees_;
 
+  std::mutex proc_lt_mutex_;
   ton::LogicalTime proc_lt_{0}, claimed_proc_lt_{0}, min_enq_lt_{~0ULL};
   ton::Bits256 proc_hash_ = ton::Bits256::zero(), claimed_proc_hash_, min_enq_hash_;
 
+  std::mutex msg_proc_lt_mutex_;
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_proc_lt_;
+
+  std::mutex msg_emitted_lt_mutex_;
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_emitted_lt_;
 
+  std::mutex removed_dispatch_queue_messages_mutex_;
   std::map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;
+  std::mutex new_dispatch_queue_messages_mutex_;
   std::map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> new_dispatch_queue_messages_;
+  std::mutex account_expected_defer_all_messages_mutex_;
   std::set<StdSmcAddress> account_expected_defer_all_messages_;
   td::uint64 old_out_msg_queue_size_ = 0;
   bool out_msg_queue_size_known_ = false;
@@ -336,6 +366,11 @@ class ContestValidateQuery : public td::actor::Actor {
 
   bool store_master_ref(vm::CellBuilder& cb);
   bool build_state_update();
+
+  std::mutex reject_query_mutex_;
+  std::atomic<bool> early_stop_{true};
+  std::mutex last_error_mutex_;
+  td::Status last_error_{td::Status::OK()};
 };
 
 }  // namespace solution

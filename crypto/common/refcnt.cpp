@@ -39,13 +39,24 @@ struct SafeDeleter {
     SCOPE_EXIT {
       is_active_ = false;
     };
-    delete ptr;
+
+    if (ptr->owns_storage()) {
+      delete ptr;
+    } else {
+      ptr->~CntObject();
+    }
+
     delete_count++;
     while (!to_delete_.empty()) {
       auto *ptr = to_delete_.back();
       to_delete_.pop_back();
       delete_count++;
-      delete ptr;
+
+      if (ptr->owns_storage()) {
+        delete ptr;
+      } else {
+        ptr->~CntObject();
+      }
     }
   }
 

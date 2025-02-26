@@ -25,11 +25,12 @@
 
 namespace vm {
 
+void ResetDataCellArena();
+void SetArenaForDataCellEnabled(bool enabled);
+bool IsArenaForDataCellEnabled();
+
 class DataCell : public Cell {
  public:
-  // NB: cells created with use_arena=true are never freed
-  static thread_local bool use_arena;
-
   DataCell(const DataCell& other) = delete;
   ~DataCell() override;
 

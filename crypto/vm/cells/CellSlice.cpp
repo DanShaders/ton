@@ -1113,12 +1113,116 @@ CellSlice load_cell_slice_special(const Ref<Cell>& cell, bool& special) {
   return CellSlice{load_cell_slice_impl(cell, &special)};
 }
 
+
+namespace {
+
+template <class CellT>
+struct ArenaAllocator {
+  ArenaAllocator() {
+    allocate_new_chunk();
+  }
+
+  template <class T, class... ArgsT>
+  CellT* make_unique(ArgsT&&... args) {
+    auto* ptr = fast_alloc(sizeof(T));
+    T* obj = new (ptr) T(std::forward<ArgsT>(args)...);
+    obj->set_owns_storage(false);
+    return obj;
+  }
+
+  void reset() {
+    current_chunk = chunks.begin();
+    current_slice = td::MutableSlice(current_chunk->data(), current_chunk->size());
+  }
+
+private:
+  using ChunksList = std::list<std::string>;
+  ChunksList chunks;
+  ChunksList::iterator current_chunk;
+  td::MutableSlice current_slice;
+
+  void allocate_new_chunk() {
+    chunks.push_back(std::string(1 << 20, 0));
+    current_chunk = chunks.end();
+    current_chunk--;
+    current_slice = td::MutableSlice(current_chunk->data(), current_chunk->size());
+  }
+
+  void move_to_next_chunk() {
+    current_chunk++;
+    if (current_chunk == chunks.end()) {
+      allocate_new_chunk();
+    }
+    current_slice = td::MutableSlice(current_chunk->data(), current_chunk->size());
+  }
+
+  char* fast_alloc(size_t size) {
+    auto aligned_size = (size + 7) / 8 * 8;
+    if (current_slice.size() < size) {
+      move_to_next_chunk();
+    }
+    auto res = current_slice.begin();
+    current_slice.remove_prefix(aligned_size);
+    return res;
+  }
+};
+
+thread_local ArenaAllocator<CellSlice>* cell_slice_arena{nullptr};
+std::mutex arena_mutex;
+std::vector<ArenaAllocator<CellSlice>*> all_threads_arenas;
+std::atomic<bool> arena_for_cell_slice_enabled{false};
+
+template <class... ArgsT>
+CellSlice* AllocateCellSliceOnArena(ArgsT&&... args) {
+  if (td::unlikely(cell_slice_arena == nullptr)) {
+    cell_slice_arena = new ArenaAllocator<CellSlice>();
+    std::lock_guard<std::mutex> guard(arena_mutex);
+    all_threads_arenas.push_back(cell_slice_arena);
+  }
+  return cell_slice_arena->make_unique<CellSlice>(std::forward<ArgsT>(args)...);
+}
+}
+
+void ResetCellSliceArena() {
+  std::lock_guard<std::mutex> guard(arena_mutex);
+  for (auto* arena : all_threads_arenas) {
+    arena->reset();
+  }
+}
+
+void SetArenaForCellSliceEnabled(bool enabled) {
+  arena_for_cell_slice_enabled.store(enabled);
+}
+
+bool IsArenaForCellSliceEnabled() {
+  return arena_for_cell_slice_enabled.load();
+}
+
+td::CntObject* CellSlice::make_copy() const {
+  if (arena_for_cell_slice_enabled.load()) {
+    return AllocateCellSliceOnArena(*this);
+  }
+  return new CellSlice{*this};
+}
+
 Ref<CellSlice> load_cell_slice_ref(const Ref<Cell>& cell) {
-  return Ref<CellSlice>{true, CellSlice(load_cell_slice_impl(cell, nullptr))};
+  if (arena_for_cell_slice_enabled.load()) {
+    return Ref<CellSlice>{AllocateCellSliceOnArena(load_cell_slice_impl(cell, nullptr)), Ref<CellSlice>::acquire_t{}};
+  }
+
+  return Ref<CellSlice>{true, load_cell_slice_impl(cell, nullptr)};
 }
 
 Ref<CellSlice> load_cell_slice_ref_special(const Ref<Cell>& cell, bool& special) {
-  return Ref<CellSlice>{true, CellSlice(load_cell_slice_impl(cell, &special))};
+  if (arena_for_cell_slice_enabled.load()) {
+    if (td::unlikely(cell_slice_arena == nullptr)) {
+      return Ref<CellSlice>{AllocateCellSliceOnArena(load_cell_slice_impl(cell, &special)), Ref<CellSlice>::acquire_t{}};
+    }
+    auto res = cell_slice_arena->make_unique<CellSlice>(load_cell_slice_impl(cell, &special));
+    return Ref<CellSlice>(res, Ref<CellSlice>::acquire_t{});
+  }
+
+  return Ref<CellSlice>{true, load_cell_slice_impl(cell, &special)};
 }
 
 void print_load_cell(std::ostream& os, Ref<Cell> cell, int indent) {

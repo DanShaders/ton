@@ -21,45 +21,99 @@
 #include "openssl/digest.hpp"
 
 #include "td/utils/ScopeGuard.h"
+#include "td/utils/common.h"
 
 #include "vm/cells/CellWithStorage.h"
 
+#include <iostream>
+
 namespace vm {
-thread_local bool DataCell::use_arena = false;
 
 namespace {
+
 template <class CellT>
 struct ArenaAllocator {
+  ArenaAllocator() {
+    allocate_new_chunk();
+  }
+
   template <class T, class... ArgsT>
   std::unique_ptr<CellT> make_unique(ArgsT&&... args) {
     auto* ptr = fast_alloc(sizeof(T));
     T* obj = new (ptr) T(std::forward<ArgsT>(args)...);
+    obj->set_owns_storage(false);
     return std::unique_ptr<T>(obj);
   }
-private:
-  td::MutableSlice alloc_batch() {
-    size_t batch_size = 1 << 20;
-    auto batch = std::make_unique<char[]>(batch_size);
-    return td::MutableSlice(batch.release(), batch_size);
+
+  void reset() {
+    current_chunk = chunks.begin();
+    current_slice = td::MutableSlice(current_chunk->data(), current_chunk->size());
   }
-  char* fast_alloc(size_t size) {
-    thread_local td::MutableSlice batch;
-    auto aligned_size = (size + 7) / 8 * 8;
-    if (batch.size() < size) {
-      batch = alloc_batch();
+
+private:
+  using ChunksList = std::list<std::string>;
+  ChunksList chunks;
+  ChunksList::iterator current_chunk;
+  td::MutableSlice current_slice;
+
+  void allocate_new_chunk() {
+    chunks.push_back(std::string(1 << 20, 0));
+    current_chunk = chunks.end();
+    current_chunk--;
+    current_slice = td::MutableSlice(current_chunk->data(), current_chunk->size());
+  }
+
+  void move_to_next_chunk() {
+    current_chunk++;
+    if (current_chunk == chunks.end()) {
+      allocate_new_chunk();
     }
-    auto res = batch.begin();
-    batch.remove_prefix(aligned_size);
+    current_slice = td::MutableSlice(current_chunk->data(), current_chunk->size());
+  }
+
+  char* fast_alloc(size_t size) {
+    auto aligned_size = (size + 7) / 8 * 8;
+    if (current_slice.size() < size) {
+      move_to_next_chunk();
+    }
+    auto res = current_slice.begin();
+    current_slice.remove_prefix(aligned_size);
     return res;
   }
 };
+
+thread_local ArenaAllocator<DataCell>* data_cell_arena{nullptr};
+std::mutex arena_mutex;
+std::vector<ArenaAllocator<DataCell>*> all_threads_arenas;
+std::atomic<bool> arena_for_data_cell_enabled{false};
+
 }
+
+void ResetDataCellArena() {
+  std::lock_guard<std::mutex> guard(arena_mutex);
+  for (auto* arena : all_threads_arenas) {
+    arena->reset();
+  }
+}
+
+void SetArenaForDataCellEnabled(bool enabled) {
+  arena_for_data_cell_enabled.store(enabled);
+}
+
+bool IsArenaForDataCellEnabled() {
+  return arena_for_data_cell_enabled.load();
+}
+
 std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
-  if (use_arena) {
-    ArenaAllocator<DataCell> allocator;
-    auto res = detail::CellWithArrayStorage<DataCell>::create(allocator, info.get_storage_size(), info);
+  if (arena_for_data_cell_enabled.load()) {
+    if (td::unlikely(data_cell_arena == nullptr)) {
+      data_cell_arena = new ArenaAllocator<DataCell>();
+      std::lock_guard<std::mutex> guard(arena_mutex);
+      all_threads_arenas.push_back(data_cell_arena);
+    }
+    auto res = detail::CellWithArrayStorage<DataCell>::create(*data_cell_arena, info.get_storage_size(), info);
     // this is dangerous
-    Ref<DataCell>(res.get()).release();
+    // Ref<DataCell>(res.get()).release();
     return res;
   }
 
@@ -268,18 +322,19 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     tmp[0] = info.d1(level_mask.apply(level_i));
     tmp[1] = info.d2();
 
-    static TD_THREAD_LOCAL digest::SHA256* hasher;
-    td::init_thread_local<digest::SHA256>(hasher);
-    hasher->reset();
-
-    hasher->feed(td::Slice(tmp, 2));
+    thread_local std::vector<unsigned char> hash_buffer;
+    hash_buffer.resize(0);
+    hash_buffer.push_back(tmp[0]);
+    hash_buffer.push_back(tmp[1]);
 
     if (hash_i == hash_i_offset) {
       DCHECK(level_i == 0 || type == SpecialType::PrunnedBranch);
-      hasher->feed(td::Slice(data_ptr, (bits + 7) >> 3));
+      td::Slice tmp_slice(data_ptr, (bits + 7) >> 3);
+      hash_buffer.insert(hash_buffer.end(), tmp_slice.data(), tmp_slice.data() + tmp_slice.size());
     } else {
       DCHECK(level_i != 0 && type != SpecialType::PrunnedBranch);
-      hasher->feed(hashes_ptr[hash_i - hash_i_offset - 1].as_slice());
+      td::Slice tmp_slice(hashes_ptr[hash_i - hash_i_offset - 1].as_slice());
+      hash_buffer.insert(hash_buffer.end(), tmp_slice.data(), tmp_slice.data() + tmp_slice.size());
     }
 
     auto dest_i = hash_i - hash_i_offset;
@@ -297,7 +352,7 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
       // add depth into hash
       td::uint8 child_depth_buf[depth_bytes];
       store_depth(child_depth_buf, child_depth);
-      hasher->feed(td::Slice(child_depth_buf, depth_bytes));
+      hash_buffer.insert(hash_buffer.end(), child_depth_buf, child_depth_buf + depth_bytes);
 
       depth = std::max(depth, child_depth);
     }
@@ -312,13 +367,20 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     // children hash
     for (int i = 0; i < info.refs_count_; i++) {
       if (type == SpecialType::MerkleProof || type == SpecialType::MerkleUpdate) {
-        hasher->feed(refs_ptr[i]->get_hash(level_i + 1).as_slice());
+        const auto& h = refs_ptr[i]->get_hash(level_i + 1);
+        td::Slice slice = h.as_slice();
+        hash_buffer.insert(hash_buffer.end(), slice.data(), slice.data() + slice.size());
       } else {
-        hasher->feed(refs_ptr[i]->get_hash(level_i).as_slice());
+        const auto& h = refs_ptr[i]->get_hash(level_i);
+        td::Slice slice = h.as_slice();
+        hash_buffer.insert(hash_buffer.end(), slice.data(), slice.data() + slice.size());
       }
     }
-    auto extracted_size = hasher->extract(hashes_ptr[dest_i].as_slice());
-    DCHECK(extracted_size == hash_bytes);
+
+    thread_local SHA256_CTX cc;
+    SHA256_Init(&cc);
+    SHA256_Update(&cc, hash_buffer.data(), hash_buffer.size());
+    SHA256_Final((unsigned char*)hashes_ptr[dest_i].as_slice().data(), &cc);
   }
 
   return Ref<DataCell>(data_cell.release(), Ref<DataCell>::acquire_t{});

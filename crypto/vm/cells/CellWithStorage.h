@@ -39,7 +39,7 @@ class CellWithArrayStorage : public CellT {
     CellT::destroy_storage(get_storage());
   }
   template <class Allocator, class... ArgsT>
-  static auto create(Allocator allocator, size_t storage_size, ArgsT&&... args) {
+  static auto create(Allocator& allocator, size_t storage_size, ArgsT&&... args) {
     static_assert(CellT::max_storage_size <= 40 * 8, "");
     //size = 128 + 32 + 8;
     auto size = (storage_size + 7) / 8;

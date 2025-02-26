@@ -117,11 +117,12 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+  td::HashMap<vm::Cell::Hash, CellInfo> seen;
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)
       : cells(0), bits(0), public_cells(0), limit_cells(limit_cells) {
+    seen.reserve(limit_cells);
   }
   void clear_seen() {
     seen.clear();
@@ -148,6 +149,8 @@ struct CellStorageStat {
 
   unsigned long long limit_cells = std::numeric_limits<unsigned long long>::max();
   unsigned long long limit_bits = std::numeric_limits<unsigned long long>::max();
+
+  td::Result<CellInfo> add_used_storage_fast_v2(Ref<vm::Cell> cell);
 };
 
 struct VmStorageStat {
@@ -377,8 +380,9 @@ class BagOfCells {
   unsigned long long get_idx_entry(int index);
   bool get_cache_entry(int index);
   td::Result<td::Slice> get_cell_slice(int index, td::Slice data);
-  td::Result<td::Ref<vm::DataCell>> deserialize_cell(int index, td::Slice data, td::Span<td::Ref<DataCell>> cells,
-                                                     std::vector<td::uint8>* cell_should_cache);
+  td::Result<td::Ref<vm::DataCell>> deserialize_cell(
+    int index, td::Slice data, td::Span<td::Ref<DataCell>> cells, std::vector<td::uint8>* cell_should_cache);
+  td::Result<std::vector<int>> get_cell_refs(int idx, td::Slice cells_slice);
 };
 
 td::Result<Ref<Cell>> std_boc_deserialize(td::Slice data, bool can_be_empty = false, bool allow_nonzero_level = false);

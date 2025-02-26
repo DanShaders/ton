@@ -34,13 +34,12 @@ class MerkleProofImpl {
   }
 
   Ref<Cell> create_from(Ref<Cell> cell) {
-    if (!is_prunned_) {
-      CHECK(usage_tree_);
-      dfs_usage_tree(cell, usage_tree_->root_id());
-      is_prunned_ = [this](const Ref<Cell> &cell) { return visited_cells_.count(cell->get_hash()) == 0; };
-    }
     try {
-      return dfs(cell, cell->get_level());
+      if (!is_prunned_) {
+        return dfs_with_usage_tree(cell, cell->get_level(), usage_tree_->root_id());
+      } else {
+        return dfs(cell, cell->get_level());
+      }
     } catch (CellBuilder::CellWriteError &) {
       return {};
     } catch (CellBuilder::CellCreateError &) {
@@ -51,20 +50,8 @@ class MerkleProofImpl {
  private:
   using Key = std::pair<Cell::Hash, int>;
   td::HashMap<Key, Ref<Cell>> cells_;
-  td::HashSet<Cell::Hash> visited_cells_;
   CellUsageTree *usage_tree_{nullptr};
   MerkleProof::IsPrunnedFunction is_prunned_;
-
-  void dfs_usage_tree(Ref<Cell> cell, CellUsageTree::NodeId node_id) {
-    if (!usage_tree_->is_loaded(node_id)) {
-      return;
-    }
-    visited_cells_.insert(cell->get_hash());
-    CellSlice cs(NoVm(), cell);
-    for (unsigned i = 0; i < cs.size_refs(); i++) {
-      dfs_usage_tree(cs.prefetch_ref(i), usage_tree_->get_child(node_id, i));
-    }
-  }
 
   Ref<Cell> dfs(Ref<Cell> cell, int merkle_depth) {
     CHECK(cell.not_null());
@@ -89,6 +76,36 @@ class MerkleProofImpl {
     cb.store_bits(cs.fetch_bits(cs.size()));
     for (unsigned i = 0; i < cs.size_refs(); i++) {
       cb.store_ref(dfs(cs.prefetch_ref(i), children_merkle_depth));
+    }
+    auto res = cb.finalize(cs.is_special());
+    CHECK(res.not_null());
+    cells_.emplace(key, res);
+    return res;
+  }
+
+  Ref<Cell> dfs_with_usage_tree(Ref<Cell> cell, int merkle_depth, CellUsageTree::NodeId node_id) {
+    CHECK(cell.not_null());
+    Key key{cell->get_hash(), merkle_depth};
+    {
+      auto it = cells_.find(key);
+      if (it != cells_.end()) {
+        CHECK(it->second.not_null());
+        return it->second;
+      }
+    }
+
+    if (!usage_tree_->is_loaded(node_id)) {
+      auto res = CellBuilder::create_pruned_branch(cell, merkle_depth + 1);
+      CHECK(res.not_null());
+      cells_.emplace(key, res);
+      return res;
+    }
+    CellSlice cs(NoVm(), cell);
+    int children_merkle_depth = cs.child_merkle_depth(merkle_depth);
+    CellBuilder cb;
+    cb.store_bits(cs.fetch_bits(cs.size()));
+    for (unsigned i = 0; i < cs.size_refs(); i++) {
+      cb.store_ref(dfs_with_usage_tree(cs.prefetch_ref(i), children_merkle_depth, usage_tree_->get_child(node_id, i)));
     }
     auto res = cb.finalize(cs.is_special());
     CHECK(res.not_null());

@@ -27,6 +27,10 @@ class StringBuilder;
 }
 namespace vm {
 
+void ResetCellSliceArena();
+void SetArenaForCellSliceEnabled(bool enabled);
+bool IsArenaForCellSliceEnabled();
+
 struct NoVm {};
 struct NoVmOrd {};
 struct NoVmSpec {};
@@ -60,9 +64,12 @@ class CellSlice : public td::CntObject {
   CellSlice& operator=(const CellSlice& other) = default;
   CellSlice();
   Cell::LoadedCell move_as_loaded_cell();
-  td::CntObject* make_copy() const override {
-    return new CellSlice{*this};
+  td::CntObject* make_copy() const override;
+
+  void clear_tree_node() {
+    tree_node = {};
   }
+
   void clear();
   bool load(VirtualCell::LoadedCell loaded_cell);
   bool load(NoVm, Ref<Cell> cell_ref);

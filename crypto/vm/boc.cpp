@@ -19,6 +19,7 @@
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
+#include <future>
 #include "vm/boc.h"
 #include "vm/boc-writers.h"
 #include "vm/cells.h"
@@ -28,6 +29,7 @@
 #include "td/utils/format.h"
 #include "td/utils/misc.h"
 #include "td/utils/Slice-decl.h"
+#include "common/delay.h"
 
 namespace vm {
 using td::Ref;
@@ -764,9 +766,39 @@ td::Result<td::Slice> BagOfCells::get_cell_slice(int idx, td::Slice data) {
   return data.substr(offs, td::narrow_cast<size_t>(offs_end - offs));
 }
 
-td::Result<td::Ref<vm::DataCell>> BagOfCells::deserialize_cell(int idx, td::Slice cells_slice,
-                                                               td::Span<td::Ref<DataCell>> cells_span,
-                                                               std::vector<td::uint8>* cell_should_cache) {
+td::Result<std::vector<int>> BagOfCells::get_cell_refs(int idx, td::Slice cells_slice) {
+  TRY_RESULT(cell_slice, get_cell_slice(idx, cells_slice));
+  std::array<td::Ref<Cell>, 4> refs_buf;
+
+  CellSerializationInfo cell_info;
+  TRY_STATUS(cell_info.init(cell_slice, info.ref_byte_size));
+  if (cell_info.end_offset != cell_slice.size()) {
+    return td::Status::Error("unused space in cell serialization");
+  }
+
+  std::vector<int> refs;
+  refs.reserve(4);
+  for (int k = 0; k < cell_info.refs_cnt; k++) {
+    int ref_idx = (int)info.read_ref(cell_slice.ubegin() + cell_info.refs_offset + k * info.ref_byte_size);
+    if (ref_idx <= idx) {
+      return td::Status::Error(PSLICE() << "bag-of-cells error: reference #" << k << " of cell #" << idx
+                                        << " is to cell #" << ref_idx << " with smaller index");
+    }
+    if (ref_idx >= cell_count) {
+      return td::Status::Error(PSLICE() << "bag-of-cells error: reference #" << k << " of cell #" << idx
+                                        << " is to non-existent cell #" << ref_idx << ", only " << cell_count
+                                        << " cells are defined");
+    }
+    refs.push_back(ref_idx);
+  }
+
+  return refs;
+}
+
+td::Result<td::Ref<vm::DataCell>> BagOfCells::deserialize_cell(
+    int idx, td::Slice cells_slice,
+    td::Span<td::Ref<DataCell>> cells_span,
+    std::vector<td::uint8>* cell_should_cache) {
   TRY_RESULT(cell_slice, get_cell_slice(idx, cells_slice));
   std::array<td::Ref<Cell>, 4> refs_buf;
 
@@ -788,7 +820,9 @@ td::Result<td::Ref<vm::DataCell>> BagOfCells::deserialize_cell(int idx, td::Slic
                                         << " is to non-existent cell #" << ref_idx << ", only " << cell_count
                                         << " cells are defined");
     }
-    refs[k] = cells_span[cell_count - ref_idx - 1];
+    refs[k] = cells_span[cell_count - 1 - ref_idx];
+    CHECK(!refs[k].is_null());
+
     if (cell_should_cache) {
       auto& cnt = (*cell_should_cache)[ref_idx];
       if (cnt < 2) {
@@ -883,19 +917,112 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
   }
   auto cells_slice = data.substr(info.data_offset, info.data_size);
   std::vector<Ref<DataCell>> cell_list;
-  cell_list.reserve(cell_count);
-  std::array<td::Ref<Cell>, 4> refs_buf;
-  for (int i = 0; i < cell_count; i++) {
-    // reconstruct cell with index cell_count - 1 - i
-    int idx = cell_count - 1 - i;
-    auto r_cell = deserialize_cell(idx, cells_slice, cell_list, info.has_cache_bits ? &cell_should_cache : nullptr);
-    if (r_cell.is_error()) {
-      return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << idx << " "
-                                        << r_cell.error());
+  
+  if (true) {
+    cell_list.resize(cell_count);
+    
+    std::vector<int> cell_depths(cell_count, 0);
+    std::map<int, std::vector<int>> idx_by_depth;
+    for (int i = cell_count - 1; i >= 0; --i) {
+      auto r_refs = get_cell_refs(i, cells_slice);
+      if (r_refs.is_error()) {
+        return r_refs.move_as_error();
+      }
+      for (int r : r_refs.ok_ref()) {
+        CHECK(r > i);
+        cell_depths[i] = std::max(cell_depths[i], cell_depths[r] + 1);
+
+        if (info.has_cache_bits) {
+          auto& cnt = cell_should_cache[r];
+          if (cnt < 2) {
+            cnt++;
+          }
+        }
+      }
+      idx_by_depth[cell_depths[i]].push_back(i);
     }
-    cell_list.push_back(r_cell.move_as_ok());
-    DCHECK(cell_list.back().not_null());
+
+    const bool arena_is_enabled = IsArenaForDataCellEnabled();
+    const int kWorkersCnt = 8;
+
+    for (auto& [k, v] : idx_by_depth) {
+      std::reverse(v.begin(), v.end());
+
+      if (v.size() < 32 || !arena_is_enabled) {
+        for (int j = 0; j < v.size(); ++j) {
+          int idx = v[j];
+          auto r_cell = deserialize_cell(idx, cells_slice, cell_list, nullptr);
+          if (r_cell.is_error()) {
+            return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << idx << " "
+                                                << r_cell.error());
+          }
+          cell_list[cell_count - 1 - idx] = r_cell.move_as_ok();
+          DCHECK(cell_list[cell_count - 1 - idx].not_null());
+        }
+      } else {
+        int chunk_size = (v.size() + kWorkersCnt - 1) / kWorkersCnt;
+        std::vector<std::shared_ptr<std::promise<td::Status>>> promises;
+        promises.reserve(kWorkersCnt);
+
+        for (int i = 0; i < v.size(); i += chunk_size) {
+          int start = i;
+          int end = std::min<int>(v.size(), start + chunk_size);
+
+          promises.emplace_back(std::make_shared<std::promise<td::Status>>());
+          auto f = [&, start=start, end=end, promise=promises.back(), k=k]() {
+            bool value_was_set = false;
+            SCOPE_EXIT {
+              if (!value_was_set) {
+                promise->set_value(td::Status::Error("promise was not set"));
+              }
+            };
+            auto& v = idx_by_depth[k];
+            for (int j = start; j < end; ++j) {
+              int idx = v[j];
+              auto r_cell = deserialize_cell(idx, cells_slice, cell_list, nullptr);
+              if (r_cell.is_error()) {
+                promise->set_value(td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << idx << " "
+                                                    << r_cell.error()));
+                value_was_set = true;
+                return;
+              }
+              cell_list[cell_count - 1 - idx] = r_cell.move_as_ok();
+              DCHECK(cell_list[cell_count - 1 - idx].not_null());
+            }
+            promise->set_value(td::Status::OK());
+            value_was_set = true;
+          };
+          ton::delay_action(f, td::Timestamp::now());
+        }
+
+        td::Status status = td::Status::OK();
+        for (auto& p : promises) {
+          auto r = p->get_future().get();
+          if (r.is_error()) {
+            status = r.move_as_error();
+          }
+        }
+
+        if (status.is_error()) {
+          return status;
+        }
+      }
+    }
+  } else {
+    cell_list.reserve(cell_count);
+    for (int i = 0; i < cell_count; i++) {
+      // reconstruct cell with index cell_count - 1 - i
+      int idx = cell_count - 1 - i;
+      auto r_cell = deserialize_cell(idx, cells_slice, cell_list, info.has_cache_bits ? &cell_should_cache : nullptr);
+      if (r_cell.is_error()) {
+        return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << idx << " "
+                                          << r_cell.error());
+      }
+      cell_list.push_back(r_cell.move_as_ok());
+      DCHECK(cell_list.back().not_null());
+    }
   }
+
   if (info.has_cache_bits) {
     for (int idx = 0; idx < cell_count; idx++) {
       auto should_cache = cell_should_cache[idx] > 1;
@@ -1068,6 +1195,7 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::compute_used_storage(cons
 td::Result<CellStorageStat::CellInfo> CellStorageStat::compute_used_storage(CellSlice&& cs, bool kill_dup,
                                                                             unsigned skip_count_root) {
   clear();
+  cs.clear_tree_node();
   TRY_RESULT(res, add_used_storage(std::move(cs), kill_dup, skip_count_root));
   clear_seen();
   return res;
@@ -1118,6 +1246,7 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(const Ce
 
 td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlice&& cs, bool kill_dup,
                                                                         unsigned skip_count_root) {
+  cs.clear_tree_node();
   if (!(skip_count_root & 1)) {
     ++cells;
     if (cells > limit_cells) {
@@ -1142,6 +1271,142 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlic
   return res;
 }
 
+td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage_fast_v2(Ref<vm::Cell> cell) {
+  if (cell.is_null()) {
+    return td::Status::Error("cell is null");
+  }
+
+  auto h = cell->get_hash();
+
+  auto it = seen.find(h);
+  if (it != seen.end()) {
+    return it->second;
+  }
+
+  const int kWorkersCnt = 8;
+
+  thread_local std::vector<std::pair<CellHash, int>> buffers_tl[kWorkersCnt];
+  for (int i = 0; i < kWorkersCnt; ++i) {
+    buffers_tl[i].resize(0);
+  }
+  auto& buffers = buffers_tl;
+
+  std::vector<std::pair<Ref<vm::Cell>, int>> current_wave_tl, new_wave_tl;
+  auto& current_wave = current_wave_tl;
+  auto& new_wave = new_wave_tl;
+  current_wave.resize(0);
+  new_wave.resize(0);
+
+  current_wave.emplace_back(std::move(cell), 0);
+
+  int max_merge_depth = 0;
+
+  std::function<CellInfo(Ref<vm::Cell>, int, int&)> dfs = [&](Ref<vm::Cell> cell, int worker_id, int& visited) {
+    auto h = cell->get_hash();
+    
+    vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
+    cs.clear_tree_node();
+
+    buffers[worker_id].emplace_back(h, cs.size());
+    ++visited;
+
+    CellInfo res;
+    while (cs.size_refs()) {
+      auto ref = cs.fetch_ref();
+      auto child = dfs(std::move(ref), worker_id, visited);
+      res.max_merkle_depth = std::max(res.max_merkle_depth, child.max_merkle_depth);
+    }
+
+    if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
+        cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
+      ++res.max_merkle_depth;
+    }
+    return res;
+  };
+
+  while (current_wave.size()) {
+    if (current_wave.size() < 256) {
+      new_wave.clear();
+      for (auto& [cell, merkle_depth] : current_wave) {
+        auto h = cell->get_hash();
+        
+        vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
+        cs.clear_tree_node();
+
+        buffers[0].emplace_back(h, cs.size());
+
+        if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
+            cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
+          merkle_depth++;
+          max_merge_depth = std::max(max_merge_depth, merkle_depth);
+        }
+
+        CellInfo res;
+        while (cs.size_refs()) {
+          auto ref = cs.fetch_ref();
+          new_wave.emplace_back(std::move(ref), merkle_depth);
+        }
+      }
+      current_wave.swap(new_wave);
+    } else {
+      int chunk_size = (current_wave.size() + kWorkersCnt - 1) / kWorkersCnt;
+      std::vector<std::shared_ptr<std::promise<CellInfo>>> promises;
+      promises.reserve(kWorkersCnt);
+      for (int worker_idx = 0; worker_idx < kWorkersCnt; ++worker_idx) {
+        int start = worker_idx * chunk_size;
+        int end = std::min<int>(current_wave.size(), start + chunk_size);
+
+        promises.emplace_back(std::make_shared<std::promise<CellInfo>>());
+        auto f = [&, start=start, end=end, promise=promises.back(), worker_idx=worker_idx]() {
+          CellInfo res;
+          int visited = 0;
+          for (int i = start; i < end; ++i) {
+            auto child_res = dfs(current_wave[i].first, worker_idx, visited);
+            res.max_merkle_depth = std::max(res.max_merkle_depth, child_res.max_merkle_depth);
+          }
+          promise->set_value(res);
+        };
+        ton::delay_action(f, td::Timestamp::now());
+      }
+
+      for (auto& p : promises) {
+        auto r = p->get_future().get();
+        max_merge_depth = std::max<int>(max_merge_depth, r.max_merkle_depth);
+      }
+
+      break;
+    }
+  }
+
+  CellInfo res;
+  res.max_merkle_depth = max_merge_depth;
+  
+  for (int i = 0; i < kWorkersCnt; ++i) {
+    for (auto& [h, sz] : buffers[i]) {
+      auto ins = seen.emplace(h, CellInfo{});
+      if (ins.second) {
+        cells++;
+        bits += sz;
+      }
+    }
+  }
+
+  for (int i = 0; i < kWorkersCnt; ++i) {
+    buffers_tl[i].resize(0);
+  }
+  current_wave.resize(0);
+  new_wave.resize(0);
+
+  if (cells > limit_cells) {
+    return td::Status::Error("too many cells");
+  }
+  if (bits > limit_bits) {
+    return td::Status::Error("too many bits");
+  }
+
+  return res;
+}
+
 td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::Cell> cell, bool kill_dup,
                                                                         unsigned skip_count_root) {
   if (cell.is_null()) {
@@ -1154,6 +1419,7 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
     }
   }
   vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
+  cs.clear_tree_node();
   return add_used_storage(std::move(cs), kill_dup, skip_count_root);
 }
 
