@@ -1116,6 +1116,235 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(const Ce
   return res;
 }
 
+CellStorageWorkerActor::CellStorageWorkerActor(CellStorageStat* stat, td::Ref<vm::Cell> cell, unsigned parallel_depth,
+                                               td::Promise<CellStorageStat::CellInfo> promise)
+    : stat_(stat), cell_(std::move(cell)), parallel_depth_(parallel_depth), promise_(std::move(promise)) {
+}
+void CellStorageWorkerActor::finish() {
+  stop();
+  return;
+}
+
+void CellStorageWorkerActor::start_up() {
+  if (cell_.is_null()) {
+    if (!done_.exchange(true)) {
+      promise_.set_error(td::Status::Error("cell is null"));
+    }
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(stat_->mutex);
+    auto ins = stat_->seen.emplace(cell_->get_hash(), CellStorageStat::CellInfo{});
+    if (!ins.second) {
+      if (!done_.exchange(true)) {
+        promise_.set_value(std::move(ins.first->second));
+      }
+      return;
+    }
+  }
+
+  vm::CellSlice cs(vm::NoVm{}, cell_);
+  {
+    std::lock_guard<std::mutex> lock(stat_->mutex);
+    ++stat_->cells;
+    if (stat_->cells > stat_->limit_cells) {
+      if (!done_.exchange(true)) {
+        promise_.set_error(td::Status::Error("too many cells"));
+      }
+      return;
+    }
+    stat_->bits += cs.size();
+    if (stat_->bits > stat_->limit_bits) {
+      if (!done_.exchange(true)) {
+        promise_.set_error(td::Status::Error("too many bits"));
+      }
+      return;
+    }
+  }
+
+  unsigned child_count = cs.size_refs();
+  if (child_count == 0) {
+    CellStorageStat::CellInfo info;
+    if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
+        cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
+      ++info.max_merkle_depth;
+    }
+    {
+      std::lock_guard<std::mutex> lock(stat_->mutex);
+      auto it = stat_->seen.find(cell_->get_hash());
+      if (it != stat_->seen.end()) {
+        it->second = info;
+      }
+    }
+    if (!done_.exchange(true)) {
+      promise_.set_value(std::move(info));
+    }
+    return;
+  }
+  if (parallel_depth_ < 1) {
+    aggregator_pending_ = child_count;
+    aggregator_max_depth_ = 0;
+    std::vector<vm::Ref<vm::Cell>> children;
+    {
+      children.reserve(child_count);
+      for (unsigned i = 0; i < child_count; i++) {
+        auto child_ref = cs.fetch_ref();
+        children.push_back(std::move(child_ref));
+      }
+    }
+    for (auto& child_ref : children) {
+      td::Promise<CellStorageStat::CellInfo> child_promise(
+          [=, self_id = td::actor::actor_id(this)](td::Result<CellStorageStat::CellInfo> child_res) mutable {
+            td::actor::send_closure(self_id, &CellStorageWorkerActor::on_child_result, std::move(child_res));
+          });
+      unsigned new_parallel_depth = parallel_depth_ + 1;
+
+      td::actor::create_actor<CellStorageWorkerActor>("cell_worker", stat_, child_ref, new_parallel_depth,
+                                                      std::move(child_promise))
+          .release();
+    }
+  } else {
+    CellStorageStat::CellInfo aggregated_info;
+    std::vector<vm::Ref<vm::Cell>> children;
+    {
+      aggregated_info.max_merkle_depth = 0;
+
+      children.reserve(child_count);
+      for (unsigned i = 0; i < child_count; i++) {
+        auto child_ref = cs.fetch_ref();
+        children.push_back(std::move(child_ref));
+      }
+    }
+    for (auto& child_ref : children) {
+      auto child_result = process_subtree(child_ref);
+      if (child_result.is_error()) {
+        if (!done_.exchange(true)) {
+          promise_.set_error(child_result.move_as_error());
+        }
+        return;
+      }
+      aggregated_info.max_merkle_depth = std::max(aggregated_info.max_merkle_depth, child_result.ok().max_merkle_depth);
+    }
+    if (!done_.exchange(true)) {
+      promise_.set_value(std::move(aggregated_info));
+    }
+  }
+}
+
+void CellStorageWorkerActor::on_child_result(td::Result<CellStorageStat::CellInfo> child_res) {
+  if (child_res.is_error()) {
+    if (!done_.exchange(true)) {
+      promise_.set_error(td::Status::Error(child_res.error().message()));
+    }
+    return;
+  }
+  auto child_info = child_res.move_as_ok();
+
+  unsigned current = aggregator_max_depth_.load(std::memory_order_relaxed);
+  while (
+      child_info.max_merkle_depth > current &&
+      !aggregator_max_depth_.compare_exchange_weak(current, child_info.max_merkle_depth, std::memory_order_relaxed)) {
+  }
+  if (aggregator_pending_.fetch_sub(1, std::memory_order_relaxed) == 1) {
+    vm::CellSlice cs(vm::NoVm{}, cell_);
+    CellStorageStat::CellInfo final_info;
+    final_info.max_merkle_depth = aggregator_max_depth_.load(std::memory_order_relaxed);
+    if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
+        cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
+      ++final_info.max_merkle_depth;
+    }
+    {
+      std::lock_guard<std::mutex> lock(stat_->mutex);
+      auto it = stat_->seen.find(cell_->get_hash());
+      if (it != stat_->seen.end()) {
+        it->second = final_info;
+      }
+    }
+    if (!done_.exchange(true)) {
+      promise_.set_value(std::move(final_info));
+    }
+  }
+}
+
+td::Result<CellStorageStat::CellInfo> CellStorageWorkerActor::process_subtree(CellSlice&& cs) {
+  {
+    std::lock_guard<std::mutex> lock(stat_->mutex);
+
+    ++stat_->cells;
+    if (stat_->cells > stat_->limit_cells) {
+      return td::Status::Error("too many cells");
+    }
+
+    stat_->bits += cs.size();
+    if (stat_->bits > stat_->limit_bits) {
+      return td::Status::Error("too many bits");
+    }
+  }
+  CellStorageStat::CellInfo res;
+  while (cs.size_refs()) {
+    TRY_RESULT(child, process_subtree(cs.fetch_ref()));
+    {
+      std::lock_guard<std::mutex> lock(stat_->mutex);
+      res.max_merkle_depth = std::max(res.max_merkle_depth, child.max_merkle_depth);
+    }
+  }
+  if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
+      cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
+    {
+      std::lock_guard<std::mutex> lock(stat_->mutex);
+      ++res.max_merkle_depth;
+    }
+  }
+  return res;
+}
+
+td::Result<CellStorageStat::CellInfo> CellStorageWorkerActor::process_subtree(Ref<vm::Cell> cell) {
+  {
+    std::lock_guard<std::mutex> lock(stat_->mutex);
+
+    if (cell.is_null()) {
+      return td::Status::Error("cell is null");
+    }
+
+    auto ins = stat_->seen.emplace(cell->get_hash(), CellStorageStat::CellInfo{});
+    if (!ins.second) {
+      return ins.first->second;
+    }
+  }
+  vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
+  return process_subtree(std::move(cs));
+}
+
+void CellStorageWorkerActor::run_async(CellStorageStat* stat, vm::Ref<vm::Cell> cell,
+                                       td::Promise<CellStorageStat::CellInfo> promise) {
+  td::actor::create_actor<CellStorageWorkerActor>("cell_worker", stat, std::move(cell), 0, std::move(promise))
+      .release();
+}
+/*  
+td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(vm::Ref<vm::Cell> cell) {
+  struct BlockingState {
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool done = false;
+    td::Result<CellInfo> result;
+  } state;
+  auto promise = td::Promise<CellStorageStat::CellInfo>([&state](td::Result<CellStorageStat::CellInfo> res) mutable {
+    {
+      std::lock_guard<std::mutex> lock(state.mutex);
+      state.result = std::move(res);
+      state.done = true;
+    }
+    state.cv.notify_one();
+  });
+  CellStorageWorkerActor::run_async(this, std::move(cell), std::move(promise));
+  {
+    std::unique_lock<std::mutex> lock(state.mutex);
+    state.cv.wait(lock, [&state] { return state.done; });
+  }
+
+  return std::move(state.result);
+}*/
+
 td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlice&& cs, bool kill_dup,
                                                                         unsigned skip_count_root) {
   if (!(skip_count_root & 1)) {
@@ -1142,6 +1371,29 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlic
   return res;
 }
 
+td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlice&& cs) {
+  ++cells;
+  if (cells > limit_cells) {
+    return td::Status::Error("too many cells");
+  }
+
+  bits += cs.size();
+  if (bits > limit_bits) {
+    return td::Status::Error("too many bits");
+  }
+
+  CellInfo res;
+  while (cs.size_refs()) {
+    TRY_RESULT(child, add_used_storage(cs.fetch_ref()));
+    res.max_merkle_depth = std::max(res.max_merkle_depth, child.max_merkle_depth);
+  }
+  if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
+      cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
+    ++res.max_merkle_depth;
+  }
+  return res;
+}
+
 td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::Cell> cell, bool kill_dup,
                                                                         unsigned skip_count_root) {
   if (cell.is_null()) {
@@ -1155,6 +1407,20 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
   }
   vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
   return add_used_storage(std::move(cs), kill_dup, skip_count_root);
+}
+
+td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::Cell> cell) {
+  if (cell.is_null()) {
+    return td::Status::Error("cell is null");
+  }
+
+  auto ins = seen.emplace(cell->get_hash(), CellInfo{});
+  if (!ins.second) {
+    return ins.first->second;
+  }
+
+  vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
+  return add_used_storage(std::move(cs));
 }
 
 void NewCellStorageStat::add_cell(Ref<Cell> cell) {

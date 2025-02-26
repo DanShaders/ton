@@ -35,7 +35,8 @@ namespace {
  */
 class StringLoggerTail : public td::LogInterface {
  public:
-  explicit StringLoggerTail(size_t max_size = 256) : buf(max_size, '\0') {}
+  explicit StringLoggerTail(size_t max_size = 256) : buf(max_size, '\0') {
+  }
 
   /**
    * Appends a slice of data to the buffer.
@@ -78,7 +79,7 @@ class StringLoggerTail : public td::LogInterface {
   size_t pos = 0;
   bool truncated = false;
 };
-}
+}  // namespace
 
 namespace block {
 using td::Ref;
@@ -1313,16 +1314,16 @@ Ref<vm::Tuple> Transaction::prepare_vm_c7(const ComputePhaseConfig& cfg) const {
     return {};
   }
   std::vector<vm::StackEntry> tuple = {
-      td::make_refint(0x076ef1ea),                // [ magic:0x076ef1ea
-      td::zero_refint(),                          //   actions:Integer
-      td::zero_refint(),                          //   msgs_sent:Integer
-      td::make_refint(now),                       //   unixtime:Integer
-      td::make_refint(account.block_lt),          //   block_lt:Integer
-      td::make_refint(start_lt),                  //   trans_lt:Integer
-      std::move(rand_seed_int),                   //   rand_seed:Integer
-      balance.as_vm_tuple(),                      //   balance_remaining:[Integer (Maybe Cell)]
-      my_addr,                                    //   myself:MsgAddressInt
-      vm::StackEntry::maybe(cfg.global_config)    //   global_config:(Maybe Cell) ] = SmartContractInfo;
+      td::make_refint(0x076ef1ea),              // [ magic:0x076ef1ea
+      td::zero_refint(),                        //   actions:Integer
+      td::zero_refint(),                        //   msgs_sent:Integer
+      td::make_refint(now),                     //   unixtime:Integer
+      td::make_refint(account.block_lt),        //   block_lt:Integer
+      td::make_refint(start_lt),                //   trans_lt:Integer
+      std::move(rand_seed_int),                 //   rand_seed:Integer
+      balance.as_vm_tuple(),                    //   balance_remaining:[Integer (Maybe Cell)]
+      my_addr,                                  //   myself:MsgAddressInt
+      vm::StackEntry::maybe(cfg.global_config)  //   global_config:(Maybe Cell) ] = SmartContractInfo;
   };
   if (cfg.global_version >= 4) {
     tuple.push_back(vm::StackEntry::maybe(new_code));  // code:Cell
@@ -1331,7 +1332,7 @@ Ref<vm::Tuple> Transaction::prepare_vm_c7(const ComputePhaseConfig& cfg) const {
     } else {
       tuple.push_back(block::CurrencyCollection::zero().as_vm_tuple());
     }
-    tuple.push_back(storage_phase->fees_collected);       // storage_fees:Integer
+    tuple.push_back(storage_phase->fees_collected);  // storage_fees:Integer
 
     // See crypto/block/mc-config.cpp#2223 (get_prev_blocks_info)
     // [ wc:Integer shard:Integer seqno:Integer root_hash:Integer file_hash:Integer] = BlockId;
@@ -1340,7 +1341,7 @@ Ref<vm::Tuple> Transaction::prepare_vm_c7(const ComputePhaseConfig& cfg) const {
     // The only context where PrevBlocksInfo (13 parameter of c7) is null is inside emulator
     // where it need to be set via transaction_emulator_set_prev_blocks_info (see emulator/emulator-extern.cpp)
     // Inside validator, collator and liteserver checking external message  contexts
-    // prev_blocks_info is always not null, since get_prev_blocks_info()  
+    // prev_blocks_info is always not null, since get_prev_blocks_info()
     // may only return tuple or raise Error (See crypto/block/mc-config.cpp#2223)
     tuple.push_back(vm::StackEntry::maybe(cfg.prev_blocks_info));
   }
@@ -1882,7 +1883,7 @@ bool Transaction::prepare_action_phase(const ActionPhaseConfig& cfg) {
   }
   ap.valid = true;
   for (int i = n - 1; i >= 0; --i) {
-    if(ap.action_list[i].is_null()) {
+    if (ap.action_list[i].is_null()) {
       continue;
     }
     ap.result_arg = n - 1 - i;
@@ -3538,7 +3539,7 @@ Ref<vm::Cell> Transaction::commit(Account& acc) {
   acc.last_trans_end_lt_ = end_lt;
   acc.last_trans_hash_ = root->get_hash().bits();
   acc.last_paid = last_paid;
-  acc.storage_stat = new_storage_stat;
+  acc.storage_stat = std::move(new_storage_stat);
   acc.storage = new_storage;
   acc.balance = std::move(balance);
   acc.due_payment = std::move(due_payment);

@@ -21,8 +21,15 @@
 
 #include <set>
 #include <map>
+#include <algorithm>
+#include <future>
+#include <vector>
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include "vm/db/DynamicBagOfCellsDb.h"
 #include "vm/cells.h"
+#include "vm/cellslice.h"
 #include "td/utils/Status.h"
 #include "td/utils/buffer.h"
 #include "td/utils/HashMap.h"
@@ -30,11 +37,17 @@
 #include "td/utils/Time.h"
 #include "td/utils/Timer.h"
 #include "td/utils/port/FileFd.h"
+#include "td/actor/actor.h"
+#include "td/actor/ActorOwn.h"
 
 namespace vm {
 using td::Ref;
 
-class NewCellStorageStat {
+// Forward declarations - CRITICAL: Declare these BEFORE CellStorageStat
+struct
+    CellStorageStat;  // Forward declare CellStorageStat itself if needed for ActorId in WorkerActor (might not be needed here but good practice if there's a cycle)
+
+class NewCellStorageStat {  // No dependency issues here, define first
  public:
   NewCellStorageStat() {
   }
@@ -110,31 +123,78 @@ class NewCellStorageStat {
   void dfs(Ref<Cell> cell, bool need_stat, bool need_proof_stat);
 };
 
+class CellStorageWorkerActor;
+
 struct CellStorageStat {
-  unsigned long long cells;
-  unsigned long long bits;
-  unsigned long long public_cells;
+  // Plain counters (no atomics)
+  unsigned long long cells{0};
+  unsigned long long bits{0};
+  unsigned long long public_cells{0};
+
+  // If you need some info on merkle depth
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+
+  // Constructors
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
-  explicit CellStorageStat(unsigned long long limit_cells)
-      : cells(0), bits(0), public_cells(0), limit_cells(limit_cells) {
+  explicit CellStorageStat(unsigned long long limit_cells_)
+      : cells(0), bits(0), public_cells(0), limit_cells(limit_cells_) {
   }
+
+  // Delete copy operations (mutex is non-copyable)
+  CellStorageStat(const CellStorageStat&) = delete;
+  CellStorageStat& operator=(const CellStorageStat&) = delete;
+
+  // Custom move constructor: move movable members; default-construct mutex.
+  CellStorageStat(CellStorageStat&& other) noexcept
+      : cells(other.cells)
+      , bits(other.bits)
+      , public_cells(other.public_cells)
+      , seen(std::move(other.seen))
+      , limit_cells(other.limit_cells)
+      , limit_bits(other.limit_bits) {
+    // 'mutex' is left default constructed.
+  }
+
+  // Custom move assignment operator: move movable members; leave mutex untouched.
+  CellStorageStat& operator=(CellStorageStat&& other) noexcept {
+    if (this != &other) {
+      cells = other.cells;
+      bits = other.bits;
+      public_cells = other.public_cells;
+      seen = std::move(other.seen);
+      limit_cells = other.limit_cells;
+      limit_bits = other.limit_bits;
+      // Do not move the mutex; each instance keeps its own mutex.
+    }
+    return *this;
+  }
+
   void clear_seen() {
     seen.clear();
   }
+  std::unordered_map<vm::Cell::Hash, CellInfo> seen;
+
   void clear() {
     cells = bits = public_cells = 0;
     clear_limit();
-    clear_seen();
   }
   void clear_limit() {
     limit_cells = std::numeric_limits<unsigned long long>::max();
     limit_bits = std::numeric_limits<unsigned long long>::max();
   }
+
+  // Just store limits as plain fields
+  unsigned long long limit_cells = std::numeric_limits<unsigned long long>::max();
+  unsigned long long limit_bits = std::numeric_limits<unsigned long long>::max();
+
+  // Mutex to guard shared state
+  mutable std::mutex mutex;
+
+  void reset();
+
   td::Result<CellInfo> compute_used_storage(Ref<vm::CellSlice> cs_ref, bool kill_dup = true,
                                             unsigned skip_count_root = 0);
   td::Result<CellInfo> compute_used_storage(const CellSlice& cs, bool kill_dup = true, unsigned skip_count_root = 0);
@@ -143,14 +203,43 @@ struct CellStorageStat {
 
   td::Result<CellInfo> add_used_storage(Ref<vm::CellSlice> cs_ref, bool kill_dup = true, unsigned skip_count_root = 0);
   td::Result<CellInfo> add_used_storage(const CellSlice& cs, bool kill_dup = true, unsigned skip_count_root = 0);
-  td::Result<CellInfo> add_used_storage(CellSlice&& cs, bool kill_dup = true, unsigned skip_count_root = 0);
-  td::Result<CellInfo> add_used_storage(Ref<vm::Cell> cell, bool kill_dup = true, unsigned skip_count_root = 0);
 
-  unsigned long long limit_cells = std::numeric_limits<unsigned long long>::max();
-  unsigned long long limit_bits = std::numeric_limits<unsigned long long>::max();
+  td::Result<CellInfo> add_used_storage(Ref<vm::Cell> cell, bool kill_dup, unsigned skip_count_root = 0);
+  td::Result<CellInfo> add_used_storage(Ref<vm::Cell> cell);
+
+  td::Result<CellInfo> add_used_storage(CellSlice&& cs);
+  td::Result<CellInfo> add_used_storage(CellSlice&& cs, bool kill_dup, unsigned skip_count_root = 0);
 };
 
-struct VmStorageStat {
+class CellStorageWorkerActor final : public td::actor::Actor {
+ public:
+  CellStorageWorkerActor(CellStorageStat* stat,
+                         vm::Ref<vm::Cell> cell,  // Store the cell itself here
+                         unsigned parallel_depth, td::Promise<CellStorageStat::CellInfo> promise);
+
+  void start_up() override;
+  void on_child_result(td::Result<CellStorageStat::CellInfo> child_res);
+  void finish();
+  static void run_async(CellStorageStat* stat, vm::Ref<vm::Cell> cell, td::Promise<CellStorageStat::CellInfo> promise);
+
+ private:
+  // The main recursive logic in a synchronous, non-actor function.
+  td::Result<CellStorageStat::CellInfo> process_subtree(CellSlice&& cs);
+  td::Result<CellStorageStat::CellInfo> process_subtree(Ref<vm::Cell> cell);
+
+  CellStorageStat* stat_;
+  vm::Ref<vm::Cell> cell_;  // store the cell, not just a slice
+  unsigned parallel_depth_;
+
+  td::Promise<CellStorageStat::CellInfo> promise_;
+
+  // Fields for aggregating parallel child results
+  std::atomic<bool> done_{false};
+  std::atomic<unsigned> aggregator_pending_{0};
+  std::atomic<unsigned> aggregator_max_depth_{0};
+};
+
+struct VmStorageStat {  // No dependency issues
   td::uint64 cells{0}, bits{0}, refs{0}, limit;
   td::HashSet<CellHash> visited;
   VmStorageStat(td::uint64 _limit) : limit(_limit) {
@@ -165,19 +254,18 @@ struct VmStorageStat {
   }
 };
 
-class ProofStorageStat {
+class ProofStorageStat {  // No dependency issues
  public:
   void add_cell(const Ref<DataCell>& cell);
   td::uint64 estimate_proof_size() const;
+
  private:
-  enum CellStatus {
-    c_none = 0, c_prunned = 1, c_loaded = 2
-  };
+  enum CellStatus { c_none = 0, c_prunned = 1, c_loaded = 2 };
   std::map<vm::Cell::Hash, CellStatus> cells_;
   td::uint64 proof_size_ = 0;
 };
 
-struct CellSerializationInfo {
+struct CellSerializationInfo {  // No dependency issues
   bool special;
   Cell::LevelMask level_mask;
 
@@ -201,7 +289,7 @@ struct CellSerializationInfo {
   td::Result<Ref<DataCell>> create_data_cell(td::Slice data, td::Span<Ref<Cell>> refs) const;
 };
 
-class BagOfCellsLogger {
+class BagOfCellsLogger {  // No dependency issues
  public:
   BagOfCellsLogger() = default;
   explicit BagOfCellsLogger(td::CancellationToken cancellation_token)
@@ -238,7 +326,7 @@ class BagOfCellsLogger {
   size_t processed_cells_ = 0;
   static constexpr double LOG_SPEED_PERIOD = 120.0;
 };
-class BagOfCells {
+class BagOfCells {  // No dependency issues
  public:
   enum { hash_bytes = vm::Cell::hash_bytes, default_max_roots = 16384 };
   enum Mode { WithIndex = 1, WithCRC32C = 2, WithTopHash = 4, WithIntHashes = 8, WithCacheBits = 16, max = 31 };
