@@ -17,7 +17,10 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+#include "common/mem_pool.hpp"
 #include "vm/cells/Cell.h"
+
+#include <cassert>
 
 namespace vm {
 class VirtualCell : public Cell {
@@ -66,6 +69,15 @@ class VirtualCell : public Cell {
   // hash and level
   LevelMask get_level_mask() const override {
     return cell_->get_level_mask().apply(virt_.get_level());
+  }
+
+  static void* operator new(std::size_t count) {
+    assert(count == sizeof(VirtualCell));
+    return td::getMemoryPool<VirtualCell>().allocate();
+  }
+
+  static void operator delete(void* ptr) {
+    td::getMemoryPool<VirtualCell>().release(ptr);
   }
 
  protected:

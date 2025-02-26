@@ -17,8 +17,12 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+
+#include "common/mem_pool.hpp"
 #include "vm/cells/Cell.h"
 #include "vm/cells/CellUsageTree.h"
+
+#include <cassert>
 
 namespace vm {
 class UsageCell : public Cell {
@@ -71,6 +75,15 @@ class UsageCell : public Cell {
   // hash and level
   LevelMask get_level_mask() const override {
     return cell_->get_level_mask();
+  }
+
+  static void* operator new(std::size_t count) {
+    assert(count == sizeof(UsageCell));
+    return td::getMemoryPool<UsageCell>().allocate();
+  }
+
+  static void operator delete(void* ptr) {
+    td::getMemoryPool<UsageCell>().release(ptr);
   }
 
  protected:

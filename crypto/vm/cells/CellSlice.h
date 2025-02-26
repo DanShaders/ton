@@ -18,9 +18,12 @@
 */
 #pragma once
 
+#include "common/mem_pool.hpp"
 #include "common/refcnt.hpp"
 #include "common/refint.h"
 #include "vm/cells.h"
+
+#include <cassert>
 
 namespace td {
 class StringBuilder;
@@ -282,6 +285,15 @@ class CellSlice : public td::CntObject {
     return CellSlice{*this, size() - offs, size_refs(), offs, 0};
   }
   CellSlice clone() const;
+
+  static void* operator new(std::size_t count) {
+    assert(count == sizeof(CellSlice));
+    return td::getMemoryPool<CellSlice>().allocate();
+  }
+
+  static void operator delete(void* ptr) {
+    td::getMemoryPool<CellSlice>().release(ptr);
+  }
 
  private:
   void init_bits_refs();
