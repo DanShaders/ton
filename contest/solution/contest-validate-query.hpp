@@ -13,7 +13,11 @@
 #include "common/global-version.h"
 #include "tonlib/tonlib/ExtClient.h"
 
+#include <future>
+#include <queue>
+
 namespace solution {
+struct RootHashHash;
 
 using namespace ton;
 using namespace ton::validator;
@@ -22,6 +26,113 @@ using td::Ref;
 
 class ErrorCtxAdd;
 class ErrorCtxSet;
+struct RootHashHash {
+  std::size_t operator()(const RootHash& rh) const noexcept {
+    // Fowler–Noll–Vo ;)
+    std::size_t h = 0xcbf29ce484222325ULL;
+    for (unsigned char c : rh.as_array()) {
+      h ^= static_cast<std::size_t>(c);
+      h *= 1099511628211ULL;
+    }
+    return h;
+  }
+  bool operator()(const RootHash& lhs, const RootHash& rhs) const noexcept {
+    return lhs == rhs;
+  }
+};
+
+struct StdSmcAddressLtHash {
+  std::size_t operator()(const std::pair<StdSmcAddress, td::uint64>& p) const noexcept {
+    std::size_t h = 0xcbf29ce484222325ULL;
+    for (unsigned char c : p.first.as_array()) {
+      h ^= static_cast<std::size_t>(c);
+      h *= 1099511628211ULL;
+    }
+    auto x = p.second;
+    for (int i = 0; i < 8; i++) {
+      h ^= static_cast<std::size_t>(x & 0xFF);
+      h *= 1099511628211ULL;
+      x >>= 8;
+    }
+    return h;
+  }
+};
+
+class LocalThreadPool {
+ public:
+  static LocalThreadPool& instance() {
+    static LocalThreadPool the_pool(std::max(1U, std::thread::hardware_concurrency()));
+    return the_pool;
+  }
+  std::future<void> enqueue(std::function<void()> job) {
+    auto promisePtr = std::make_shared<std::promise<void>>();
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      tasks_.push([promisePtr, fn = std::move(job)]() {
+        try {
+          fn();
+          promisePtr->set_value();
+        } catch (...) {
+          promisePtr->set_exception(std::current_exception());
+        }
+      });
+    }
+    cond_.notify_one();
+    return promisePtr->get_future();
+  }
+
+ private:
+  explicit LocalThreadPool(unsigned threadCount) : stop_(false) {
+    workers_.reserve(threadCount);
+    for (unsigned i = 0; i < threadCount; ++i) {
+      workers_.emplace_back([this] { this->workerLoop(); });
+    }
+  }
+
+  ~LocalThreadPool() {
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      stop_ = true;
+    }
+    cond_.notify_all();
+    for (auto& th : workers_) {
+      if (th.joinable()) {
+        th.join();
+      }
+    }
+  }
+
+  void workerLoop() {
+    while (true) {
+      std::function<void()> job;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        cond_.wait(lock, [this] { return stop_ || !tasks_.empty(); });
+        if (stop_ && tasks_.empty()) {
+          return;
+        }
+        job = std::move(tasks_.front());
+        tasks_.pop();
+      }
+      job();
+    }
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable cond_;
+  bool stop_;
+  std::queue<std::function<void()>> tasks_;
+  std::vector<std::thread> workers_;
+};
+
+enum class ErrorType { Fatal, Reject };
+
+struct ValidateTask {
+  std::function<bool()> func;
+  ErrorType error_type;
+  std::string error_msg;
+};
 
 struct ErrorCtx {
  protected:
@@ -131,7 +242,7 @@ class ContestValidateQuery : public td::actor::Actor {
 
   Ref<vm::Cell> block_root_;
   std::vector<Ref<vm::Cell>> collated_roots_;
-  std::map<RootHash, Ref<vm::Cell>> virt_roots_;
+  std::unordered_map<RootHash, Ref<vm::Cell>, RootHashHash> virt_roots_;
   std::unique_ptr<vm::Dictionary> top_shard_descr_dict_;
   block::gen::ExtraCollatedData::Record extra_collated_data_;
   bool have_extra_collated_data_ = false;
@@ -170,7 +281,7 @@ class ContestValidateQuery : public td::actor::Actor {
   td::RefInt256 masterchain_create_fee_, basechain_create_fee_;
 
   std::vector<block::McShardDescr> neighbors_;
-  std::map<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
+  std::unordered_map<BlockSeqno, Ref<MasterchainStateQ>> aux_mc_states_;
 
   block::ShardState ps_;
   block::ShardState ns_;
@@ -178,12 +289,11 @@ class ContestValidateQuery : public td::actor::Actor {
   std::unique_ptr<vm::AugmentedDictionary> sibling_out_msg_queue_;
   std::shared_ptr<block::MsgProcessedUptoCollection> sibling_processed_upto_;
 
-  std::map<td::Bits256, int> block_create_count_;
-  unsigned block_create_total_{0};
-
   std::unique_ptr<vm::AugmentedDictionary> in_msg_dict_, out_msg_dict_, account_blocks_dict_;
+  Ref<vm::CellSlice> cached_in_msg_dict_root_, cached_out_msg_dict_root_, cached_account_blocks_root_,
+      cached_ps_dispatch_queue_root_, cached_ns_dispatch_queue_root_;
   block::ValueFlow value_flow_;
-  block::CurrencyCollection import_created_, transaction_fees_, total_burned_{0}, fees_burned_{0};
+  block::CurrencyCollection import_created_, transaction_fees_, total_burned_{0};
   td::RefInt256 import_fees_;
 
   ton::LogicalTime proc_lt_{0}, claimed_proc_lt_{0}, min_enq_lt_{~0ULL};
@@ -192,8 +302,10 @@ class ContestValidateQuery : public td::actor::Actor {
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_proc_lt_;
   std::vector<std::tuple<Bits256, LogicalTime, LogicalTime>> msg_emitted_lt_;
 
-  std::map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> removed_dispatch_queue_messages_;
-  std::map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>> new_dispatch_queue_messages_;
+  std::unordered_map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>, StdSmcAddressLtHash>
+      removed_dispatch_queue_messages_;
+  std::unordered_map<std::pair<StdSmcAddress, td::uint64>, Ref<vm::Cell>, StdSmcAddressLtHash>
+      new_dispatch_queue_messages_;
   std::set<StdSmcAddress> account_expected_defer_all_messages_;
   td::uint64 old_out_msg_queue_size_ = 0;
   bool out_msg_queue_size_known_ = false;
@@ -212,15 +324,15 @@ class ContestValidateQuery : public td::actor::Actor {
 
   void finish_query();
   void abort_query(td::Status error);
-  bool reject_query(std::string error, td::BufferSlice reason = {});
-  bool reject_query(std::string err_msg, td::Status error, td::BufferSlice reason = {});
-  bool soft_reject_query(std::string error, td::BufferSlice reason = {});
+  bool reject_query(const std::string& error, td::BufferSlice reason = {});
+  bool reject_query(const std::string& err_msg, td::Status error, td::BufferSlice reason = {});
+  bool soft_reject_query(const std::string& error, td::BufferSlice reason = {});
   void start_up() override;
 
   bool fatal_error(td::Status error);
-  bool fatal_error(int err_code, std::string err_msg);
-  bool fatal_error(int err_code, std::string err_msg, td::Status error);
-  bool fatal_error(std::string err_msg, int err_code = -666);
+  bool fatal_error(int err_code, const std::string& err_msg);
+  bool fatal_error(int err_code, const std::string& err_msg, td::Status error);
+  bool fatal_error(const std::string& err_msg, int err_code = -666);
 
   std::string error_ctx() const {
     return error_ctx_.as_string();
@@ -236,7 +348,7 @@ class ContestValidateQuery : public td::actor::Actor {
     return actor_id(this);
   }
 
-  td::Result<Ref<ShardState>> fetch_block_state(BlockIdExt block_id) {
+  td::Result<Ref<ShardState>> fetch_block_state(const BlockIdExt &block_id) {
     Ref<vm::Cell> state_root = get_virt_state_root(block_id.root_hash);
     if (state_root.is_null()) {
       return td::Status::Error(PSTRING() << "cannot get hash of state root: " << block_id.to_str());
@@ -289,13 +401,9 @@ class ContestValidateQuery : public td::actor::Actor {
   bool unpack_block_data();
   bool unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
   bool compute_minted_amount(block::CurrencyCollection& to_mint);
-  bool postcheck_one_account_update(td::ConstBitPtr acc_id, Ref<vm::CellSlice> old_value, Ref<vm::CellSlice> new_value);
-  bool postcheck_account_updates();
   bool precheck_one_transaction(td::ConstBitPtr acc_id, ton::LogicalTime trans_lt, Ref<vm::CellSlice> trans_csr,
                                 ton::Bits256& prev_trans_hash, ton::LogicalTime& prev_trans_lt,
                                 unsigned& prev_trans_lt_len, ton::Bits256& acc_state_hash);
-  bool precheck_one_account_block(td::ConstBitPtr acc_id, Ref<vm::CellSlice> acc_blk);
-  bool precheck_account_transactions();
   Ref<vm::Cell> lookup_transaction(const ton::StdSmcAddress& addr, ton::LogicalTime lt) const;
   bool is_valid_transaction_ref(Ref<vm::Cell> trans_ref) const;
 
@@ -324,7 +432,6 @@ class ContestValidateQuery : public td::actor::Actor {
   std::unique_ptr<block::Account> unpack_account(td::ConstBitPtr addr);
   bool check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first,
                              bool is_last);
-  bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr);
   bool check_transactions();
   bool check_message_processing_order();
   bool check_new_state();
@@ -336,6 +443,8 @@ class ContestValidateQuery : public td::actor::Actor {
 
   bool store_master_ref(vm::CellBuilder& cb);
   bool build_state_update();
+  bool need_to_stop = true;
+  bool run_tasks(const std::initializer_list<ValidateTask>& tasks);
 };
 
 }  // namespace solution
