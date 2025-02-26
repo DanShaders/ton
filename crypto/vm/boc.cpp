@@ -88,7 +88,7 @@ td::Result<int> CellSerializationInfo::get_bits(td::Slice cell) const {
 
 // TODO: check usage when result is empty
 td::Result<Ref<DataCell>> CellSerializationInfo::create_data_cell(td::Slice cell_slice,
-                                                                  td::Span<Ref<Cell>> refs) const {
+                                                                  td::MutableSpan<Ref<Cell>> refs) const {
   CellBuilder cb;
   TRY_RESULT(bits, get_bits(cell_slice));
   cb.store_bits(cell_slice.ubegin() + data_offset, bits);
@@ -765,7 +765,7 @@ td::Result<td::Slice> BagOfCells::get_cell_slice(int idx, td::Slice data) {
 }
 
 td::Result<td::Ref<vm::DataCell>> BagOfCells::deserialize_cell(int idx, td::Slice cells_slice,
-                                                               td::Span<td::Ref<DataCell>> cells_span,
+                                                               td::MutableSpan<td::Ref<DataCell>> cells_span,
                                                                std::vector<td::uint8>* cell_should_cache) {
   TRY_RESULT(cell_slice, get_cell_slice(idx, cells_slice));
   std::array<td::Ref<Cell>, 4> refs_buf;
@@ -911,7 +911,7 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
   root_count = info.root_count;
   dangle_count = info.absent_count;
   for (auto& root_info : roots) {
-    root_info.cell = cell_list[root_info.idx];
+    root_info.cell = std::move(cell_list[root_info.idx]);
   }
   cell_list.clear();
   return size_est;
@@ -1109,8 +1109,9 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(const Ce
     TRY_RESULT(child, add_used_storage(cs.prefetch_ref(i), kill_dup));
     res.max_merkle_depth = std::max(res.max_merkle_depth, child.max_merkle_depth);
   }
-  if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
-      cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
+  auto type = cs.special_type();
+  if (type == CellTraits::SpecialType::MerkleProof ||
+      type == CellTraits::SpecialType::MerkleUpdate) {
     ++res.max_merkle_depth;
   }
   return res;
@@ -1135,8 +1136,9 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlic
     TRY_RESULT(child, add_used_storage(cs.fetch_ref(), kill_dup));
     res.max_merkle_depth = std::max(res.max_merkle_depth, child.max_merkle_depth);
   }
-  if (cs.special_type() == CellTraits::SpecialType::MerkleProof ||
-      cs.special_type() == CellTraits::SpecialType::MerkleUpdate) {
+  auto type = cs.special_type();
+  if (type == CellTraits::SpecialType::MerkleProof ||
+      type == CellTraits::SpecialType::MerkleUpdate) {
     ++res.max_merkle_depth;
   }
   return res;
@@ -1148,9 +1150,9 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::
     return td::Status::Error("cell is null");
   }
   if (kill_dup) {
-    auto ins = seen.emplace(cell->get_hash(), CellInfo{});
+    auto ins = seen.emplace(cell->get_hash());
     if (!ins.second) {
-      return ins.first->second;
+      return CellInfo{};
     }
   }
   vm::CellSlice cs{vm::NoVm{}, std::move(cell)};

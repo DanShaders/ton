@@ -130,7 +130,7 @@ class RefcntCellParser {
       if (!data.empty()) {
         return td::Status::Error("Too much data");
       }
-      TRY_RESULT(data_cell, info.create_data_cell(cell_data, td::Span<Ref<Cell>>(refs, info.refs_cnt)));
+      TRY_RESULT(data_cell, info.create_data_cell(cell_data, td::MutableSpan<Ref<Cell>>(refs, info.refs_cnt)));
       cell = std::move(data_cell);
       return td::Status::OK();
     }();

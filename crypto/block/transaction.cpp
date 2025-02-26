@@ -2880,8 +2880,8 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
       return td::Status::OK();
     };
     TRY_STATUS(add_used_storage(new_code));
-    TRY_STATUS(add_used_storage(new_data));
     TRY_STATUS(add_used_storage(new_library));
+    TRY_STATUS(add_used_storage(new_data));
     if (timer.elapsed() > 0.1) {
       LOG(INFO) << "Compute used storage took " << timer.elapsed() << "s";
     }
@@ -3174,6 +3174,7 @@ bool Transaction::compute_state() {
       LOG(INFO) << "Compute used storage took " << timer.elapsed() << "s";
     }
   }
+  stats.clear_seen();
   CHECK(cb.store_long_bool(1, 1)                       // account$1
         && cb.append_cellslice_bool(account.my_addr)   // addr:MsgAddressInt
         && block::store_UInt7(cb, stats.cells)         // storage_used$_ cells:(VarUInteger 7)

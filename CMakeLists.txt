@@ -57,7 +57,7 @@ int main() {
 set(CMAKE_REQUIRED_FLAGS ${OLD_CMAKE_REQURED_FLAGS})
 
 if(NOT MSVC)
-  set(CMAKE_REQUIRED_FLAGS "-msse4.2 -mpclmul")
+  set(CMAKE_REQUIRED_FLAGS "-msse4.2 -flto -mpclmul")
 endif()
 CHECK_CXX_SOURCE_COMPILES("
 #include <cstdint>
@@ -79,7 +79,7 @@ else()
   set(HAVE_SSE42 FALSE)
 endif()
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 set(CMAKE_CXX_EXTENSIONS FALSE)
 
@@ -320,7 +320,7 @@ if (NOT MSVC)
   add_cxx_compiler_flag("-Wall")
   add_cxx_compiler_flag("-Wextra")
 endif()
-
+add_cxx_compiler_flag("-flto")
 add_cxx_compiler_flag("-Wimplicit-fallthrough=2")
 add_cxx_compiler_flag("-Wpointer-arith")
 add_cxx_compiler_flag("-Wcast-qual")
@@ -402,6 +402,7 @@ function(target_link_libraries_system target)
 endfunction(target_link_libraries_system)
 
 set(TDUTILS_MIME_TYPE OFF CACHE BOOL "Generate mime type conversion")
+add_subdirectory(mimalloc)
 add_subdirectory(tdutils)
 add_subdirectory(memprof)
 add_subdirectory(tdactor)

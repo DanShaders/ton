@@ -35,11 +35,15 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   struct NodePtr {
    public:
     NodePtr() = default;
+    NodePtr(std::nullptr_t ptr, CellUsageTree* tree_ptr, NodeId node_id)
+        : tree_ptr_(tree_ptr), node_id_(node_id) {
+    }
     NodePtr(std::weak_ptr<CellUsageTree> tree_weak, NodeId node_id)
-        : tree_weak_(std::move(tree_weak)), node_id_(node_id) {
+        : node_id_(node_id) {
+      tree_ptr_ = tree_weak.lock().get();
     }
     bool empty() const {
-      return node_id_ == 0 || tree_weak_.expired();
+      return node_id_ == 0;// || tree_weak_.expired();
     }
 
     bool on_load(const td::Ref<vm::DataCell>& cell) const;
@@ -48,7 +52,7 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
     bool is_from_tree(const CellUsageTree* master_tree) const;
 
    private:
-    std::weak_ptr<CellUsageTree> tree_weak_;
+    CellUsageTree* tree_ptr_;
     NodeId node_id_{0};
   };
 

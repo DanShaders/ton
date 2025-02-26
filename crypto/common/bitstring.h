@@ -226,8 +226,11 @@ class BitSliceGen {
   }
   explicit BitSliceGen(Slice slice) : BitSliceGen(slice.data(), slice.size() * 8) {
   }
-  ~BitSliceGen() {
-  }
+    ~BitSliceGen() = default;
+  BitSliceGen(const BitSliceGen&) = default;
+  BitSliceGen(BitSliceGen&&) = default;
+  BitSliceGen& operator=(BitSliceGen&&) = default;
+  BitSliceGen& operator=(const BitSliceGen&) = default;
   Pt* get_ptr() const {
     return ptr;
   }

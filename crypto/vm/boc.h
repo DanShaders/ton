@@ -30,7 +30,7 @@
 #include "td/utils/Time.h"
 #include "td/utils/Timer.h"
 #include "td/utils/port/FileFd.h"
-
+#include "absl/container/btree_map.h"
 namespace vm {
 using td::Ref;
 
@@ -117,7 +117,9 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+private:
+  absl::flat_hash_set<vm::Cell::Hash> seen;
+public:
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)
@@ -198,7 +200,7 @@ struct CellSerializationInfo {
   td::Status init(td::uint8 d1, td::uint8 d2, int ref_byte_size);
   td::Result<int> get_bits(td::Slice cell) const;
 
-  td::Result<Ref<DataCell>> create_data_cell(td::Slice data, td::Span<Ref<Cell>> refs) const;
+  td::Result<Ref<DataCell>> create_data_cell(td::Slice data, td::MutableSpan<Ref<Cell>> refs) const;
 };
 
 class BagOfCellsLogger {
@@ -377,7 +379,7 @@ class BagOfCells {
   unsigned long long get_idx_entry(int index);
   bool get_cache_entry(int index);
   td::Result<td::Slice> get_cell_slice(int index, td::Slice data);
-  td::Result<td::Ref<vm::DataCell>> deserialize_cell(int index, td::Slice data, td::Span<td::Ref<DataCell>> cells,
+  td::Result<td::Ref<vm::DataCell>> deserialize_cell(int index, td::Slice data, td::MutableSpan<td::Ref<DataCell>> cells,
                                                      std::vector<td::uint8>* cell_should_cache);
 };
 

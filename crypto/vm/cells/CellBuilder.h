@@ -85,6 +85,9 @@ class CellBuilder : public td::CntObject {
   Ref<Cell> get_ref(unsigned idx) const {
     return idx < refs_cnt ? refs[idx] : Ref<Cell>{};
   }
+  const Ref<Cell>& get_ref_ref(unsigned idx) const {
+    return refs[idx];
+  }
   void reset();
   bool reset_bool() {
     reset();

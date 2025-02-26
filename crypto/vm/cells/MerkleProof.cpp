@@ -50,7 +50,7 @@ class MerkleProofImpl {
 
  private:
   using Key = std::pair<Cell::Hash, int>;
-  td::HashMap<Key, Ref<Cell>> cells_;
+  td::HashMap<Key, const Cell*> cells_;
   td::HashSet<Cell::Hash> visited_cells_;
   CellUsageTree *usage_tree_{nullptr};
   MerkleProof::IsPrunnedFunction is_prunned_;
@@ -72,15 +72,15 @@ class MerkleProofImpl {
     {
       auto it = cells_.find(key);
       if (it != cells_.end()) {
-        CHECK(it->second.not_null());
-        return it->second;
+        CHECK(it->second != nullptr);
+        return Ref<Cell>(it->second);
       }
     }
 
     if (is_prunned_(cell)) {
       auto res = CellBuilder::create_pruned_branch(cell, merkle_depth + 1);
       CHECK(res.not_null());
-      cells_.emplace(key, res);
+      cells_.emplace(key, res.get());
       return res;
     }
     CellSlice cs(NoVm(), cell);
@@ -92,7 +92,7 @@ class MerkleProofImpl {
     }
     auto res = cb.finalize(cs.is_special());
     CHECK(res.not_null());
-    cells_.emplace(key, res);
+    cells_.emplace(key, res.get());
     return res;
   }
 };

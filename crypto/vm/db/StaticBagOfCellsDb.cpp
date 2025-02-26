@@ -504,7 +504,7 @@ class StaticBagOfCellsDbLazyImpl : public StaticBagOfCellsDb {
       refs[k] = std::move(ref);
     }
 
-    TRY_RESULT(data_cell, cell_info.create_data_cell(cell_slice, td::Span<Ref<Cell>>(refs, cell_info.refs_cnt)));
+    TRY_RESULT(data_cell, cell_info.create_data_cell(cell_slice, td::MutableSpan<Ref<Cell>>(refs, cell_info.refs_cnt)));
     if (!should_cache) {
       return std::move(data_cell);
     }

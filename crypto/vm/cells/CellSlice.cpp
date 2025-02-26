@@ -30,12 +30,15 @@ CellSlice::CellSlice(Ref<Cell>&& ref) : cell(std::move(ref)), bits_st(0), refs_s
 */
 
 CellSlice::CellSlice(VirtualCell::LoadedCell loaded_cell)
-    : virt(loaded_cell.virt)
-    , cell(std::move(loaded_cell.data_cell))
+    : cell(std::move(loaded_cell.data_cell))
+    , virt(loaded_cell.virt)
     , tree_node(std::move(loaded_cell.tree_node))
     , bits_st(0)
     , refs_st(0)
+    , bits_en(0)
+    , refs_en(0)
     , ptr(0)
+    , z(0)
     , zd(0) {
   init_bits_refs();
 }
@@ -77,14 +80,19 @@ CellSlice::CellSlice(NoVmSpec, Ref<Cell> ref) : CellSlice(load_cell_nothrow(std:
 CellSlice::CellSlice(Ref<DataCell> ref) : CellSlice(VirtualCell::LoadedCell{std::move(ref), {}, {}}) {
 }
 CellSlice::CellSlice(const CellSlice& cs) = default;
+CellSlice::CellSlice(CellSlice&& cs) = default;
+
 
 bool CellSlice::load(VirtualCell::LoadedCell loaded_cell) {
-  virt = loaded_cell.virt;
   cell = std::move(loaded_cell.data_cell);
+  virt = loaded_cell.virt;
   tree_node = std::move(loaded_cell.tree_node);
   bits_st = 0;
   refs_st = 0;
+  bits_en = 0;
+  refs_en = 0;
   ptr = 0;
+  z = 0;
   zd = 0;
   init_bits_refs();
   return cell.not_null();
@@ -125,14 +133,15 @@ CellSlice::CellSlice(Ref<DataCell> dc_ref, unsigned _bits_en, unsigned _refs_en,
 */
 
 CellSlice::CellSlice(const CellSlice& cs, unsigned _bits_en, unsigned _refs_en, unsigned _bits_st, unsigned _refs_st)
-    : virt(cs.virt)
-    , cell(cs.cell)
+    : cell(cs.cell)
+    , virt(cs.virt)
     , tree_node(cs.tree_node)
     , bits_st(cs.bits_st + _bits_st)
     , refs_st(cs.refs_st + _refs_st)
     , bits_en(cs.bits_st + _bits_en)
     , refs_en(cs.refs_st + _refs_en)
     , ptr(0)
+    , z(0)
     , zd(0) {
   assert(_bits_st <= _bits_en && _refs_st <= _refs_en);
   assert(_bits_en <= cs.size() && _refs_en <= cs.size_refs());
@@ -142,8 +151,8 @@ CellSlice::CellSlice(const CellSlice& cs, unsigned _bits_en, unsigned _refs_en, 
 }
 
 CellSlice::CellSlice(const CellSlice& cs, unsigned _bits_en, unsigned _refs_en)
-    : virt(cs.virt)
-    , cell(cs.cell)
+    : cell(cs.cell)
+    , virt(cs.virt)
     , tree_node(cs.tree_node)
     , bits_st(cs.bits_st)
     , refs_st(cs.refs_st)
@@ -740,9 +749,9 @@ bool CellSlice::prefetch_bytes(td::MutableSlice slice) const {
 Ref<Cell> CellSlice::prefetch_ref(unsigned offset) const {
   if (offset < size_refs()) {
     auto ref_id = refs_st + offset;
-    auto res = cell->get_ref(ref_id)->virtualize(child_virt());
+    auto res = cell->get_ref_raw_ptr(ref_id)->virtualize(child_virt());
     if (!tree_node.empty()) {
-      res = UsageCell::create(std::move(res), tree_node.create_child(ref_id));
+      return UsageCell::create(std::move(res), tree_node.create_child(ref_id));
     }
     return res;
   } else {
@@ -753,9 +762,9 @@ Ref<Cell> CellSlice::prefetch_ref(unsigned offset) const {
 Ref<Cell> CellSlice::fetch_ref() {
   if (have_refs()) {
     auto ref_id = refs_st++;
-    auto res = cell->get_ref(ref_id)->virtualize(child_virt());
+    auto res = cell->get_ref_raw_ptr(ref_id)->virtualize(child_virt());
     if (!tree_node.empty()) {
-      res = UsageCell::create(std::move(res), tree_node.create_child(ref_id));
+      return UsageCell::create(std::move(res), tree_node.create_child(ref_id));
     }
     return res;
   } else {
@@ -1055,10 +1064,15 @@ std::ostream& operator<<(std::ostream& os, Ref<CellSlice> cs_ref) {
 
 // If can_be_special is not null, then it is allowed to load special cell
 // Flag whether loaded cell is actually special will be stored into can_be_special
-VirtualCell::LoadedCell load_cell_slice_impl(Ref<Cell> cell, bool* can_be_special) {
+
+VirtualCell::LoadedCell load_cell_slice_impl(const Ref<Cell>& input_cell, bool* can_be_special) {
   auto* vm_state_interface = VmStateInterface::get();
   bool library_loaded = false;
+
+  Ref<Cell> additional_cell;
+  const Ref<Cell>* cell_ptr = &input_cell;
   while (true) {
+    const Ref<Cell>& cell = *cell_ptr;
     if (vm_state_interface && !library_loaded) {
       vm_state_interface->register_cell_load(cell->get_hash());
     }
@@ -1086,9 +1100,9 @@ VirtualCell::LoadedCell load_cell_slice_impl(Ref<Cell> cell, bool* can_be_specia
           }
           CellSlice cs(std::move(loaded_cell));
           DCHECK(cs.size() == Cell::hash_bits + 8);
-          auto library_cell = vm_state_interface->load_library(cs.data_bits() + 8);
-          if (library_cell.not_null()) {
-            cell = library_cell;
+          additional_cell = vm_state_interface->load_library(cs.data_bits() + 8);
+          if (additional_cell.not_null()) {
+            cell_ptr = &additional_cell;
             can_be_special = nullptr;
             continue;
           }
@@ -1114,11 +1128,11 @@ CellSlice load_cell_slice_special(const Ref<Cell>& cell, bool& special) {
 }
 
 Ref<CellSlice> load_cell_slice_ref(const Ref<Cell>& cell) {
-  return Ref<CellSlice>{true, CellSlice(load_cell_slice_impl(cell, nullptr))};
+  return Ref<CellSlice>(true, CellSlice(load_cell_slice_impl(cell, nullptr)));
 }
 
 Ref<CellSlice> load_cell_slice_ref_special(const Ref<Cell>& cell, bool& special) {
-  return Ref<CellSlice>{true, CellSlice(load_cell_slice_impl(cell, &special))};
+  return Ref<CellSlice>(true, CellSlice(load_cell_slice_impl(cell, &special)));
 }
 
 void print_load_cell(std::ostream& os, Ref<Cell> cell, int indent) {
