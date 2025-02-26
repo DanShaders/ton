@@ -12,6 +12,7 @@
 #include <map>
 #include "common/global-version.h"
 #include "tonlib/tonlib/ExtClient.h"
+#include "transaction-checker.hpp"
 
 namespace solution {
 
@@ -93,8 +94,8 @@ class ContestValidateQuery : public td::actor::Actor {
  public:
   ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice collated_data,
                        td::Promise<td::BufferSlice> promise);
-
  private:
+  td::uint32 compute_phase_cfg_defer_out_queue_size_limit;
   int verbosity{0};
   int pending{0};
   const ShardIdFull shard_;
@@ -117,6 +118,7 @@ class ContestValidateQuery : public td::actor::Actor {
   int stage_{0};
   td::BitArray<64> shard_pfx_;
   int shard_pfx_len_;
+  std::unique_ptr<TransactionChecker> async_tx_checker; 
   td::Bits256 created_by_;
 
   Ref<vm::Cell> prev_state_root_;
@@ -157,7 +159,6 @@ class ContestValidateQuery : public td::actor::Actor {
   ton::LogicalTime prev_key_block_lt_;
   std::unique_ptr<block::BlockLimits> block_limits_;
   std::unique_ptr<block::BlockLimitStatus> block_limit_status_;
-  td::uint64 total_gas_used_{0}, total_special_gas_used_{0};
 
   LogicalTime start_lt_, end_lt_;
   UnixTime now_{~0u};
@@ -167,6 +168,7 @@ class ContestValidateQuery : public td::actor::Actor {
   block::StoragePhaseConfig storage_phase_cfg_{&storage_prices_};
   block::ComputePhaseConfig compute_phase_cfg_;
   block::ActionPhaseConfig action_phase_cfg_;
+  block::MsgPrices action_phase_cfg_fwd_std;
   td::RefInt256 masterchain_create_fee_, basechain_create_fee_;
 
   std::vector<block::McShardDescr> neighbors_;
@@ -267,6 +269,8 @@ class ContestValidateQuery : public td::actor::Actor {
   bool unpack_merge_prev_state();
   bool unpack_prev_state();
   bool init_next_state();
+  bool start_async_transactions_check();
+  bool wait_for_async_transactions_check();
   bool unpack_one_prev_state(block::ShardState& ss, BlockIdExt blkid, Ref<vm::Cell> prev_state_root);
   bool split_prev_state(block::ShardState& ss);
   bool request_neighbor_queues();
@@ -320,12 +324,8 @@ class ContestValidateQuery : public td::actor::Actor {
                                        const block::McShardDescr& src_nb, bool& unprocessed, bool& processed_here,
                                        td::Bits256& msg_hash);
   bool check_in_queue();
-  std::unique_ptr<block::Account> make_account_from(td::ConstBitPtr addr, Ref<vm::CellSlice> account);
-  std::unique_ptr<block::Account> unpack_account(td::ConstBitPtr addr);
   bool check_one_transaction(block::Account& account, LogicalTime lt, Ref<vm::Cell> trans_root, bool is_first,
                              bool is_last);
-  bool check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_tr);
-  bool check_transactions();
   bool check_message_processing_order();
   bool check_new_state();
   bool postcheck_value_flow();
@@ -336,6 +336,7 @@ class ContestValidateQuery : public td::actor::Actor {
 
   bool store_master_ref(vm::CellBuilder& cb);
   bool build_state_update();
+  bool prepare_transaction_checker();
 };
 
 }  // namespace solution
