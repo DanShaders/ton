@@ -1203,7 +1203,9 @@ bool HashmapAugE::validate_skip(int* ops, vm::CellSlice& cs, bool weak) const {
       return cs.advance(1) && (extra = root_type.aug.extra_type.validate_fetch(ops, cs, weak)).not_null() &&
              root_type.aug.check_empty(extra.unique_write());
     case ahme_root:
-      if (cs.advance(1) && root_type.validate_ref(ops, cs.prefetch_ref(), weak)) {
+      // if (cs.advance(1) && root_type.validate_ref(ops, cs.prefetch_ref(), weak)) {
+      // It seems incorrect to check the entire cell slice for validating a cell reference.
+      if (cs.advance(1) && cs.prefetch_ref().not_null()) {
         bool special;
         auto cs_root = load_cell_slice_special(cs.fetch_ref(), special);
         if (special) {
