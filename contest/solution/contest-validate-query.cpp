@@ -15,6 +15,7 @@
 #include "common/errorlog.h"
 #include "fabric.h"
 #include <ctime>
+#include <mutex>
 
 namespace solution {
 
@@ -30,12 +31,9 @@ using namespace std::literals::string_literals;
  * @returns The error context as a string.
  */
 std::string ErrorCtx::as_string() const {
-  std::string a;
-  for (const auto& s : entries_) {
-    a += s;
-    a += " : ";
-  }
-  return a;
+    return std::accumulate(entries_.begin(), entries_.end(), std::string{}, [](const std::string& acc, const std::string& s) {
+        return acc + s + " : ";
+    });
 }
 
 /**
@@ -48,14 +46,8 @@ std::string ErrorCtx::as_string() const {
  */
 ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data,
                                            td::BufferSlice collated_data, td::Promise<td::BufferSlice> promise)
-    : shard_(block_id.shard_full())
-    , id_(block_id)
-    , block_data(std::move(block_data))
-    , collated_data(std::move(collated_data))
-    , main_promise(std::move(promise))
-    , shard_pfx_(shard_.shard)
-    , shard_pfx_len_(ton::shard_prefix_length(shard_)) {
-}
+    : shard_(block_id.shard_full()), id_(block_id), block_data(std::move(block_data)), collated_data(std::move(collated_data)),
+      main_promise(std::move(promise)), shard_pfx_(shard_.shard), shard_pfx_len_(ton::shard_prefix_length(shard_)) {}
 
 /**
  * Aborts the validation with the given error.
@@ -198,83 +190,60 @@ void ContestValidateQuery::start_up() {
   LOG(INFO) << "validate query for " << id_.to_str() << " started";
   rand_seed_.set_zero();
 
-  if (ShardIdFull(id_) != shard_) {
-    soft_reject_query(PSTRING() << "block candidate belongs to shard " << ShardIdFull(id_).to_str()
-                                << " different from current shard " << shard_.to_str());
-    return;
+   if (ShardIdFull(id_) != shard_ || workchain() != ton::basechainId || !shard_.is_valid_ext()) {
+        reject_query("Invalid shard or workchain");
+        return;
+   }
+
+  if (td::lower_bit64(shard_.shard) < 8) {
+        reject_query("A shard cannot be split more than 60 times");
+        return;
   }
-  if (workchain() != ton::basechainId) {
-    soft_reject_query("only basechain is supported");
-    return;
-  }
-  if (!shard_.is_valid_ext()) {
-    reject_query("requested to validate a block for an invalid shard");
-    return;
-  }
-  td::uint64 x = td::lower_bit64(shard_.shard);
-  if (x < 8) {
-    reject_query("a shard cannot be split more than 60 times");
-    return;
-  }
+
+
   // 3. unpack block candidate (while necessary data is being loaded)
   if (!unpack_block_candidate()) {
     reject_query("error unpacking block candidate");
     return;
   }
-  if (prev_blocks.size() > 2) {
-    soft_reject_query("cannot have more than two previous blocks");
-    return;
-  }
-  if (!prev_blocks.size()) {
-    soft_reject_query("must have one or two previous blocks to generate a next block");
-    return;
-  }
-  if (prev_blocks.size() == 2) {
-    if (!(shard_is_parent(shard_, ShardIdFull(prev_blocks[0])) &&
-          shard_is_parent(shard_, ShardIdFull(prev_blocks[1])) && prev_blocks[0].id.shard < prev_blocks[1].id.shard)) {
-      soft_reject_query(
-          "the two previous blocks for a merge operation are not siblings or are not children of current shard");
-      return;
-    }
-    for (const auto& blk : prev_blocks) {
-      if (!blk.id.seqno) {
-        soft_reject_query("previous blocks for a block merge operation must have non-zero seqno");
+
+  size_t num_prev_blocks = prev_blocks.size();
+  if (num_prev_blocks == 0 || num_prev_blocks > 2) {
+        soft_reject_query("Invalid number of previous blocks");
         return;
-      }
-    }
-    // soft_reject_query("merging shards is not implemented yet");
-    // return;
-  } else {
-    CHECK(prev_blocks.size() == 1);
-    // creating next block
-    if (!ShardIdFull(prev_blocks[0]).is_valid_ext()) {
-      soft_reject_query("previous block does not have a valid id");
-      return;
-    }
-    if (ShardIdFull(prev_blocks[0]) != shard_) {
-      if (!shard_is_parent(ShardIdFull(prev_blocks[0]), shard_)) {
-        soft_reject_query("previous block does not belong to the shard we are generating a new block for");
-        return;
-      }
-    }
-    if (after_split_) {
-      // soft_reject_query("splitting shards not implemented yet");
-      // return;
-    }
   }
+  if (num_prev_blocks == 2) {
+        if (!(shard_is_parent(shard_, ShardIdFull(prev_blocks[0])) &&
+              shard_is_parent(shard_, ShardIdFull(prev_blocks[1])) &&
+              prev_blocks[0].id.shard < prev_blocks[1].id.shard)) {
+            soft_reject_query("Invalid merge operation");
+            return;
+        }
+        for (const auto& blk : prev_blocks) {
+            if (!blk.id.seqno) {
+                soft_reject_query("Previous blocks must have non-zero seqno");
+                return;
+            }
+        }
+    } else {
+        if (!ShardIdFull(prev_blocks[0]).is_valid_ext() ||
+            (ShardIdFull(prev_blocks[0]) != shard_ && !shard_is_parent(ShardIdFull(prev_blocks[0]), shard_))) {
+            soft_reject_query("Previous block does not belong to the correct shard");
+            return;
+        }
+    }
   // 4. load state(s) corresponding to previous block(s)
-  prev_states.resize(prev_blocks.size());
-  for (int i = 0; (unsigned)i < prev_blocks.size(); i++) {
-    // 4.1. load state
-    LOG(DEBUG) << "sending wait_block_state() query #" << i << " for " << prev_blocks[i].to_str() << " to Manager";
-    ++pending;
-    td::actor::send_closure_later(actor_id(this), &ContestValidateQuery::after_get_shard_state, i,
-                                  fetch_block_state(prev_blocks[i]));
-  }
+    prev_states.resize(num_prev_blocks);
+    for (size_t i = 0; i < num_prev_blocks; ++i) {
+        //LOG(DEBUG) << "Sending wait_block_state() query #" << i << " for " << prev_blocks[i].to_str() << " to Manager";
+        ++pending;
+        td::actor::send_closure_later(actor_id(this), &ContestValidateQuery::after_get_shard_state, i,
+                                      fetch_block_state(prev_blocks[i]));
+    }
   // 5. request masterchain state referred to in the block
   ++pending;
   td::actor::send_closure_later(actor_id(this), &ContestValidateQuery::after_get_mc_state,
-                                fetch_block_state(mc_blkid_));
+                                  fetch_block_state(mc_blkid_));
   // ...
   CHECK(pending);
 }
@@ -322,7 +291,7 @@ bool ContestValidateQuery::unpack_block_candidate() {
   }
   int n = boc2.get_root_count();
   CHECK(n >= 0);
-  for (int i = 0; i < n; i++) {
+  for (size_t i = 0; i < n; ++i) {
     collated_roots_.emplace_back(boc2.get_root_cell(i));
   }
   // 9. extract/classify collated data
@@ -978,8 +947,12 @@ bool ContestValidateQuery::compute_prev_state() {
       return fatal_error(-667, "cannot construct mechanically merged previously state");
     }
   }
+  // static std::mutex state_usage_mutex;
   state_usage_tree_ = std::make_shared<vm::CellUsageTree>();
-  prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr());
+  {
+    // std::lock_guard<std::mutex> lock(state_usage_mutex);
+    prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr());
+  }
   return true;
 }
 
@@ -1075,7 +1048,7 @@ bool ContestValidateQuery::unpack_one_prev_state(block::ShardState& ss, BlockIdE
  * @returns True if the split operation is successful, false otherwise.
  */
 bool ContestValidateQuery::split_prev_state(block::ShardState& ss) {
-  LOG(INFO) << "Splitting previous state " << ss.id_.to_str() << " to subshard " << shard_.to_str();
+  // LOG(INFO) << "Splitting previous state " << ss.id_.to_str() << " to subshard " << shard_.to_str();
   CHECK(after_split_);
   auto sib_shard = ton::shard_sibling(shard_);
   auto res1 = ss.compute_split_out_msg_queue(sib_shard);
@@ -1119,35 +1092,37 @@ bool ContestValidateQuery::init_next_state() {
 bool ContestValidateQuery::request_neighbor_queues() {
   CHECK(new_shard_conf_);
   auto neighbor_list = new_shard_conf_->get_neighbor_shard_hash_ids(shard_);
-  LOG(DEBUG) << "got a preliminary list of " << neighbor_list.size() << " neighbors for " << shard_.to_str();
-  for (ton::BlockId blk_id : neighbor_list) {
+  
+  neighbors_.reserve(neighbor_list.size());
+  
+  for (const auto& blk_id : neighbor_list) {
     if (blk_id.seqno == 0 && blk_id.shard_full() != shard_) {
       continue;
     }
+    
     auto shard_ptr = new_shard_conf_->get_shard_hash(ton::ShardIdFull(blk_id));
     if (shard_ptr.is_null()) {
       return reject_query("cannot obtain shard hash for neighbor "s + blk_id.to_str());
     }
+    
     if (shard_ptr->blk_.id != blk_id) {
-      return reject_query("invalid block id "s + shard_ptr->blk_.to_str() + " returned in information for neighbor " +
-                          blk_id.to_str());
+      return reject_query("invalid block id "s + shard_ptr->blk_.to_str() + " returned in information for neighbor " + blk_id.to_str());
     }
-    neighbors_.emplace_back(*shard_ptr);
+    
+    neighbors_.emplace_back(std::move(*shard_ptr));
   }
+  
   int i = 0;
-  {
-    for (block::McShardDescr& descr : neighbors_) {
-      LOG(DEBUG) << "requesting outbound queue of neighbor #" << i << " : " << descr.blk_.to_str();
-      ++pending;
-      auto r_state = fetch_block_state(descr.blk_);
-      if (r_state.is_error()) {
-        return fatal_error(r_state.move_as_error());
-      }
-      td::actor::send_closure(actor_id(this), &ContestValidateQuery::got_neighbor_out_queue, i,
-                              r_state.ok()->message_queue());
-      ++i;
+  pending += neighbors_.size();
+  
+  for (auto& descr : neighbors_) {
+    auto r_state = fetch_block_state(descr.blk_);
+    if (r_state.is_error()) {
+      return fatal_error(r_state.move_as_error());
     }
+    td::actor::send_closure(actor_id(this), &ContestValidateQuery::got_neighbor_out_queue, i++, r_state.ok()->message_queue());
   }
+  
   return true;
 }
 
@@ -1201,7 +1176,7 @@ void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQ
     return;
   }
   outq_descr.clear();
-  do {
+  // do {
     // require masterchain blocks referred to in ProcessedUpto
     // TODO: perform this only if there are messages for this shard in our output queue
     // .. (have to check the above condition and perform a `break` here) ..
@@ -1212,7 +1187,7 @@ void ContestValidateQuery::got_neighbor_out_queue(int i, td::Result<Ref<MessageQ
         return;
       }
     }
-  } while (false);
+  // } while (false);
   if (!pending) {
     LOG(INFO) << "all neighbor output queues fetched";
     try_validate();
@@ -1509,15 +1484,15 @@ bool ContestValidateQuery::fix_all_processed_upto() {
  * @returns True if the operation is successful, false otherwise.
  */
 bool ContestValidateQuery::add_trivial_neighbor_after_merge() {
-  LOG(DEBUG) << "in add_trivial_neighbor_after_merge()";
+  // LOG(DEBUG) << "in add_trivial_neighbor_after_merge()";
   CHECK(prev_blocks.size() == 2);
   int found = 0;
   std::size_t n = neighbors_.size();
-  for (std::size_t i = 0; i < n; i++) {
+  for (std::size_t i = 0; i < n; ++i) {
     auto& nb = neighbors_.at(i);
     if (ton::shard_intersects(nb.shard(), shard_)) {
       ++found;
-      LOG(DEBUG) << "neighbor #" << i << " : " << nb.blk_.to_str() << " intersects our shard " << shard_.to_str();
+      // LOG(DEBUG) << "neighbor #" << i << " : " << nb.blk_.to_str() << " intersects our shard " << shard_.to_str();
       if (!ton::shard_is_parent(shard_, nb.shard()) || found > 2) {
         return fatal_error("impossible shard configuration in add_trivial_neighbor_after_merge()");
       }
@@ -1550,7 +1525,7 @@ bool ContestValidateQuery::add_trivial_neighbor_after_merge() {
  * @returns True if the operation is successful, false otherwise.
  */
 bool ContestValidateQuery::add_trivial_neighbor() {
-  LOG(DEBUG) << "in add_trivial_neighbor()";
+  // LOG(DEBUG) << "in add_trivial_neighbor()";
   if (after_merge_) {
     return add_trivial_neighbor_after_merge();
   }
@@ -1583,9 +1558,9 @@ bool ContestValidateQuery::add_trivial_neighbor() {
   // In all of the above cases, our shard intersects exactly one neighbor, which has the same shard or its parent.
   // 4. there are two neighbors intersecting shard = prev_shard, which are its children.
   // 5. there are two prev_shards, the two children of shard, and two neighbors coinciding with prev_shards
-  int found = 0, cs = 0;
+  size_t found = 0, cs = 0;
   std::size_t n = neighbors_.size();
-  for (std::size_t i = 0; i < n; i++) {
+  for (std::size_t i = 0; i < n; ++i) {
     auto& nb = neighbors_.at(i);
     if (ton::shard_intersects(nb.shard(), shard_)) {
       ++found;
@@ -1690,7 +1665,7 @@ bool ContestValidateQuery::add_trivial_neighbor() {
  * @returns True if the block data is successfully unpacked and passes all validation checks, false otherwise.
  */
 bool ContestValidateQuery::unpack_block_data() {
-  LOG(DEBUG) << "unpacking block structures";
+  // LOG(DEBUG) << "unpacking block structures";
   block::gen::Block::Record blk;
   block::gen::BlockExtra::Record extra;
   if (!(tlb::unpack_cell(block_root_, blk) && tlb::unpack_cell(blk.extra, extra))) {
@@ -1711,17 +1686,15 @@ bool ContestValidateQuery::unpack_block_data() {
   }
   in_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(inmsg_cs), 256, block::tlb::aug_InMsgDescr);
   out_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(outmsg_cs), 256, block::tlb::aug_OutMsgDescr);
-  account_blocks_dict_ = std::make_unique<vm::AugmentedDictionary>(
-      vm::load_cell_slice_ref(std::move(extra.account_blocks)), 256, block::tlb::aug_ShardAccountBlocks);
-  LOG(DEBUG) << "validating InMsgDescr";
   if (!in_msg_dict_->validate_all()) {
     return reject_query("InMsgDescr dictionary is invalid");
   }
-  LOG(DEBUG) << "validating OutMsgDescr";
   if (!out_msg_dict_->validate_all()) {
     return reject_query("OutMsgDescr dictionary is invalid");
   }
-  LOG(DEBUG) << "validating ShardAccountBlocks";
+  account_blocks_dict_ = std::make_unique<vm::AugmentedDictionary>(
+      vm::load_cell_slice_ref(std::move(extra.account_blocks)), 256, block::tlb::aug_ShardAccountBlocks);
+
   if (!account_blocks_dict_->validate_all()) {
     return reject_query("ShardAccountBlocks dictionary is invalid");
   }
@@ -1740,25 +1713,25 @@ bool ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_r
   if (!(cs.is_valid() && value_flow_.fetch(cs) && cs.empty_ext())) {
     return reject_query("cannot unpack ValueFlow of the new block "s + id_.to_str());
   }
-  std::ostringstream os;
-  value_flow_.show(os);
-  LOG(DEBUG) << "value flow: " << os.str();
+  // std::ostringstream os;
+  // value_flow_.show(os);
+  // LOG(DEBUG) << "value flow: " << os.str();
   if (!value_flow_.validate()) {
-    LOG(INFO) << "invalid value flow: " << os.str();
+    // LOG(INFO) << "invalid value flow: " << os.str();
     return reject_query("ValueFlow of block "s + id_.to_str() + " is invalid (in-balance is not equal to out-balance)");
   }
   if (!value_flow_.minted.is_zero()) {
-    LOG(INFO) << "invalid value flow: " << os.str();
+    // LOG(INFO) << "invalid value flow: " << os.str();
     return reject_query("ValueFlow of block "s + id_.to_str() +
                         " is invalid (non-zero minted value in a non-masterchain block)");
   }
   if (!value_flow_.recovered.is_zero()) {
-    LOG(INFO) << "invalid value flow: " << os.str();
+    // LOG(INFO) << "invalid value flow: " << os.str();
     return reject_query("ValueFlow of block "s + id_.to_str() +
                         " is invalid (non-zero recovered value in a non-masterchain block)");
   }
   if (!value_flow_.burned.is_zero()) {
-    LOG(INFO) << "invalid value flow: " << os.str();
+    // LOG(INFO) << "invalid value flow: " << os.str();
     return reject_query("ValueFlow of block "s + id_.to_str() +
                         " is invalid (non-zero burned value in a non-masterchain block)");
   }
@@ -1795,7 +1768,7 @@ bool ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_r
                         td::dec_string(create_fee));
   }
   if (!value_flow_.fees_imported.is_zero()) {
-    LOG(INFO) << "invalid value flow: " << os.str();
+    // LOG(INFO) << "invalid value flow: " << os.str();
     return reject_query("ValueFlow of block "s + id_.to_str() +
                         " is invalid (non-zero fees_imported in a non-masterchain block)");
   }
@@ -4587,7 +4560,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     }
   }
   vm::Dictionary out_dict{trans.r1.out_msgs, 15};
-  for (int i = 0; i < trans.outmsg_cnt; i++) {
+  for (int i = 0; i < trans.outmsg_cnt; ++i) {
     auto out_msg_root = out_dict.lookup_ref(td::BitArray<15>{i});
     CHECK(out_msg_root.not_null());  // we have pre-checked this
     auto out_descr_cs = out_msg_dict_->lookup(out_msg_root->get_hash().as_bitslice());
@@ -5091,7 +5064,7 @@ bool ContestValidateQuery::check_message_processing_order() {
   // New rule:
   // If message was taken from dispatch queue, instead of created_lt use emitted_lt
   std::sort(msg_proc_lt_.begin(), msg_proc_lt_.end());
-  for (std::size_t i = 1; i < msg_proc_lt_.size(); i++) {
+  for (std::size_t i = 1; i < msg_proc_lt_.size(); ++i) {
     auto &a = msg_proc_lt_[i - 1], &b = msg_proc_lt_[i];
     if (std::get<0>(a) == std::get<0>(b) && std::get<2>(a) > std::get<2>(b)) {
       return reject_query(PSTRING() << "incorrect message processing order: transaction (" << std::get<1>(a) << ","
@@ -5105,7 +5078,7 @@ bool ContestValidateQuery::check_message_processing_order() {
   // Check that if messages m1 and m2 with the same source have m1.created_lt < m2.created_lt then
   // m1.emitted_lt < m2.emitted_lt.
   std::sort(msg_emitted_lt_.begin(), msg_emitted_lt_.end());
-  for (std::size_t i = 1; i < msg_emitted_lt_.size(); i++) {
+  for (std::size_t i = 1; i < msg_emitted_lt_.size(); ++i) {
     auto &a = msg_emitted_lt_[i - 1], &b = msg_emitted_lt_[i];
     if (std::get<0>(a) == std::get<0>(b) && std::get<2>(a) >= std::get<2>(b)) {
       return reject_query(PSTRING() << "incorrect deferred message processing order for sender "
@@ -5123,53 +5096,33 @@ bool ContestValidateQuery::check_message_processing_order() {
  * @returns True if the new state is valid, false otherwise.
  */
 bool ContestValidateQuery::check_new_state() {
-  // shard_state#9023afe2 global_id:int32 -> checked in unpack_next_state()
-  // shard_id:ShardIdent -> checked in unpack_next_state()
-  // seq_no:uint32 vert_seq_no:# -> checked in unpack_next_state()
-  // gen_utime:uint32 gen_lt:uint64 -> checked in unpack_next_state()
-  // min_ref_mc_seqno:uint32
-  ton::BlockSeqno my_mc_seqno = mc_seqno_;
-  ton::BlockSeqno ref_mc_seqno =
-      std::min(std::min(my_mc_seqno, min_shard_ref_mc_seqno_), ns_.processed_upto_->min_mc_seqno());
+  ton::BlockSeqno ref_mc_seqno = std::min({mc_seqno_, min_shard_ref_mc_seqno_, ns_.processed_upto_->min_mc_seqno()});
   ns_.min_ref_mc_seqno_ = ref_mc_seqno;
-  // out_msg_queue_info:^OutMsgQueueInfo
-  // -> _ out_queue:OutMsgQueue proc_info:ProcessedInfo
-  //      ihr_pending:IhrPendingInfo = OutMsgQueueInfo;
 
-  // before_split:(## 1) -> checked in unpack_next_state()
-  // accounts:^ShardAccounts -> checked in precheck_account_updates() + other
-  // ^[ overload_history:uint64 underload_history:uint64
-  ns_.overload_history_ = ((ps_.overload_history_ << 1) | extra_collated_data_.overload);
-  ns_.underload_history_ = ((ps_.underload_history_ << 1) | extra_collated_data_.underload);
+  ns_.overload_history_ = (ps_.overload_history_ << 1) | extra_collated_data_.overload;
+  ns_.underload_history_ = (ps_.underload_history_ << 1) | extra_collated_data_.underload;
 
-  if (ns_.overload_history_ & ns_.underload_history_ & 1) {
-    return reject_query(
-        "lower-order bits both set in the new state's overload_history and underload history (block cannot be both "
-        "overloaded and underloaded)");
+  if ((ns_.overload_history_ & ns_.underload_history_) & 1) {
+    return reject_query("Block cannot be both overloaded and underloaded");
   }
+
   if (after_split_ || after_merge_) {
     if ((ns_.overload_history_ | ns_.underload_history_) & ~1ULL) {
-      return reject_query(
-          "new block is immediately after split or after merge, but the old underload or overload history has not been "
-          "cleared");
+      return reject_query("Old underload/overload history not cleared after split/merge");
     }
   } else {
-    if ((ns_.overload_history_ ^ (ps_.overload_history_ << 1)) & ~1ULL) {
-      return reject_query(PSTRING() << "new overload history " << ns_.overload_history_
-                                    << " is not compatible with the old overload history " << ps_.overload_history_);
-    }
-    if ((ns_.underload_history_ ^ (ps_.underload_history_ << 1)) & ~1ULL) {
-      return reject_query(PSTRING() << "new underload history " << ns_.underload_history_
-                                    << " is not compatible with the old underload history " << ps_.underload_history_);
+    if ((ns_.overload_history_ ^ (ps_.overload_history_ << 1)) & ~1ULL ||
+        (ns_.underload_history_ ^ (ps_.underload_history_ << 1)) & ~1ULL) {
+      return reject_query("Overload/underload history mismatch");
     }
   }
-  // total_balance:CurrencyCollection
-  // total_validator_fees:CurrencyCollection
-  block::CurrencyCollection old_total_validator_fees(ps_.total_validator_fees_);
-  ns_.total_validator_fees_ = old_total_validator_fees + value_flow_.fees_collected - value_flow_.recovered;
+
+  ns_.total_validator_fees_ = ps_.total_validator_fees_ + value_flow_.fees_collected - value_flow_.recovered;
   ns_.total_balance_ = value_flow_.to_next_blk;
+  
   return true;
 }
+
 
 /**
  * Validates the value flow of a block.
@@ -5229,102 +5182,58 @@ Ref<vm::Cell> ContestValidateQuery::get_virt_state_root(td::Bits256 block_root_h
  * @returns True if the validation is successful, False otherwise.
  */
 bool ContestValidateQuery::try_validate() {
-  if (pending) {
-    return true;
-  }
+  if (pending) return true;
+
   try {
     if (!stage_) {
       LOG(INFO) << "try_validate stage 0";
-      if (!compute_prev_state()) {
-        return fatal_error(-666, "cannot compute previous state");
+
+      if (!compute_prev_state() ||
+          !request_neighbor_queues() ||
+          !unpack_prev_state() ||
+          !init_next_state() ||
+          !check_utime_lt() ||
+          !prepare_out_msg_queue_size()) {
+        return fatal_error("Stage 0 validation failed");
       }
-      if (!request_neighbor_queues()) {
-        return fatal_error("cannot request neighbor output queues");
-      }
-      if (!unpack_prev_state()) {
-        return fatal_error("cannot unpack previous state");
-      }
-      if (!init_next_state()) {
-        return fatal_error("cannot unpack previous state");
-      }
-      if (!check_utime_lt()) {
-        return reject_query("creation utime/lt of the new block is invalid");
-      }
-      if (!prepare_out_msg_queue_size()) {
-        return reject_query("cannot request out msg queue size");
-      }
+
       stage_ = 1;
-      if (pending) {
-        return true;
-      }
+      if (pending) return true;
     }
-    LOG(INFO) << "try_validate stage 1";
-    LOG(INFO) << "running automated validity checks for block candidate " << id_.to_str();
-    if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
-      return reject_query("block "s + id_.to_str() + " failed to pass automated validity checks");
+
+    LOG(INFO) << "try_validate stage 1 - running automated checks for " << id_.to_str();
+
+    if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_) ||
+        !fix_all_processed_upto() ||
+        !add_trivial_neighbor() ||
+        !unpack_block_data() ||
+        !precheck_account_transactions() ||
+        !build_new_message_queue() ||
+        !precheck_message_queue_update() ||
+        !unpack_dispatch_queue_update() ||
+        !check_in_msg_descr() ||
+        !check_out_msg_descr() ||
+        !check_dispatch_queue_update() ||
+        !check_processed_upto() ||
+        !check_in_queue() ||
+        !check_transactions() ||
+        !postcheck_account_updates() ||
+        !check_message_processing_order() ||
+        !check_new_state() ||
+        !postcheck_value_flow() ||
+        !build_state_update()) {
+      return reject_query("Stage 1 validation failed");
     }
-    if (!fix_all_processed_upto()) {
-      return fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks");
-    }
-    if (!add_trivial_neighbor()) {
-      return fatal_error("cannot add previous block as a trivial neighbor");
-    }
-    if (!unpack_block_data()) {
-      return reject_query("cannot unpack block data");
-    }
-    if (!precheck_account_transactions()) {
-      return reject_query("invalid collection of account transactions in ShardAccountBlocks");
-    }
-    if (!build_new_message_queue()) {
-      return reject_query("cannot build a new message queue");
-    }
-    if (!precheck_message_queue_update()) {
-      return reject_query("invalid OutMsgQueue update");
-    }
-    if (!unpack_dispatch_queue_update()) {
-      return reject_query("invalid DispatchQueue update");
-    }
-    if (!check_in_msg_descr()) {
-      return reject_query("invalid InMsgDescr");
-    }
-    if (!check_out_msg_descr()) {
-      return reject_query("invalid OutMsgDescr");
-    }
-    if (!check_dispatch_queue_update()) {
-      return reject_query("invalid OutMsgDescr");
-    }
-    if (!check_processed_upto()) {
-      return reject_query("invalid ProcessedInfo");
-    }
-    if (!check_in_queue()) {
-      return reject_query("cannot check inbound message queues");
-    }
-    if (!check_transactions()) {
-      return reject_query("invalid collection of account transactions in ShardAccountBlocks");
-    }
-    if (!postcheck_account_updates()) {
-      return reject_query("invalid AccountState update");
-    }
-    if (!check_message_processing_order()) {
-      return reject_query("some messages have been processed by transactions in incorrect order");
-    }
-    if (!check_new_state()) {
-      return reject_query("the header of the new shardchain state is invalid");
-    }
-    if (!postcheck_value_flow()) {
-      return reject_query("new ValueFlow is invalid");
-    }
-    if (!build_state_update()) {
-      return reject_query("cannot build state update");
-    }
-  } catch (vm::VmError& err) {
+  } catch (const vm::VmError& err) {
     return fatal_error(-666, err.get_msg());
-  } catch (vm::VmVirtError& err) {
+  } catch (const vm::VmVirtError& err) {
     return reject_query(err.get_msg());
   }
+
   finish_query();
   return true;
 }
+
 
 /**
  * Creates a new shard state and generates Merkle update. The serialized update is stored to result_state_update_.

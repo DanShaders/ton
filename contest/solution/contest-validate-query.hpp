@@ -236,7 +236,7 @@ class ContestValidateQuery : public td::actor::Actor {
     return actor_id(this);
   }
 
-  td::Result<Ref<ShardState>> fetch_block_state(BlockIdExt block_id) {
+  inline td::Result<Ref<ShardState>> fetch_block_state(BlockIdExt block_id) {
     Ref<vm::Cell> state_root = get_virt_state_root(block_id.root_hash);
     if (state_root.is_null()) {
       return td::Status::Error(PSTRING() << "cannot get hash of state root: " << block_id.to_str());
