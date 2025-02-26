@@ -23,6 +23,7 @@
 #include "td/utils/int_types.h"
 #include "td/utils/logging.h"
 #include <functional>
+#include <tbb/concurrent_vector.h>
 
 namespace vm {
 
@@ -69,13 +70,37 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
 
  private:
   struct Node {
-    bool is_loaded{false};
+    std::atomic<bool> is_loaded{false};
     bool has_mark{false};
     NodeId parent{0};
     std::array<td::uint32, CellTraits::max_refs> children{};
+
+    Node() = default;
+
+    Node(Node&& other) noexcept
+        : has_mark(other.has_mark),
+          parent(other.parent),
+          children(std::move(other.children)) {
+        // Mutexes and atomics cannot be moved, so they are default-initialized
+    }
+
+    Node& operator=(Node&& other) noexcept {
+        if (this != &other) {
+            has_mark = other.has_mark;
+            parent = other.parent;
+            children = std::move(other.children);
+            is_loaded.store(other.is_loaded.load());
+            // Mutexes and atomics cannot be moved, so they are left unchanged
+        }
+        return *this;
+    }
+
+    // Delete copy constructor and copy assignment operator
+    Node(const Node&) = delete;
+    Node& operator=(const Node&) = delete;
   };
   bool use_mark_{false};
-  std::vector<Node> nodes_{2};
+  tbb::concurrent_vector<Node> nodes_{2};
   std::function<void(const td::Ref<vm::DataCell>&)> cell_load_callback_;
 
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);

@@ -133,9 +133,11 @@ CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_i
 }
 
 CellUsageTree::NodeId CellUsageTree::create_node(NodeId parent) {
-  NodeId res = static_cast<NodeId>(nodes_.size());
-  nodes_.emplace_back();
-  nodes_.back().parent = parent;
+  Node newNode;
+  newNode.parent = parent;
+  auto it = nodes_.grow_by(1);
+  size_t res = it - nodes_.begin();
+  *it = std::move(newNode);
   return res;
 }
 

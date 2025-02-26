@@ -210,6 +210,7 @@ class ContestValidateQuery : public td::actor::Actor {
     return shard_.workchain;
   }
 
+  void handle_rejection(td::Status error);
   void finish_query();
   void abort_query(td::Status error);
   bool reject_query(std::string error, td::BufferSlice reason = {});
@@ -260,6 +261,9 @@ class ContestValidateQuery : public td::actor::Actor {
   bool check_this_shard_mc_info();
   bool init_parse();
   bool unpack_block_candidate();
+  bool unpack_block_candidate_data();
+  bool unpack_block_candidate_collated();
+  bool after_check_transactions(block::Account &account, block::gen::AccountBlock::Record acc_blk);
   bool extract_collated_data_from(Ref<vm::Cell> croot, int idx);
   bool extract_collated_data();
   bool try_validate();

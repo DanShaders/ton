@@ -21,6 +21,7 @@
 #include "vm/cells/MerkleUpdate.h"
 
 #include <sys/resource.h>
+// #include "contest/solution/solution-helper.cpp"
 
 using namespace ton;
 
@@ -197,6 +198,7 @@ class ContestGrader : public td::actor::Actor {
 
   void finish() {
     printf("%s\n", std::string(separator_length_, '=').c_str());
+    // solution::logger::LogManager::log_all();
     printf("Passed %lu/%lu tests\n", cnt_ok_, test_files_.size());
     printf("Total time (only passed valid tests): %.5f\n", total_time_);
     printf("Total CPU time (only passed valid tests): %.5f\n", total_cpu_time_);
