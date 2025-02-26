@@ -22,6 +22,7 @@
 #include <openssl/evp.h>
 #include <openssl/opensslv.h>
 
+#include "bitcoin-crypto/crypto/sha256.h"
 #include "td/utils/Slice.h"
 
 namespace digest {
@@ -75,6 +76,53 @@ class HashCtx {
   std::string extract();
 };
 
+template <>
+class HashCtx<CSHA256>{
+  CSHA256 ctx;
+  void init() {
+  }
+  void clear() {
+    ctx.Reset();
+  }
+
+ public:
+  enum { digest_bytes = 32 };
+  HashCtx() {
+    init();
+  }
+  HashCtx(const void *data, std::size_t len) {
+    init();
+    feed(data, len);
+  }
+  ~HashCtx() {
+    clear();
+  }
+  void reset() {
+    ctx.Reset();
+  }
+  void feed(const void *data, std::size_t len) {
+    ctx.Write((const unsigned char*)data, len);
+  }
+  void feed(td::Slice slice) {
+    feed(slice.data(), slice.size());
+  }
+  std::size_t extract(unsigned char buffer[digest_bytes]) {
+    ctx.Finalize(buffer);
+    return digest_bytes;
+  }
+
+  std::size_t extract(td::MutableSlice slice) {
+    return extract(slice.ubegin());
+  }
+
+  std::string extract() {
+    unsigned char buffer[digest_bytes];
+    ctx.Finalize(buffer);
+    assert(olen == digest_bytes);
+    return std::string((char *)buffer, digest_bytes);
+  }
+};
+
 template <typename H>
 void HashCtx<H>::init() {
   ctx = EVP_MD_CTX_create();
@@ -126,6 +174,7 @@ std::string HashCtx<H>::extract() {
 typedef HashCtx<OpensslEVP_SHA1> SHA1;
 typedef HashCtx<OpensslEVP_SHA256> SHA256;
 typedef HashCtx<OpensslEVP_SHA512> SHA512;
+typedef HashCtx<CSHA256> SHA256_SIMD;
 
 template <typename T>
 std::size_t hash_str(unsigned char buffer[T::digest_bytes], const void *data, std::size_t size) {

@@ -1,3 +1,4 @@
+#include "bitcoin-crypto/crypto/sha256.h"
 #include "td/utils/OptionParser.h"
 #include <fstream>
 #include "overlay/overlays.h"
@@ -225,6 +226,8 @@ class ContestGrader : public td::actor::Actor {
 
 int main(int argc, char* argv[]) {
   SET_VERBOSITY_LEVEL(verbosity_ERROR);
+
+  SHA256AutoDetect();
 
   td::actor::ActorOwn<ContestGrader> x;
   td::unique_ptr<td::LogInterface> logger_;

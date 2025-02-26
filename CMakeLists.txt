@@ -121,6 +121,9 @@ if (TON_USE_ABSEIL)
   set(ABSL_FOUND 1)
 endif()
 
+add_subdirectory(third-party/unordered_dense)
+add_subdirectory(third-party/bitcoin-crypto)
+
 #add_subdirectory(third-party/libcuckoo EXCLUDE_FROM_ALL)
 #add_subdirectory(third-party/junction EXCLUDE_FROM_ALL)
 

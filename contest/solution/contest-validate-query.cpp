@@ -979,7 +979,7 @@ bool ContestValidateQuery::compute_prev_state() {
     }
   }
   state_usage_tree_ = std::make_shared<vm::CellUsageTree>();
-  prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr());
+  prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr_persisten());
   return true;
 }
 

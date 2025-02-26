@@ -19,43 +19,99 @@
 #include "vm/cells/CellUsageTree.h"
 
 namespace vm {
+namespace details {
+// namespace fn_on_tree_traits {
+//   struct ReturnSameToFn{};
+//   struct ReturnWithOriginalPointer {};
+
+//   template <class>
+//   inline constexpr bool always_false_v = false;
+
+//   template <typename ReturnValue, typename PtrType, typename ReturnTrait = fn_on_tree_traits::ReturnSameToFn>
+//   constexpr auto return_carry(ReturnValue&& value, PtrType&& ptr) {
+//     if constexpr (std::is_same_v<ReturnTrait, fn_on_tree_traits::ReturnSameToFn>) {
+//       return std::forward<ReturnValue>(value);
+//     } else if constexpr (std::is_same_v<ReturnTrait, fn_on_tree_traits::ReturnWithOriginalPointer>) {
+//       return std::make_tuple(std::forward<ReturnValue>(value), std::forward<PtrType>(ptr));
+//     } else {
+//       static_assert(always_false_v<ReturnValue>, "unexpected trait");
+//     }
+//   }
+// }
+
+// clang 16 much slower here then clang 18
+// template <typename Functor>
+// auto fn_on_tree(const CellUsageTree::NodePtr::TreeVariant& tree_var, Functor&& fn) {
+//   if (auto weak_var = std::get_if<CellUsageTree::NodePtr::TreeWeakPtr>(&tree_var)) {
+//     auto tree = weak_var->lock();
+//     return fn(tree.get());
+//   } else if (auto ptr_var = std::get_if<CellUsageTree*>(&tree_var)) {
+//     return fn(*ptr_var);
+//   } else {
+//     return fn(nullptr);
+//   }
+// }
+
+template <typename Functor>
+auto fn_on_tree(const CellUsageTree::NodePtr::TreeVariant& tree_var, Functor&& fn) {
+  if (tree_var.is_weak()) {
+    auto tree = tree_var.weak.lock();
+    return fn(tree.get());
+  } else {
+    return fn(tree_var.ptr);
+  }
+}
+
+}  // namespace details
 //
 // CellUsageTree::NodePtr
 //
-bool CellUsageTree::NodePtr::on_load(const td::Ref<vm::DataCell>& cell) const {
-  auto tree = tree_weak_.lock();
-  if (!tree) {
-    return false;
+bool CellUsageTree::NodePtr::empty() const {
+  if (node_id_ == 0) {
+    return true;
   }
-  tree->on_load(node_id_, cell);
-  return true;
+
+  return details::fn_on_tree(trees_variant_, [&](CellUsageTree* tree) { return tree == nullptr; });
+}
+bool CellUsageTree::NodePtr::on_load(const td::Ref<vm::DataCell>& cell) const {
+  return details::fn_on_tree(trees_variant_, [&](CellUsageTree* tree) {
+    if (tree == nullptr) {
+      return false;
+    }
+    tree->on_load(node_id_, cell);
+    return true;
+  });
 }
 
 CellUsageTree::NodePtr CellUsageTree::NodePtr::create_child(unsigned ref_id) const {
-  auto tree = tree_weak_.lock();
-  if (!tree) {
-    return {};
+  if (trees_variant_.is_weak()) {
+    auto tree = trees_variant_.weak.lock();
+    if (!tree) {
+      return {};
+    }
+    return {trees_variant_.weak, tree->create_child(node_id_, ref_id)};
+  } else {
+    if (!trees_variant_.ptr) {
+      return {};
+    }
+    return {trees_variant_.ptr, trees_variant_.ptr->create_child(node_id_, ref_id)};
   }
-  return {tree_weak_, tree->create_child(node_id_, ref_id)};
 }
 
 bool CellUsageTree::NodePtr::is_from_tree(const CellUsageTree* master_tree) const {
   DCHECK(master_tree);
-  auto tree = tree_weak_.lock();
-  if (tree.get() != master_tree) {
-    return false;
-  }
-  return true;
+  return details::fn_on_tree(trees_variant_, [&](CellUsageTree* tree) { return tree == master_tree; });
 }
 
 bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
   DCHECK(master_tree);
-  auto tree = tree_weak_.lock();
-  if (tree.get() != master_tree) {
-    return false;
-  }
-  master_tree->mark_path(node_id_);
-  return true;
+  return details::fn_on_tree(trees_variant_, [&](CellUsageTree* tree) {
+    if (tree != master_tree) {
+      return false;
+    }
+    master_tree->mark_path(node_id_);
+    return true;
+  });
 }
 
 //
@@ -63,6 +119,10 @@ bool CellUsageTree::NodePtr::mark_path(CellUsageTree* master_tree) const {
 //
 CellUsageTree::NodePtr CellUsageTree::root_ptr() {
   return {shared_from_this(), 1};
+}
+
+CellUsageTree::NodePtr CellUsageTree::root_ptr_persisten() {
+  return {this, 1};
 }
 
 CellUsageTree::NodeId CellUsageTree::root_id() const {

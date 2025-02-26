@@ -24,6 +24,8 @@
 
 #include "vm/cells/CellWithStorage.h"
 
+#include <bitcoin-crypto/crypto/sha256.h>
+
 namespace vm {
 thread_local bool DataCell::use_arena = false;
 
@@ -268,8 +270,8 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     tmp[0] = info.d1(level_mask.apply(level_i));
     tmp[1] = info.d2();
 
-    static TD_THREAD_LOCAL digest::SHA256* hasher;
-    td::init_thread_local<digest::SHA256>(hasher);
+    static TD_THREAD_LOCAL digest::SHA256_SIMD* hasher;
+    td::init_thread_local<digest::SHA256_SIMD>(hasher);
     hasher->reset();
 
     hasher->feed(td::Slice(tmp, 2));

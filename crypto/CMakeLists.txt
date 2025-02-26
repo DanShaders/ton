@@ -299,6 +299,7 @@ if (NOT WIN32)
   target_link_libraries(ton_crypto_core PUBLIC dl z)
 endif()
 target_include_directories(ton_crypto_core SYSTEM PUBLIC $<BUILD_INTERFACE:${OPENSSL_INCLUDE_DIR}>)
+target_link_libraries(ton_crypto_core PUBLIC unordered_dense bitcoincrypto)
 
 add_library(ton_crypto STATIC ${TON_CRYPTO_SOURCE})
 target_include_directories(ton_crypto PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>)

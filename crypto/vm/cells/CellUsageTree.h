@@ -23,6 +23,7 @@
 #include "td/utils/int_types.h"
 #include "td/utils/logging.h"
 #include <functional>
+#include <variant>
 
 namespace vm {
 
@@ -36,23 +37,114 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
    public:
     NodePtr() = default;
     NodePtr(std::weak_ptr<CellUsageTree> tree_weak, NodeId node_id)
-        : tree_weak_(std::move(tree_weak)), node_id_(node_id) {
+        : trees_variant_(std::move(tree_weak)), node_id_(node_id) {
     }
-    bool empty() const {
-      return node_id_ == 0 || tree_weak_.expired();
+    // we guarantee that tree outlives its nodes
+    NodePtr(CellUsageTree* tree, NodeId node_id) : trees_variant_(std::move(tree)), node_id_(node_id) {
     }
-
+    bool empty() const;
     bool on_load(const td::Ref<vm::DataCell>& cell) const;
     NodePtr create_child(unsigned ref_id) const;
     bool mark_path(CellUsageTree* master_tree) const;
     bool is_from_tree(const CellUsageTree* master_tree) const;
 
+   public:
+    using TreeWeakPtr = std::weak_ptr<CellUsageTree>;
+    // using TreeVariant = std::variant<TreeWeakPtr, CellUsageTree*>;
+    struct TreeVariant {
+      TreeVariant() noexcept : tag(Tag::PLAIN), ptr(nullptr) {
+      }
+      explicit TreeVariant(CellUsageTree* ptr) noexcept : tag(Tag::PLAIN), ptr(ptr) {
+      }
+      explicit TreeVariant(TreeWeakPtr&& weak) noexcept : tag(Tag::PLAIN), weak(std::move(weak)) {
+      }
+
+      TreeVariant(TreeVariant&& other) noexcept {
+        tag = other.tag;
+        switch (tag) {
+          case Tag::PLAIN: {
+            ptr = other.ptr;
+            break;
+          }
+          case Tag::WEAK: {
+            weak = std::move(other.weak);
+            break;
+          }
+        }
+      }
+      TreeVariant& operator=(TreeVariant&& other) noexcept {
+        tag = other.tag;
+        switch (tag) {
+          case Tag::PLAIN: {
+            ptr = other.ptr;
+            break;
+          }
+          case Tag::WEAK: {
+            weak = std::move(other.weak);
+            break;
+          }
+        }
+        return *this;
+      }
+
+      TreeVariant(const TreeVariant& other) noexcept {
+        tag = other.tag;
+        switch (tag) {
+          case Tag::PLAIN: {
+            ptr = other.ptr;
+            break;
+          }
+          case Tag::WEAK: {
+            weak = other.weak;
+            break;
+          }
+        }
+      }
+      TreeVariant& operator=(const TreeVariant& other) noexcept {
+        tag = other.tag;
+        switch (tag) {
+          case Tag::PLAIN: {
+            ptr = other.ptr;
+            break;
+          }
+          case Tag::WEAK: {
+            weak = other.weak;
+            break;
+          }
+        }
+        return *this;
+      }
+
+      ~TreeVariant() {
+        switch (tag) {
+          case Tag::PLAIN:
+            break;
+          case Tag::WEAK: {
+            weak.reset();
+            break;
+          }
+        }
+      }
+
+      enum class Tag : td::uint8 { PLAIN, WEAK } tag;
+      union {
+        CellUsageTree* ptr;
+        TreeWeakPtr weak;
+      };
+
+      bool is_weak() const {
+        return tag == Tag::WEAK;
+      }
+    };
+
    private:
-    std::weak_ptr<CellUsageTree> tree_weak_;
+    TreeVariant trees_variant_;
     NodeId node_id_{0};
   };
 
   NodePtr root_ptr();
+  // DANGEROUS! tree must outlive its nodes
+  NodePtr root_ptr_persisten();
   NodeId root_id() const;
   bool is_loaded(NodeId node_id) const;
   bool has_mark(NodeId node_id) const;

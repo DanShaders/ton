@@ -19,6 +19,7 @@
 #pragma once
 #include "td/utils/CancellationToken.h"
 
+#include <ankerl/unordered_dense.h>
 #include <set>
 #include <map>
 #include "vm/db/DynamicBagOfCellsDb.h"
@@ -117,7 +118,7 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+  ankerl::unordered_dense::map<vm::CellHash, CellInfo> seen;
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)
