@@ -31,6 +31,10 @@
 #include "td/utils/Timer.h"
 #include "td/utils/port/FileFd.h"
 
+#undef narrow_cast
+#include <boost/unordered/unordered_flat_set.hpp>
+#define narrow_cast detail::NarrowCast(__FILE__, __LINE__).cast
+
 namespace vm {
 using td::Ref;
 
@@ -113,19 +117,17 @@ class NewCellStorageStat {
 struct CellStorageStat {
   unsigned long long cells;
   unsigned long long bits;
+
   unsigned long long public_cells;
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
-  CellStorageStat() : cells(0), bits(0), public_cells(0) {
-  }
-  explicit CellStorageStat(unsigned long long limit_cells)
-      : cells(0), bits(0), public_cells(0), limit_cells(limit_cells) {
-  }
-  void clear_seen() {
-    seen.clear();
-  }
+
+  boost::unordered::unordered_flat_set<vm::Cell::Hash, std::hash<vm::CellHash>> seen;
+  ~CellStorageStat();
+  CellStorageStat();
+  explicit CellStorageStat(unsigned long long limit_cells);
+  void clear_seen();
   void clear() {
     cells = bits = public_cells = 0;
     clear_limit();

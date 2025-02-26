@@ -16,6 +16,7 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
+
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
@@ -1142,20 +1143,42 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlic
   return res;
 }
 
+void CellStorageStat::clear_seen() {
+    seen.clear();
+  }
+
 td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::Cell> cell, bool kill_dup,
                                                                         unsigned skip_count_root) {
   if (cell.is_null()) {
     return td::Status::Error("cell is null");
   }
   if (kill_dup) {
-    auto ins = seen.emplace(cell->get_hash(), CellInfo{});
-    if (!ins.second) {
-      return ins.first->second;
+    constexpr const CellInfo empty{};
+    auto const& hash = cell->get_hash();
+    auto ins_ = seen.emplace(hash);
+    if (!ins_.second) { // if it's already presented, break the chain
+      return empty;
     }
+
+    // auto ins = seen.emplace(hash);
+    // if (!ins.second) { // if it's already presented, break the chain
+    //   return empty;
+    // }
   }
   vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
   return add_used_storage(std::move(cs), kill_dup, skip_count_root);
 }
+
+  CellStorageStat::~CellStorageStat() {}
+
+  CellStorageStat::CellStorageStat() : cells(0), bits(0), public_cells(0) {
+    seen.reserve(60);
+  }
+
+  CellStorageStat::CellStorageStat(unsigned long long limit_cells)
+      : cells(0), bits(0), public_cells(0), limit_cells(limit_cells) {
+        seen.reserve(60);
+  }
 
 void NewCellStorageStat::add_cell(Ref<Cell> cell) {
   dfs(std::move(cell), true, false);
