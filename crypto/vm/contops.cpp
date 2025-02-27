@@ -16,7 +16,14 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
+
 #include <functional>
+#include <algorithm>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "vm/contops.h"
 #include "vm/log.h"
 #include "vm/opctable.h"
@@ -25,6 +32,14 @@
 #include "vm/cellops.h"
 #include "vm/excno.hpp"
 #include "vm/vm.h"
+#include "common/bigint.hpp"
+#include "common/refcnt.hpp"
+#include "common/refint.h"
+#include "utils/Slice-decl.h"
+#include "utils/logging.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellSlice.h"
+#include "vm/vmstate.h"
 
 using namespace std::literals::string_literals;
 

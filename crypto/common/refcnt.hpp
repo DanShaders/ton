@@ -22,9 +22,12 @@
 #include <utility>
 #include <atomic>
 #include <iostream>
+#include <type_traits>
 
-#include "td/utils/StringBuilder.h"
-#include "td/utils/logging.h"
+#include "utils/StringBuilder.h"
+#include "utils/logging.h"
+#include "utils/check.h"
+#include "utils/int_types.h"
 
 namespace td {
 

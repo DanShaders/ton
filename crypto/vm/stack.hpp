@@ -25,6 +25,9 @@
 #include <iostream>
 #include <sstream>
 #include <memory>
+#include <functional>
+#include <utility>
+
 #include "common/refcnt.hpp"
 #include "common/bigint.hpp"
 #include "common/refint.h"
@@ -32,10 +35,11 @@
 #include "vm/cells.h"
 #include "vm/cellslice.h"
 #include "vm/excno.hpp"
-
-#include "td/utils/Span.h"
-
-#include <functional>
+#include "utils/Span.h"
+#include "utils/Slice-decl.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/CellSlice.h"
 
 namespace td {
 extern template class td::Cnt<std::string>;

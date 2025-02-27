@@ -1,3 +1,0 @@
-(int, int) get_stake_parameters() {
-    return (1000, 100);
-}

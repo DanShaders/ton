@@ -18,8 +18,7 @@
 */
 #include "vm/cells/CellTraits.h"
 
-#include "td/utils/StringBuilder.h"
-#include "td/utils/Slice.h"
+#include "utils/StringBuilder.h"
 
 namespace vm {
 td::StringBuilder& operator<<(td::StringBuilder& sb, CellTraits::SpecialType special_type) {

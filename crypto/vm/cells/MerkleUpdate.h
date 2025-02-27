@@ -17,15 +17,19 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+#include <utility>
+
 #include "vm/cells/Cell.h"
 #include "vm/cells/CellSlice.h"
 #include "vm/cells/CellBuilder.h"
-
-#include "td/utils/Status.h"
-
-#include <utility>
+#include "utils/Status.h"
+#include "common/refcnt.hpp"
+#include "utils/int_types.h"
+#include "utils/port/platform.h"
 
 namespace vm {
+class CellUsageTree;
+
 class MerkleUpdate {
  public:
   // from + update == to
@@ -37,7 +41,6 @@ class MerkleUpdate {
   // check if update is valid
   static TD_WARN_UNUSED_RESULT td::Status validate(Ref<Cell> update);
   // check that hash in from is same as hash stored in update. Do not validate update
-  static TD_WARN_UNUSED_RESULT td::Status may_apply(Ref<Cell> from, Ref<Cell> update);
 
   static Ref<Cell> apply_raw(Ref<Cell> from, Ref<Cell> update_from, Ref<Cell> update_to, td::uint32 from_level,
                              td::uint32 to_level);

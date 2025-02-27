@@ -17,6 +17,10 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <vector>
 #include <string>
 #include <algorithm>
@@ -25,11 +29,15 @@
 #include <ostream>
 #include <sstream>
 #include <cassert>
-#include "common/bitstring.h"
+#include <cstdio>
+#include <cstdlib>
 
-#include "td/utils/bits.h"
-#include "td/utils/Span.h"
-#include "td/utils/uint128.h"
+#include "common/bitstring.h"
+#include "utils/bits.h"
+#include "utils/Span.h"
+#include "utils/uint128.h"
+#include "utils/check.h"
+#include "utils/int_types.h"
 
 /**************************************
  *

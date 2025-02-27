@@ -1,0 +1,4 @@
+--- third-party/libraptorq
++++ third-party/libraptorq
+@@ -1 +0,0 @@
+-Subproject commit 14baff5994b6faf7739a5f058481797365b57fb1

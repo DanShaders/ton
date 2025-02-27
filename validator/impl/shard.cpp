@@ -17,16 +17,31 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "shard.hpp"
+
+#include <algorithm>
+#include <string>
+#include <utility>
+
 #include "message-queue.hpp"
-#include "validator-set.hpp"
 #include "vm/boc.h"
-#include "td/db/utils/BlobView.h"
+#include "db/BlobView.h"
 #include "vm/db/StaticBagOfCellsDb.h"
-#include "vm/cellslice.h"
 #include "vm/cells/MerkleUpdate.h"
 #include "block/block-parse.h"
 #include "block/block-auto.h"
-#include "td/utils/filesystem.h"
+#include "common/bitstring.h"
+#include "interfaces/message-queue.h"
+#include "mc-config.h"
+#include "utils/Slice-decl.h"
+#include "utils/Slice.h"
+#include "utils/ThreadSafeCounter.h"
+#include "utils/Timer.h"
+#include "utils/check.h"
+#include "utils/logging.h"
+#include "utils/port/FileFd.h"
+#include "tl/tlblib.hpp"
+#include "ton/ton-shard.h"
+#include "vm/cells/CellSlice.h"
 
 #define LAZY_STATE_DESERIALIZE 1
 
@@ -178,59 +193,6 @@ td::Result<Ref<MessageQueue>> ShardStateQ::message_queue() const {
   return Ref<MessageQueue>(Ref<MessageQueueQ>{true, blkid, std::move(out_queue_info)});
 }
 
-td::Status ShardStateQ::apply_block(BlockIdExt newid, td::Ref<BlockData> block) {
-  if (block.is_null()) {
-    return td::Status::Error(-666, "the block to be applied to a previous state is absent");
-  }
-  Ref<vm::Cell> block_root = block->root_cell();
-  if (root.is_null() || block_root.is_null()) {
-    return td::Status::Error(-666, "cannot apply an (empty) block to an (empty) state");
-  }
-  if (newid != block->block_id()) {
-    return td::Status::Error(-666, "block id mismatch in apply_block()");
-  }
-  RootHash blk_rhash{block_root->get_hash().bits()};
-  if (blk_rhash != newid.root_hash) {
-    return td::Status::Error(-666, "cannot apply a block because its root hash differs from expected");
-  }
-  if (before_split_ != fake_split_) {
-    return td::Status::Error(
-        -666, "cannot apply a block because previous state has before_split set, but it has not been split virtually");
-  }
-  vm::CellSlice cs{vm::NoVmOrd{}, block_root};
-  if (cs.prefetch_ulong(32) != 0x11ef55aa || !cs.have_refs(4)) {
-    return td::Status::Error(-666, "invalid shardchain block header for block "s + block->block_id().id.to_str());
-  }
-  Ref<vm::Cell> update = cs.prefetch_ref(2);  // Merkle update
-  auto next_state_root = vm::MerkleUpdate::apply(root, update);
-  if (next_state_root.is_null()) {
-    return td::Status::Error("cannot apply Merkle update from block "s + block->block_id().id.to_str() +
-                             " to previous state");
-  }
-  blkid = block->block_id();
-  // boc.reset();  // keep old lazy static bag of cells in case undeserialized branches are inherited by the current state
-  data.clear();
-  root = std::move(next_state_root);
-  rhash = root->get_hash().bits();
-  block::gen::ShardStateUnsplit::Record info;
-  if (!tlb::unpack_cell(root, info)) {
-    return td::Status::Error(
-        -668, "newly-computed shardchain state for block "s + blkid.id.to_str() + " does not contain a valid header");
-  }
-  lt = info.gen_lt;
-  utime = info.gen_utime;
-  before_split_ = info.before_split;
-  fake_split_ = fake_merge_ = false;
-  block::ShardId id{info.shard_id};
-  ton::BlockId hdr_id{ton::ShardIdFull(id), info.seq_no};
-  if (!id.is_valid() || get_shard() != ton::ShardIdFull(id) || get_seqno() != info.seq_no) {
-    return td::Status::Error(-668, "header of newly-computed shardchain state for block "s + blkid.id.to_str() +
-                                       " contains a BlockId " + hdr_id.to_str() +
-                                       " different from the one originally required");
-  }
-  return td::Status::OK();
-}
-
 td::Result<td::Ref<ShardState>> ShardStateQ::merge_with(const ShardState& with) const {
   const ShardStateQ& other = dynamic_cast<const ShardStateQ&>(with);
   if (fake_split_ || fake_merge_ || other.fake_split_ || other.fake_merge_) {
@@ -267,76 +229,6 @@ td::Result<td::Ref<ShardState>> ShardStateQ::merge_with(const ShardState& with) 
   ms.bocs_ = bocs_;
   ms.bocs_.insert(ms.bocs_.end(), other.bocs_.begin(), other.bocs_.end());
   return std::move(m);
-}
-
-td::Result<std::pair<td::Ref<ShardState>, td::Ref<ShardState>>> ShardStateQ::split() const {
-  if (fake_split_ || fake_merge_) {
-    return td::Status::Error(-666, "cannot split blockchain state which has been split or merged immediately before");
-  }
-  if (!before_split_) {
-    return td::Status::Error(-666, "cannot split blockchain state which does not have before_split flag set");
-  }
-  if (blkid.is_masterchain()) {
-    return td::Status::Error(-666, "cannot split masterchain state");
-  }
-  auto l = Ref<ShardStateQ>{true, *this};
-  auto r = Ref<ShardStateQ>{true, *this};
-  auto& ls = l.unique_write();
-  auto& rs = r.unique_write();
-  ls.fake_split_ = rs.fake_split_ = true;
-  ls.blkid.id.shard = ton::shard_child(blkid.id.shard, true);
-  rs.blkid.id.shard = ton::shard_child(blkid.id.shard, false);
-  return std::make_pair<Ref<ShardState>, Ref<ShardState>>(std::move(l), std::move(r));
-}
-
-td::Result<td::BufferSlice> ShardStateQ::serialize() const {
-  TD_PERF_COUNTER(serialize_state);
-  td::PerfWarningTimer perf_timer_{"serializestate", 0.1};
-  if (!data.is_null()) {
-    return data.clone();
-  }
-  if (root.is_null()) {
-    return td::Status::Error(-666, "cannot serialize an uninitialized state");
-  }
-  vm::BagOfCells new_boc;
-  new_boc.set_root(root);
-  auto res = new_boc.import_cells();
-  if (res.is_error()) {
-    return res.move_as_error();
-  }
-  auto st_res = new_boc.serialize_to_slice(31);
-  if (st_res.is_error()) {
-    LOG(ERROR) << "cannot serialize a shardchain state";
-    return st_res.move_as_error();
-  }
-  // data = st_res.move_as_ok();
-  // return data.clone();
-  return st_res.move_as_ok();
-}
-
-td::Status ShardStateQ::serialize_to_file(td::FileFd& fd) const {
-  TD_PERF_COUNTER(serialize_state_to_file);
-  td::PerfWarningTimer perf_timer_{"serializestate", 0.1};
-  if (!data.is_null()) {
-    auto cur_data = data.clone();
-    while (cur_data.size() > 0) {
-      TRY_RESULT(s, fd.write(cur_data.as_slice()));
-      cur_data.confirm_read(s);
-    }
-    return td::Status::OK();
-  }
-  if (root.is_null()) {
-    return td::Status::Error(-666, "cannot serialize an uninitialized state");
-  }
-  vm::BagOfCells new_boc;
-  new_boc.set_root(root);
-  TRY_STATUS(new_boc.import_cells());
-  auto st_res = new_boc.serialize_to_file(fd, 31);
-  if (st_res.is_error()) {
-    LOG(ERROR) << "cannot serialize a shardchain state";
-    return st_res.move_as_error();
-  }
-  return td::Status::OK();
 }
 
 MasterchainStateQ::MasterchainStateQ(const BlockIdExt& _id, td::BufferSlice _data)
@@ -403,116 +295,11 @@ td::Status MasterchainStateQ::mc_reinit() {
   return td::Status::OK();
 }
 
-td::Status MasterchainStateQ::apply_block(BlockIdExt id, td::Ref<BlockData> block) {
-  auto err = ShardStateQ::apply_block(id, block);
-  if (err.is_error()) {
-    return err;
-  }
-  config_.reset();
-  err = mc_reinit();
-  if (err.is_error()) {
-    LOG(ERROR) << "cannot extract masterchain-specific state data from newly-computed state for block "
-               << id.id.to_str() << " : " << err.to_string();
-  }
-  return err;
-}
-
 td::Status MasterchainStateQ::prepare() {
   if (config_) {
     return td::Status::OK();
   }
   return mc_reinit();
-}
-
-Ref<ValidatorSet> MasterchainStateQ::compute_validator_set(ShardIdFull shard, const block::ValidatorSet& vset,
-                                                           UnixTime time, CatchainSeqno ccseqno) const {
-  if (!config_) {
-    return {};
-  }
-  LOG(DEBUG) << "in compute_validator_set() for " << shard.to_str();
-  auto nodes = config_->compute_validator_set_cc(shard, vset, time, &ccseqno);
-  if (nodes.empty()) {
-    return {};
-  }
-  return Ref<ValidatorSetQ>{true, ccseqno, shard, std::move(nodes)};
-}
-
-Ref<ValidatorSet> MasterchainStateQ::get_validator_set(ShardIdFull shard) const {
-  if (!config_ || !cur_validators_) {
-    LOG(ERROR) << "MasterchainStateQ::get_validator_set() : no config or no cur_validators";
-    return {};
-  }
-  return compute_validator_set(shard, *cur_validators_, config_->utime, 0);
-}
-
-Ref<ValidatorSet> MasterchainStateQ::get_validator_set(ShardIdFull shard, UnixTime ts, CatchainSeqno cc_seqno) const {
-  if (!config_ || !cur_validators_) {
-    LOG(ERROR) << "MasterchainStateQ::get_validator_set() : no config or no cur_validators";
-    return {};
-  }
-  auto nodes = config_->compute_validator_set(shard, *cur_validators_, ts, cc_seqno);
-  if (nodes.empty()) {
-    return {};
-  }
-  return Ref<ValidatorSetQ>{true, cc_seqno, shard, std::move(nodes)};
-}
-
-// next = -1 -> prev, next = 0 -> cur
-Ref<ValidatorSet> MasterchainStateQ::get_total_validator_set(int next) const {
-  if (!config_) {
-    LOG(ERROR) << "MasterchainStateQ::get_total_validator_set() : no config";
-    return {};
-  }
-  auto nodes = config_->compute_total_validator_set(next);
-  if (nodes.empty()) {
-    return {};
-  }
-  return Ref<ValidatorSetQ>{true, 0, ton::ShardIdFull{}, std::move(nodes)};
-}
-
-Ref<ValidatorSet> MasterchainStateQ::get_next_validator_set(ShardIdFull shard) const {
-  if (!config_ || !cur_validators_) {
-    LOG(ERROR) << "MasterchainStateQ::get_next_validator_set() : no config or no cur_validators";
-    return {};
-  }
-  if (!next_validators_) {
-    return compute_validator_set(shard, *cur_validators_, config_->utime, 1);
-  }
-  bool is_mc = shard.is_masterchain();
-  auto ccv_cfg = config_->get_catchain_validators_config();
-  unsigned cc_lifetime = is_mc ? ccv_cfg.mc_cc_lifetime : ccv_cfg.shard_cc_lifetime;
-  if (next_validators_->utime_since > (config_->utime / cc_lifetime + 1) * cc_lifetime) {
-    return compute_validator_set(shard, *cur_validators_, config_->utime, 1);
-  } else {
-    return compute_validator_set(shard, *next_validators_, config_->utime, 1);
-  }
-}
-
-std::vector<Ref<McShardHash>> MasterchainStateQ::get_shards() const {
-  if (!config_) {
-    return {};
-  }
-  std::vector<ton::BlockId> shard_ids = config_->get_shard_hash_ids(true);
-  std::vector<Ref<McShardHash>> v;
-  for (const auto& b : shard_ids) {
-    v.emplace_back(config_->get_shard_hash(ton::ShardIdFull(b)));
-    CHECK(v.back().not_null());
-  }
-  return v;
-}
-
-td::Ref<McShardHash> MasterchainStateQ::get_shard_from_config(ShardIdFull shard) const {
-  if (!config_) {
-    return {};
-  }
-  return config_->get_shard_hash(shard);
-}
-
-bool MasterchainStateQ::rotated_all_shards() const {
-  if (!config_) {
-    return false;
-  }
-  return config_->rotated_all_shards();
 }
 
 bool MasterchainStateQ::get_old_mc_block_id(ton::BlockSeqno seqno, ton::BlockIdExt& blkid,

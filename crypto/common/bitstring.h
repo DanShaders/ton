@@ -17,13 +17,21 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
-#include "common/refcnt.hpp"
+
+
 #include <utility>
 #include <array>
 #include <string>
 #include <ostream>
 #include <cstdlib>
-#include "td/utils/bits.h"
+#include <algorithm>
+#include <cstring>
+#include <type_traits>
+
+#include "refcnt.hpp"
+#include "utils/bits.h"
+#include "utils/Slice-decl.h"
+#include "utils/Slice.h"
 
 namespace td {
 template <class Pt>

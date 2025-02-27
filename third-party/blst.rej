@@ -1,0 +1,5 @@
+--- third-party/blst
++++ third-party/blst
+@@ -1 +1 @@
+-Subproject commit 3dd0f804b1819e5d03fb22ca2e6fac105932043a
++Subproject commit e3a28740c0094799b20bfb1707d96a2417421c17

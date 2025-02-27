@@ -16,14 +16,26 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
+
+#include <functional>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "vm/log.h"
-#include "vm/stackops.h"
 #include "vm/opctable.h"
 #include "vm/stack.hpp"
 #include "vm/excno.hpp"
 #include "vm/vm.h"
+#include "common/bigint.hpp"
+#include "common/refcnt.hpp"
+#include "common/refint.h"
+#include "utils/Slice-decl.h"
+#include "utils/logging.h"
 
 namespace vm {
+class CellSlice;
 
 int exec_push_null(VmState* st) {
   VM_LOG(st) << "execute PUSHNULL";

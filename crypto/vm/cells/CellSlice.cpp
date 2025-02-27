@@ -17,9 +17,29 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "vm/cells/CellSlice.h"
+
+
+#include <stdio.h>
+#include <assert.h>
+#include <cstdio>
+#include <sstream>
+#include <string>
+#include <utility>
+
 #include "vm/excno.hpp"
-#include "td/utils/bits.h"
-#include "td/utils/misc.h"
+#include "utils/bits.h"
+#include "utils/misc.h"
+#include "common/bigint.hpp"
+#include "utils/Slice.h"
+#include "utils/Status.h"
+#include "utils/StringBuilder.h"
+#include "utils/as.h"
+#include "utils/check.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/CellTraits.h"
+#include "vm/cells/LevelMask.h"
+#include "vm/cells/UsageCell.h"
+#include "vm/vmstate.h"
 
 namespace vm {
 

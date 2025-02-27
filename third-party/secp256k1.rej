@@ -1,0 +1,5 @@
+--- third-party/secp256k1
++++ third-party/secp256k1
+@@ -1 +1 @@
+-Subproject commit acf5c55ae6a94e5ca847e07def40427547876101
++Subproject commit 6b8726975cd1f8e65e639dbc29a478ebe3b0bdad

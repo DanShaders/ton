@@ -17,79 +17,32 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "vm/cells/MerkleUpdate.h"
-#include "vm/cells/MerkleProof.h"
 
-#include "td/utils/HashMap.h"
-#include "td/utils/HashSet.h"
+#include <absl/container/flat_hash_map.h>
+#include <absl/hash/hash.h>
+#include <stddef.h>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <tuple>
+
+#include "vm/cells/MerkleProof.h"
+#include "utils/HashMap.h"
+#include "utils/HashSet.h"
+#include "utils/Slice-decl.h"
+#include "utils/check.h"
+#include "utils/logging.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/CellHash.h"
+#include "vm/cells/CellSlice.h"
+#include "vm/cells/CellTraits.h"
+#include "vm/cells/CellUsageTree.h"
+#include "vm/cells/DataCell.h"
+#include "vm/cells/LevelMask.h"
 
 namespace vm {
 namespace detail {
-class MerkleUpdateApply {
- public:
-  Ref<Cell> apply(Ref<Cell> from, Ref<Cell> update_from, Ref<Cell> update_to, td::uint32 from_level,
-                  td::uint32 to_level) {
-    if (from_level != from->get_level()) {
-      return {};
-    }
-    dfs_both(from, update_from, from_level);
-    return dfs(update_to, to_level);
-  }
-
- private:
-  using Key = std::pair<Cell::Hash, int>;
-  td::HashMap<Cell::Hash, Ref<Cell>> known_cells_;
-  td::HashMap<Key, Ref<Cell>> ready_cells_;
-
-  void dfs_both(Ref<Cell> original, Ref<Cell> update_from, int merkle_depth) {
-    CellSlice cs_update_from(NoVm(), update_from);
-    known_cells_.emplace(original->get_hash(merkle_depth), original);
-    if (cs_update_from.special_type() == Cell::SpecialType::PrunnedBranch) {
-      return;
-    }
-    int child_merkle_depth = cs_update_from.child_merkle_depth(merkle_depth);
-
-    CellSlice cs_original(NoVm(), original);
-    for (unsigned i = 0; i < cs_original.size_refs(); i++) {
-      dfs_both(cs_original.prefetch_ref(i), cs_update_from.prefetch_ref(i), child_merkle_depth);
-    }
-  }
-
-  Ref<Cell> dfs(Ref<Cell> cell, int merkle_depth) {
-    CellSlice cs(NoVm(), cell);
-    if (cs.special_type() == Cell::SpecialType::PrunnedBranch) {
-      if ((int)cell->get_level() == merkle_depth + 1) {
-        auto it = known_cells_.find(cell->get_hash(merkle_depth));
-        if (it != known_cells_.end()) {
-          return it->second;
-        }
-        return {};
-      }
-      return cell;
-    }
-    Key key{cell->get_hash(), merkle_depth};
-    {
-      auto it = ready_cells_.find(key);
-      if (it != ready_cells_.end()) {
-        return it->second;
-      }
-    }
-
-    int child_merkle_depth = cs.child_merkle_depth(merkle_depth);
-
-    CellBuilder cb;
-    cb.store_bits(cs.fetch_bits(cs.size()));
-    for (unsigned i = 0; i < cs.size_refs(); i++) {
-      auto ref = dfs(cs.prefetch_ref(i), child_merkle_depth);
-      if (ref.is_null()) {
-        return {};
-      }
-      cb.store_ref(std::move(ref));
-    }
-    auto res = cb.finalize(cs.is_special());
-    ready_cells_.emplace(key, res);
-    return res;
-  }
-};
 
 class MerkleUpdateValidator {
  public:
@@ -142,44 +95,6 @@ class MerkleUpdateValidator {
   }
 };
 }  // namespace detail
-
-td::Status MerkleUpdate::may_apply(Ref<Cell> from, Ref<Cell> update) {
-  if (update->get_level() != 0 || from->get_level() != 0) {
-    return td::Status::Error("Level of update of from is not zero");
-  }
-  CellSlice cs(NoVm(), std::move(update));
-  if (cs.special_type() != Cell::SpecialType::MerkleUpdate) {
-    return td::Status::Error("Update cell is not a MerkeUpdate");
-  }
-  auto update_from = cs.fetch_ref();
-  if (from->get_hash(0) != update_from->get_hash(0)) {
-    return td::Status::Error("Hash mismatch");
-  }
-  return td::Status::OK();
-}
-
-Ref<Cell> MerkleUpdate::apply(Ref<Cell> from, Ref<Cell> update) {
-  if (update->get_level() != 0 || from->get_level() != 0) {
-    return {};
-  }
-  CellSlice cs(NoVm(), std::move(update));
-  if (cs.special_type() != Cell::SpecialType::MerkleUpdate) {
-    return {};
-  }
-  auto update_from = cs.fetch_ref();
-  auto update_to = cs.fetch_ref();
-  return apply_raw(std::move(from), std::move(update_from), std::move(update_to), 0, 0);
-}
-
-Ref<Cell> MerkleUpdate::apply_raw(Ref<Cell> from, Ref<Cell> update_from, Ref<Cell> update_to, td::uint32 from_level,
-                                  td::uint32 to_level) {
-  if (from->get_hash(from_level) != update_from->get_hash(from_level)) {
-    LOG(DEBUG) << "invalid Merkle update: expected old value hash = " << update_from->get_hash(from_level).to_hex()
-               << ", applied to value with hash = " << from->get_hash(from_level).to_hex();
-    return {};
-  }
-  return detail::MerkleUpdateApply().apply(from, std::move(update_from), std::move(update_to), from_level, to_level);
-}
 
 std::pair<Ref<Cell>, Ref<Cell>> MerkleUpdate::generate_raw(Ref<Cell> from, Ref<Cell> to, CellUsageTree *usage_tree) {
   // create Merkle update cell->new_cell
@@ -242,18 +157,6 @@ class MerkleCombine {
       return td::Status::Error("Impossible to combine merkle updates");
     }
 
-    auto log = [](td::Slice name, auto cell) {
-      CellSlice cs(NoVm(), cell);
-      LOG(ERROR) << name << " " << cell->get_level();
-      cs.print_rec(std::cerr);
-    };
-    if (0) {
-      log("A", A_);
-      log("B", B_);
-      log("C", C_);
-      log("D", D_);
-    }
-
     // We have four bags of cells. A, B, C and D.
     // X = Virtualize(A), A is subtree (merkle proof) of X
     // Y = Virtualize(B) = Virtualize(C), B and C are  subrees of Y
@@ -303,9 +206,6 @@ class MerkleCombine {
 
     // 4. create_A(A) - create new_A. Traverse Max(A), and stop at cells not marked at step 3.
     auto new_A = create_A(A_, 0, 0);
-    if (0) {
-      log("NewD", new_D);
-    }
 
     return CellBuilder::create_merkle_update(new_A, new_D);
   }

@@ -17,9 +17,18 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+#include <cstddef>
+#include <memory>
+#include <utility>
+#include <vector>
+
 #include "ton/ton-types.h"
 #include "vm/cells/CellSlice.h"
 #include "block/mc-config.h"
+#include "common/bitstring.h"
+#include "common/refcnt.hpp"
+#include "utils/int_types.h"
+#include "vm/cells/Cell.h"
 
 namespace block {
 using td::Ref;

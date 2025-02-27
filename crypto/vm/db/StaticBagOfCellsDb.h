@@ -18,10 +18,22 @@
 */
 #pragma once
 
-#include "vm/cells.h"
-#include "td/db/utils/BlobView.h"
+#include <stddef.h>
+#include <memory>
+#include <string>
 
-#include "td/utils/Status.h"
+#include "vm/cells.h"
+#include "db/BlobView.h"
+#include "utils/Status.h"
+#include "common/refcnt.hpp"
+#include "utils/Slice-decl.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/DataCell.h"
+
+namespace td {
+class BlobView;
+class BufferSlice;
+}  // namespace td
 
 namespace vm {
 class StaticBagOfCellsDb : public std::enable_shared_from_this<StaticBagOfCellsDb> {

@@ -16,8 +16,9 @@
 */
 #pragma once
 
-#include "td/utils/Slice.h"
-#include "td/utils/Status.h"
+#include "utils/Slice.h"
+#include "utils/Status.h"
+#include "utils/Slice-decl.h"
 
 namespace td {
 

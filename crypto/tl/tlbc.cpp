@@ -25,34 +25,35 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#include <unistd.h>
 #include <vector>
 #include <string>
-#include <map>
-#include <set>
-#include <stack>
 #include <utility>
 #include <algorithm>
 #include <iostream>
 #include <fstream>
-#include <functional>
 #include <sstream>
-#include <cstdio>
 #include <cassert>
 #include <cstdlib>
-#include <getopt.h>
+#include <array>
+#include <cstring>
+#include <memory>
 
-#include "common/refcnt.hpp"
-#include "common/bigint.hpp"
-#include "common/refint.h"
 #include "parser/srcread.h"
 #include "parser/lexer.h"
 #include "parser/symtable.h"
-#include "td/utils/Slice-decl.h"
-#include "td/utils/format.h"
-#include "td/utils/crypto.h"
+#include "utils/Slice-decl.h"
+#include "utils/crypto.h"
 #include "tlbc-aux.h"
 #include "tlbc-data.h"
-#include "tlbc-gen-cpp.h"
+#include "common/linalloc.hpp"
+#include "utils/Slice.h"
+#include "utils/bits.h"
+#include "utils/check.h"
 
 int verbosity;
 

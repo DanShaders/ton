@@ -18,6 +18,15 @@
 */
 #include "output-queue-merger.h"
 
+#include <assert.h>
+#include <algorithm>
+#include <limits>
+#include <string>
+
+#include "utils/Slice-decl.h"
+#include "utils/logging.h"
+#include "vm/dict.h"
+
 namespace block {
 
 /*

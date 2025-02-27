@@ -17,14 +17,20 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+#include <assert.h>
+
+#include <cstring>
+
 #include "ellcurve/Montgomery.h"
 #include "ellcurve/TwEdwards.h"
 #include "openssl/digest.hpp"
 #include "openssl/rand.hpp"
-#include <assert.h>
-#include <cstring>
-
-#include "td/utils/buffer.h"
+#include "utils/buffer.h"
+#include "ellcurve/Fp25519.h"
+#include "openssl/bignum.h"
+#include "utils/Slice-decl.h"
+#include "utils/Slice.h"
+#include "utils/check.h"
 
 namespace crypto {
 namespace Ed25519 {

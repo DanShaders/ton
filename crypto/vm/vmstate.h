@@ -19,9 +19,11 @@
 #pragma once
 #include "common/refcnt.hpp"
 #include "vm/cells.h"
-#include "common/global-version.h"
 
-#include "td/utils/Context.h"
+#include "utils/Context.h"
+namespace ton {
+  inline const int SUPPORTED_VERSION = 9;
+}
 
 namespace vm {
 using td::Ref;

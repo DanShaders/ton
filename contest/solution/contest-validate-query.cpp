@@ -1,20 +1,37 @@
 #include "contest-validate-query.hpp"
-#include "top-shard-descr.hpp"
-#include "validator-set.hpp"
-#include "adnl/utils.hpp"
-#include "ton/ton-tl.hpp"
-#include "ton/ton-io.hpp"
+
+
+#include <ctime>
+#include <algorithm>
+#include <functional>
+#include <iostream>
+#include <sstream>
+#include <future>
+
 #include "vm/boc.h"
-#include "block/block-db.h"
 #include "block/block.h"
 #include "block/block-parse.h"
 #include "block/block-auto.h"
 #include "block/output-queue-merger.h"
 #include "vm/cells/MerkleProof.h"
 #include "vm/cells/MerkleUpdate.h"
-#include "common/errorlog.h"
-#include "fabric.h"
-#include <ctime>
+#include "mc-config.h"
+#include "actor/actor.h"
+#include "utils/Closure.h"
+#include "utils/Slice-decl.h"
+#include "utils/Slice.h"
+#include "utils/StringBuilder.h"
+#include "utils/bits.h"
+#include "utils/check.h"
+#include "utils/optional.h"
+#include "tl/tlblib.hpp"
+#include "ton/ton-shard.h"
+#include "transaction.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/CellUsageTree.h"
+#include "vm/cells/UsageCell.h"
+#include "vm/excno.hpp"
+#include "vm/stack.hpp"
 
 namespace solution {
 
@@ -279,6 +296,50 @@ void ContestValidateQuery::start_up() {
   CHECK(pending);
 }
 
+bool ContestValidateQuery::unpack_block_data_func() {
+  vm::BagOfCells boc1;
+  auto res1 = boc1.deserialize(block_data);
+  if (res1.is_error()) {
+    return false;
+  }
+  if (boc1.get_root_count() != 1) {
+    return false;
+  }
+  block_root_ = boc1.get_root_cell();
+  CHECK(block_root_.not_null());
+  if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
+    return false;
+  }
+  // 3. initial block parse
+  {
+    try {
+      if (!init_parse()) {
+        return false;
+      }
+    } catch (vm::VmError& err) {
+      return false;
+    } catch (vm::VmVirtError& err) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool ContestValidateQuery::unpack_collated_data_func() {
+  vm::BagOfCells boc2;
+  auto res2 = boc2.deserialize(collated_data);
+  if (res2.is_error()) {
+    return false;
+  }
+  int n = boc2.get_root_count();
+  CHECK(n >= 0);
+  for (int i = 0; i < n; i++) {
+    collated_roots_.emplace_back(boc2.get_root_cell(i));
+  }
+  // 9. extract/classify collated data
+  return extract_collated_data();
+}
 /**
  * Unpacks and validates a block candidate.
  *
@@ -290,43 +351,15 @@ void ContestValidateQuery::start_up() {
  * @returns True if the block candidate was successfully unpacked, false otherwise.
  */
 bool ContestValidateQuery::unpack_block_candidate() {
-  vm::BagOfCells boc1, boc2;
-  // 1. deserialize block itself
-  auto res1 = boc1.deserialize(block_data);
-  if (res1.is_error()) {
-    return reject_query("cannot deserialize block", res1.move_as_error());
-  }
-  if (boc1.get_root_count() != 1) {
-    return reject_query("block BoC must contain exactly one root");
-  }
-  block_root_ = boc1.get_root_cell();
-  CHECK(block_root_.not_null());
-  // 3. initial block parse
-  {
-    auto guard = error_ctx_add_guard("parsing block header");
-    try {
-      if (!init_parse()) {
-        return reject_query("invalid block header");
-      }
-    } catch (vm::VmError& err) {
-      return reject_query(err.get_msg());
-    } catch (vm::VmVirtError& err) {
-      return reject_query(err.get_msg());
-    }
-  }
-  // ...
-  // 8. deserialize collated data
-  auto res2 = boc2.deserialize(collated_data);
-  if (res2.is_error()) {
-    return reject_query("cannot deserialize collated data", res2.move_as_error());
-  }
-  int n = boc2.get_root_count();
-  CHECK(n >= 0);
-  for (int i = 0; i < n; i++) {
-    collated_roots_.emplace_back(boc2.get_root_cell(i));
-  }
-  // 9. extract/classify collated data
-  return extract_collated_data();
+    std::future<bool> block_future = std::async(std::launch::async, [this]() -> bool {
+        return unpack_block_data_func();
+    });
+    std::future<bool> collated_future = std::async(std::launch::async, [this]() -> bool {
+        return unpack_collated_data_func();
+    });
+    bool block_res = block_future.get();
+    bool collated_res = collated_future.get();
+    return block_res && collated_res;
 }
 
 /**
@@ -336,21 +369,8 @@ bool ContestValidateQuery::unpack_block_candidate() {
  */
 bool ContestValidateQuery::init_parse() {
   CHECK(block_root_.not_null());
-  std::vector<BlockIdExt> prev_blks;
   bool after_split;
-  auto res = block::unpack_block_prev_blk_try(block_root_, id_, prev_blks, mc_blkid_, after_split, nullptr, true);
-  if (res.is_error()) {
-    return reject_query("cannot unpack block header : "s + res.to_string());
-  }
-  CHECK(mc_blkid_.id.is_masterchain_ext());
-  mc_seqno_ = mc_blkid_.seqno();
-  prev_blocks = prev_blks;
-  after_merge_ = prev_blocks.size() == 2;
-  after_split_ = !after_merge_ && prev_blocks[0].shard_full() != shard_;
-  if (after_split != after_split_) {
-    // ??? impossible
-    return fatal_error("after_split mismatch in block header");
-  }
+ 
   block::gen::Block::Record blk;
   block::gen::BlockInfo::Record info;
   block::gen::BlockExtra::Record extra;
@@ -360,10 +380,75 @@ bool ContestValidateQuery::init_parse() {
         block::tlb::t_ShardIdent.unpack(info.shard.write(), shard) &&
         block::gen::BlkPrevInfo{info.after_merge}.validate_ref(info.prev_ref) &&
         (!info.not_master || tlb::unpack_cell(info.master_ref, mcref)) && tlb::unpack_cell(blk.extra, extra))) {
-    return reject_query("cannot unpack block header");
+    return false;
+  }
+  bool ignore_root_hash = true;
+  ton::BlockId hdr_id{shard, (unsigned)info.seq_no};
+  if (id_.id != hdr_id) {
+    return false;
+  }
+  if (id_.root_hash != block_root_->get_hash().bits() && !ignore_root_hash) {
+    return false;
+  }
+  if (info.not_master != !shard.is_masterchain()) {
+    return false;
+  }
+  after_split = info.after_split;
+  block::gen::ExtBlkRef::Record prev1, prev2;
+  if (info.after_merge) {
+    auto cs = vm::load_cell_slice(std::move(info.prev_ref));
+    CHECK(cs.size_ext() == 0x20000);  // prev_blks_info$_ prev1:^ExtBlkRef prev2:^ExtBlkRef = BlkPrevInfo 1;
+    if (!(tlb::unpack_cell(cs.prefetch_ref(0), prev1) && tlb::unpack_cell(cs.prefetch_ref(1), prev2))) {
+      return false;
+    }
+  } else {
+    // prev_blk_info$_ prev:ExtBlkRef = BlkPrevInfo 0;
+    if (!(tlb::unpack_cell(std::move(info.prev_ref), prev1))) {
+      return false;
+    }
+  }
+  prev_blocks.clear();
+  ton::BlockSeqno prev_seqno = prev1.seq_no;
+  if (!info.after_merge) {
+    prev_blocks.emplace_back(shard.workchain, info.after_split ? ton::shard_parent(shard.shard) : shard.shard, prev1.seq_no,
+                      prev1.root_hash, prev1.file_hash);
+    if (info.after_split && !prev1.seq_no) {
+      return false;
+    }
+  } else {
+    if (info.after_split) {
+      return false;
+    }
+    prev_blocks.emplace_back(shard.workchain, ton::shard_child(shard.shard, true), prev1.seq_no, prev1.root_hash,
+                      prev1.file_hash);
+    prev_blocks.emplace_back(shard.workchain, ton::shard_child(shard.shard, false), prev2.seq_no, prev2.root_hash,
+                      prev2.file_hash);
+    prev_seqno = std::max<unsigned>(prev1.seq_no, prev2.seq_no);
+    if (!prev1.seq_no || !prev2.seq_no) {
+      return false;
+    }
+  }
+  if (id_.id.seqno != prev_seqno + 1) {
+    return false;
+  }
+  if (shard.is_masterchain()) {
+    mc_blkid_ = prev_blocks.at(0);
+  } else {
+    mc_blkid_ = ton::BlockIdExt{ton::masterchainId, ton::shardIdAll, mcref.seq_no, mcref.root_hash, mcref.file_hash};
+  }
+  if (shard.is_masterchain() && info.vert_seqno_incr && !info.key_block) {
+    return false;
+  }
+  CHECK(mc_blkid_.id.is_masterchain_ext());
+  mc_seqno_ = mc_blkid_.seqno();
+  after_merge_ = prev_blocks.size() == 2;
+  after_split_ = !after_merge_ && prev_blocks[0].shard_full() != shard_;
+  if (after_split != after_split_) {
+    // ??? impossible
+    return false;
   }
   if (shard != shard_) {
-    return reject_query("shard mismatch in the block header");
+    return false;
   }
   global_id_ = blk.global_id;
   vert_seqno_ = info.vert_seq_no;
@@ -376,38 +461,64 @@ bool ContestValidateQuery::init_parse() {
   is_key_block_ = info.key_block;
   prev_key_seqno_ = info.prev_key_block_seqno;
   CHECK(after_split_ == info.after_split);
-  if (is_key_block_) {
-    LOG(INFO) << "validating key block " << id_.to_str();
-  }
   if (start_lt_ >= end_lt_) {
-    return reject_query("block has start_lt greater than or equal to end_lt");
+    return false;
   }
   if (info.after_merge && info.after_split) {
-    return reject_query("a block cannot be both after merge and after split at the same time");
+    return false;
   }
   int shard_pfx_len = ton::shard_prefix_length(shard);
   if (info.after_split && !shard_pfx_len) {
-    return reject_query("a block with empty shard prefix cannot be after split");
+    return false;
   }
   if (info.after_merge && shard_pfx_len >= 60) {
-    return reject_query("a block split 60 times cannot be after merge");
+    return false;
   }
   if (is_key_block_) {
-    return reject_query("a non-masterchain block cannot be a key block");
+    return false;
   }
   if (info.vert_seqno_incr) {
     // what about non-masterchain blocks?
-    return reject_query("new blocks cannot have vert_seqno_incr set");
+    return false;
   }
   if (info.after_merge != after_merge_) {
-    return reject_query("after_merge value mismatch in block header");
+    return false;
   }
   rand_seed_ = extra.rand_seed;
   created_by_ = extra.created_by;
   if (extra.custom->size_refs()) {
-    return reject_query("non-masterchain block cannot have McBlockExtra");
+    return false;
   }
-  // ...
+  auto inmsg_cs = vm::load_cell_slice_ref(std::move(extra.in_msg_descr));
+  auto outmsg_cs = vm::load_cell_slice_ref(std::move(extra.out_msg_descr));
+  // run some hand-written checks from block::tlb::
+  // (automatic tests from block::gen:: have been already run for the entire block)
+  if (!block::tlb::t_InMsgDescr.validate_upto(10000000, *inmsg_cs)) {
+    return reject_query("InMsgDescr of the new block failed to pass handwritten validity tests");
+  }
+  if (!block::tlb::t_OutMsgDescr.validate_upto(10000000, *outmsg_cs)) {
+    return reject_query("OutMsgDescr of the new block failed to pass handwritten validity tests");
+  }
+  if (!block::tlb::t_ShardAccountBlocks.validate_ref(10000000, extra.account_blocks)) {
+    return reject_query("ShardAccountBlocks of the new block failed to pass handwritten validity tests");
+  }
+  in_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(inmsg_cs), 256, block::tlb::aug_InMsgDescr);
+  out_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(outmsg_cs), 256, block::tlb::aug_OutMsgDescr);
+  account_blocks_dict_ = std::make_unique<vm::AugmentedDictionary>(
+      vm::load_cell_slice_ref(std::move(extra.account_blocks)), 256, block::tlb::aug_ShardAccountBlocks);
+  LOG(DEBUG) << "validating InMsgDescr";
+  if (!in_msg_dict_->validate_all()) {
+    return reject_query("InMsgDescr dictionary is invalid");
+  }
+  LOG(DEBUG) << "validating OutMsgDescr";
+  if (!out_msg_dict_->validate_all()) {
+    return reject_query("OutMsgDescr dictionary is invalid");
+  }
+  LOG(DEBUG) << "validating ShardAccountBlocks";
+  if (!account_blocks_dict_->validate_all()) {
+    return reject_query("ShardAccountBlocks dictionary is invalid");
+  }
+  value_flow_root_ = std::move(blk.value_flow);
   return true;
 }
 
@@ -423,44 +534,40 @@ bool ContestValidateQuery::extract_collated_data_from(Ref<vm::Cell> croot, int i
   bool is_special = false;
   auto cs = vm::load_cell_slice_special(croot, is_special);
   if (!cs.is_valid()) {
-    return reject_query("cannot load root cell");
+    return false;
   }
   if (is_special) {
     if (cs.special_type() != vm::Cell::SpecialType::MerkleProof) {
-      return reject_query("it is a special cell, but not a Merkle proof root");
+      return false;
     }
     auto virt_root = vm::MerkleProof::virtualize(croot, 1);
     if (virt_root.is_null()) {
-      return reject_query("invalid Merkle proof");
+      return false;
     }
     RootHash virt_hash{virt_root->get_hash().bits()};
-    LOG(DEBUG) << "collated datum # " << idx << " is a Merkle proof with root hash " << virt_hash.to_hex();
     auto ins = virt_roots_.emplace(virt_hash, std::move(virt_root));
     if (!ins.second) {
-      return reject_query("Merkle proof with duplicate virtual root hash "s + virt_hash.to_hex());
+      return false;
     }
     return true;
   }
   if (block::gen::t_TopBlockDescrSet.has_valid_tag(cs)) {
-    LOG(DEBUG) << "collated datum # " << idx << " is a TopBlockDescrSet";
     if (!block::gen::t_TopBlockDescrSet.validate_upto(10000, cs)) {
-      return reject_query("invalid TopBlockDescrSet");
+      return false;
     }
     if (top_shard_descr_dict_) {
-      return reject_query("duplicate TopBlockDescrSet in collated data");
+      return false;
     }
-    top_shard_descr_dict_ = std::make_unique<vm::Dictionary>(cs.prefetch_ref(), 96);
+    top_shard_descr_dict_ = true;
     return true;
   }
   if (block::gen::t_ExtraCollatedData.has_valid_tag(cs)) {
-    LOG(DEBUG) << "collated datum # " << idx << " is an ExtraCollatedData";
     if (!block::gen::unpack(cs, extra_collated_data_)) {
-      return reject_query("invalid ExtraCollatedData");
+      return false;
     }
     have_extra_collated_data_ = true;
     return true;
   }
-  LOG(INFO) << "collated datum # " << idx << " has unknown type (magic " << cs.prefetch_ulong(32) << "), ignoring";
   return true;
 }
 
@@ -473,19 +580,18 @@ bool ContestValidateQuery::extract_collated_data() {
   int i = -1;
   for (auto croot : collated_roots_) {
     ++i;
-    auto guard = error_ctx_add_guard(PSTRING() << "collated datum #" << i);
     try {
       if (!extract_collated_data_from(croot, i)) {
-        return reject_query("cannot unpack collated datum");
+        return false;
       }
     } catch (vm::VmError& err) {
-      return reject_query(PSTRING() << "vm error " << err.get_msg());
+      return false;
     } catch (vm::VmVirtError& err) {
-      return reject_query(PSTRING() << "virtualization error " << err.get_msg());
+      return false;
     }
   }
   if (!have_extra_collated_data_) {
-    return reject_query("no extra collated data");
+    return false;
   }
   return true;
 }
@@ -574,7 +680,6 @@ bool ContestValidateQuery::process_mc_state(Ref<MasterchainState> mc_state) {
  */
 bool ContestValidateQuery::try_unpack_mc_state() {
   LOG(DEBUG) << "unpacking reference masterchain state";
-  auto guard = error_ctx_add_guard("unpack last mc state");
   try {
     if (mc_state_.is_null()) {
       return fatal_error(-666, "no previous masterchain state present");
@@ -1690,42 +1795,8 @@ bool ContestValidateQuery::add_trivial_neighbor() {
  * @returns True if the block data is successfully unpacked and passes all validation checks, false otherwise.
  */
 bool ContestValidateQuery::unpack_block_data() {
-  LOG(DEBUG) << "unpacking block structures";
-  block::gen::Block::Record blk;
-  block::gen::BlockExtra::Record extra;
-  if (!(tlb::unpack_cell(block_root_, blk) && tlb::unpack_cell(blk.extra, extra))) {
-    return reject_query("cannot unpack Block header");
-  }
-  auto inmsg_cs = vm::load_cell_slice_ref(std::move(extra.in_msg_descr));
-  auto outmsg_cs = vm::load_cell_slice_ref(std::move(extra.out_msg_descr));
-  // run some hand-written checks from block::tlb::
-  // (automatic tests from block::gen:: have been already run for the entire block)
-  if (!block::tlb::t_InMsgDescr.validate_upto(10000000, *inmsg_cs)) {
-    return reject_query("InMsgDescr of the new block failed to pass handwritten validity tests");
-  }
-  if (!block::tlb::t_OutMsgDescr.validate_upto(10000000, *outmsg_cs)) {
-    return reject_query("OutMsgDescr of the new block failed to pass handwritten validity tests");
-  }
-  if (!block::tlb::t_ShardAccountBlocks.validate_ref(10000000, extra.account_blocks)) {
-    return reject_query("ShardAccountBlocks of the new block failed to pass handwritten validity tests");
-  }
-  in_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(inmsg_cs), 256, block::tlb::aug_InMsgDescr);
-  out_msg_dict_ = std::make_unique<vm::AugmentedDictionary>(std::move(outmsg_cs), 256, block::tlb::aug_OutMsgDescr);
-  account_blocks_dict_ = std::make_unique<vm::AugmentedDictionary>(
-      vm::load_cell_slice_ref(std::move(extra.account_blocks)), 256, block::tlb::aug_ShardAccountBlocks);
-  LOG(DEBUG) << "validating InMsgDescr";
-  if (!in_msg_dict_->validate_all()) {
-    return reject_query("InMsgDescr dictionary is invalid");
-  }
-  LOG(DEBUG) << "validating OutMsgDescr";
-  if (!out_msg_dict_->validate_all()) {
-    return reject_query("OutMsgDescr dictionary is invalid");
-  }
-  LOG(DEBUG) << "validating ShardAccountBlocks";
-  if (!account_blocks_dict_->validate_all()) {
-    return reject_query("ShardAccountBlocks dictionary is invalid");
-  }
-  return unpack_precheck_value_flow(std::move(blk.value_flow));
+  
+  return unpack_precheck_value_flow();
 }
 
 /**
@@ -1735,8 +1806,9 @@ bool ContestValidateQuery::unpack_block_data() {
  *
  * @returns True if the value flow is valid and unpacked successfully, false otherwise.
  */
-bool ContestValidateQuery::unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root) {
-  vm::CellSlice cs{vm::NoVmOrd(), value_flow_root};
+bool ContestValidateQuery::unpack_precheck_value_flow() {
+  vm::CellSlice cs{vm::NoVmOrd(), value_flow_root_
+  };
   if (!(cs.is_valid() && value_flow_.fetch(cs) && cs.empty_ext())) {
     return reject_query("cannot unpack ValueFlow of the new block "s + id_.to_str());
   }
@@ -2907,9 +2979,7 @@ bool ContestValidateQuery::check_imported_message(Ref<vm::Cell> msg_env) {
                             " had a different MsgEnvelope in that outbound message queue");
       }
       if (ps_.processed_upto_->already_processed(enq_msg_descr)) {
-        return reject_query(PSTRING() << "imported internal message with hash " << env.msg->get_hash().bits()
-                                      << " and lt=" << created_lt
-                                      << " has been already imported by a previous block of this shardchain");
+        return false;
       }
       update_max_processed_lt_hash(enq_msg_descr.lt_, enq_msg_descr.hash_);
       return true;
@@ -5260,9 +5330,6 @@ bool ContestValidateQuery::try_validate() {
     }
     LOG(INFO) << "try_validate stage 1";
     LOG(INFO) << "running automated validity checks for block candidate " << id_.to_str();
-    if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
-      return reject_query("block "s + id_.to_str() + " failed to pass automated validity checks");
-    }
     if (!fix_all_processed_upto()) {
       return fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks");
     }

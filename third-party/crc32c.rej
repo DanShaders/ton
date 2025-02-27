@@ -1,0 +1,5 @@
+--- third-party/crc32c
++++ third-party/crc32c
+@@ -1 +1 @@
+-Subproject commit 02e65f4fd3065d27b2e29324800ca6d04df16126
++Subproject commit 71d678cf323c15d8083c7c886fa1508b858bb392

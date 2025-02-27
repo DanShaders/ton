@@ -16,7 +16,17 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
+
+
+#include <stddef.h>
 #include <functional>
+#include <algorithm>
+#include <array>
+#include <iostream>
+#include <limits>
+#include <string>
+#include <vector>
+
 #include "vm/tonops.h"
 #include "vm/log.h"
 #include "vm/opctable.h"
@@ -31,11 +41,30 @@
 #include "block/block-parse.h"
 #include "crypto/ellcurve/secp256k1.h"
 #include "crypto/ellcurve/p256.h"
-
 #include "openssl/digest.hpp"
-#include <sodium.h>
 #include "bls.h"
 #include "mc-config.h"
+#include "common/bigint.hpp"
+#include "common/bitstring.h"
+#include "common/refcnt.hpp"
+#include "sodium/crypto_core_ristretto255.h"
+#include "sodium/crypto_scalarmult_ristretto255.h"
+#include "utils/SharedSlice.h"
+#include "utils/Slice-decl.h"
+#include "utils/Slice.h"
+#include "utils/Status.h"
+#include "utils/buffer.h"
+#include "utils/check.h"
+#include "utils/logging.h"
+#include "utils/port/platform.h"
+#include "utils/uint128.h"
+#include "tl/tlblib.hpp"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/CellTraits.h"
+#include "vm/cells/DataCell.h"
+#include "vm/continuation.h"
+#include "vm/vmstate.h"
 
 namespace vm {
 

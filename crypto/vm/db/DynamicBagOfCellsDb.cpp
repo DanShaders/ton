@@ -17,19 +17,25 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "vm/db/DynamicBagOfCellsDb.h"
+
+#include <absl/container/flat_hash_set.h>
+#include <queue>
+#include <type_traits>
+
 #include "vm/db/CellStorage.h"
 #include "vm/db/CellHashTable.h"
-
 #include "vm/cells/ExtCell.h"
-
-#include "td/utils/base64.h"
-#include "td/utils/format.h"
-#include "td/utils/ThreadSafeCounter.h"
-
-#include "vm/cellslice.h"
-#include <queue>
-#include "td/actor/actor.h"
-#include "common/delay.h"
+#include "utils/ThreadSafeCounter.h"
+#include "utils/ScopeGuard.h"
+#include "utils/Slice.h"
+#include "utils/common.h"
+#include "utils/logging.h"
+#include "utils/port/thread.h"
+#include "vm/cells/CellHash.h"
+#include "vm/cells/CellSlice.h"
+#include "vm/cells/CellTraits.h"
+#include "vm/cells/LevelMask.h"
+#include "vm/cells/PrunnedCell.h"
 
 namespace vm {
 namespace {

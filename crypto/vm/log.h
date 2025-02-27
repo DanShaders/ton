@@ -18,7 +18,7 @@
 */
 #pragma once
 
-#include "td/utils/logging.h"
+#include "utils/logging.h"
 
 #define VM_LOG_IMPL(st, mask)                                                             \
   LOG_IMPL_FULL(get_log_interface(st), get_log_options(st), DEBUG, VERBOSITY_NAME(DEBUG), \

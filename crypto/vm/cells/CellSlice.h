@@ -18,14 +18,25 @@
 */
 #pragma once
 
+#include <algorithm>
+#include <ostream>
+
 #include "common/refcnt.hpp"
 #include "common/refint.h"
 #include "vm/cells.h"
+#include "common/bitstring.h"
+#include "utils/Slice-decl.h"
+#include "utils/int_types.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellUsageTree.h"
+#include "vm/cells/DataCell.h"
+#include "vm/cells/VirtualCell.h"
 
 namespace td {
 class StringBuilder;
 }
 namespace vm {
+class CellBuilder;
 
 struct NoVm {};
 struct NoVmOrd {};

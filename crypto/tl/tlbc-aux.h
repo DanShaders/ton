@@ -22,6 +22,8 @@
 #include <memory>
 #include <ostream>
 
+#include "utils/bits.h"
+
 namespace tlbc {
 
 static constexpr unsigned long long All = 1ULL << 63;

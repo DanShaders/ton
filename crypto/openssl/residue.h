@@ -17,6 +17,9 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+#include <istream>
+#include <string>
+
 #include "bignum.h"
 #include "common/refcnt.hpp"
 

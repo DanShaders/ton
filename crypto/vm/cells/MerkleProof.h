@@ -17,13 +17,18 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
-#include "vm/cells/Cell.h"
-#include "td/utils/buffer.h"
-
 #include <utility>
 #include <functional>
+#include <memory>
+
+#include "vm/cells/Cell.h"
+#include "utils/buffer.h"
+#include "common/refcnt.hpp"
+#include "utils/Status.h"
+#include "vm/cells/CellUsageTree.h"
 
 namespace vm {
+class DataCell;
 
 class MerkleProof {
  public:
@@ -51,25 +56,5 @@ class MerkleProof {
   static Ref<Cell> combine_fast_raw(Ref<Cell> a, Ref<Cell> b);
 };
 
-class MerkleProofBuilder {
-  std::shared_ptr<CellUsageTree> usage_tree;
-  Ref<vm::Cell> orig_root, usage_root;
-
- public:
-  MerkleProofBuilder() = default;
-  MerkleProofBuilder(Ref<Cell> root);
-  Ref<Cell> init(Ref<Cell> root);
-  bool clear();
-  Ref<Cell> root() const {
-    return usage_root;
-  }
-  td::Result<Ref<Cell>> extract_proof() const;
-  bool extract_proof_to(Ref<Cell> &proof_root) const;
-  td::Result<td::BufferSlice> extract_proof_boc() const;
-
-  void set_cell_load_callback(std::function<void(const td::Ref<vm::DataCell>&)> f) {
-    usage_tree->set_cell_load_callback(std::move(f));
-  }
-};
 
 }  // namespace vm

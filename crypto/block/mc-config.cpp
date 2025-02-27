@@ -26,18 +26,32 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "mc-config.h"
+
+
+#include <stack>
+#include <algorithm>
+#include <compare>
+#include <iostream>
+#include <string>
+
 #include "block/block.h"
 #include "block/block-parse.h"
 #include "block/block-auto.h"
 #include "common/bitstring.h"
 #include "vm/dict.h"
-#include "td/utils/bits.h"
-#include "td/utils/uint128.h"
+#include "utils/bits.h"
+#include "utils/uint128.h"
 #include "ton/ton-types.h"
 #include "ton/ton-shard.h"
 #include "openssl/digest.hpp"
-#include <stack>
-#include <algorithm>
+#include "utils/Slice-decl.h"
+#include "utils/Slice.h"
+#include "utils/check.h"
+#include "utils/logging.h"
+#include "utils/port/platform.h"
+#include "tl/tlblib.hpp"
+#include "vm/cells/CellBuilder.h"
+#include "vm/excno.hpp"
 
 namespace block {
 using namespace std::literals::string_literals;
@@ -57,39 +71,6 @@ Config::Config(Ref<vm::Cell> config_root, const td::Bits256& config_addr, int _m
     : mode(_mode), config_addr(config_addr), config_root(std::move(config_root)) {
 }
 
-td::Result<std::unique_ptr<Config>> Config::unpack_config(Ref<vm::Cell> config_root, const td::Bits256& config_addr,
-                                                          int mode) {
-  std::unique_ptr<Config> ptr{new Config(std::move(config_root), config_addr, mode)};
-  TRY_STATUS(ptr->unpack_wrapped());
-  return std::move(ptr);
-}
-
-td::Result<std::unique_ptr<Config>> Config::unpack_config(Ref<vm::CellSlice> config_csr, int mode) {
-  std::unique_ptr<Config> ptr{new Config(mode)};
-  TRY_STATUS(ptr->unpack_wrapped(std::move(config_csr)));
-  return std::move(ptr);
-}
-
-td::Result<std::unique_ptr<Config>> Config::extract_from_key_block(Ref<vm::Cell> key_block_root, int mode) {
-  block::gen::Block::Record blk;
-  block::gen::BlockExtra::Record extra;
-  block::gen::McBlockExtra::Record mc_extra;
-  if (!(tlb::unpack_cell(key_block_root, blk) && tlb::unpack_cell(std::move(blk.extra), extra) &&
-        tlb::unpack_cell(extra.custom->prefetch_ref(), mc_extra) && mc_extra.key_block && mc_extra.config.not_null())) {
-    return td::Status::Error(-400, "cannot unpack extra header of key block to extract configuration");
-  }
-  return block::Config::unpack_config(std::move(mc_extra.config), mode);
-}
-
-td::Result<std::unique_ptr<Config>> Config::extract_from_state(Ref<vm::Cell> mc_state_root, int mode) {
-  gen::ShardStateUnsplit::Record state;
-  gen::McStateExtra::Record extra;
-  if (!(tlb::unpack_cell(mc_state_root, state) && state.global_id &&
-        tlb::unpack_cell(state.custom->prefetch_ref(), extra))) {
-    return td::Status::Error("cannot extract configuration from masterchain state extra information");
-  }
-  return unpack_config(std::move(extra.config), mode);
-}
 
 td::Result<std::unique_ptr<ConfigInfo>> ConfigInfo::extract_config(std::shared_ptr<vm::StaticBagOfCellsDb> static_boc,
                                                                    int mode) {
@@ -291,75 +272,6 @@ td::Status Config::unpack() {
   return td::Status::OK();
 }
 
-td::Status Config::visit_validator_params() const {
-  {
-    // current validator set
-    TRY_RESULT(vset, unpack_validator_set(get_config_param(34)));
-  }
-  for (int i = 32; i < 38; i++) {
-    // prev/current/next persistent and temporary validator sets
-    auto vs = get_config_param(i);
-    if (vs.not_null()) {
-      TRY_RESULT(vset, unpack_validator_set(std::move(vs)));
-    }
-  }
-  get_catchain_validators_config();
-  return td::Status::OK();
-}
-
-ton::ValidatorSessionConfig Config::get_consensus_config() const {
-  auto cc = get_config_param(29);
-  ton::ValidatorSessionConfig c;
-  auto set_v1 = [&](auto& r) {
-    c.catchain_opts.idle_timeout = r.consensus_timeout_ms * 0.001;
-    c.catchain_opts.max_deps = r.catchain_max_deps;
-    c.round_candidates = r.round_candidates;
-    c.next_candidate_delay = r.next_candidate_delay_ms * 0.001;
-    c.round_attempt_duration = r.attempt_duration;
-    c.max_round_attempts = r.fast_attempts;
-    c.max_block_size = r.max_block_bytes;
-    c.max_collated_data_size = r.max_collated_bytes;
-  };
-  auto set_v2 = [&](auto& r) {
-    set_v1(r);
-    c.new_catchain_ids = r.new_catchain_ids;
-  };
-  auto set_v3 = [&](auto& r) {
-    set_v2(r);
-    c.proto_version = r.proto_version;
-  };
-  auto set_v4 = [&](auto& r) {
-    set_v3(r);
-    td::uint64 max_blocks_coeff = r.catchain_max_blocks_coeff;
-    if (max_blocks_coeff == 0) {
-      c.catchain_opts.max_block_height_coeff = 0;
-    } else {
-      auto catchain_config = get_catchain_validators_config();
-      td::uint64 catchain_lifetime = std::max(catchain_config.mc_cc_lifetime, catchain_config.shard_cc_lifetime);
-      c.catchain_opts.max_block_height_coeff = catchain_lifetime * max_blocks_coeff;
-    }
-  };
-  if (cc.not_null()) {
-    block::gen::ConsensusConfig::Record_consensus_config_v4 r4;
-    block::gen::ConsensusConfig::Record_consensus_config_v3 r3;
-    block::gen::ConsensusConfig::Record_consensus_config_new r2;
-    block::gen::ConsensusConfig::Record_consensus_config r1;
-    if (tlb::unpack_cell(cc, r4)) {
-      set_v4(r4);
-    } else if (tlb::unpack_cell(cc, r3)) {
-      set_v3(r3);
-    } else if (tlb::unpack_cell(cc, r2)) {
-      set_v2(r2);
-    } else if (tlb::unpack_cell(cc, r1)) {
-      set_v1(r1);
-    }
-  }
-  if (c.proto_version >= ton::ValidatorSessionConfig::BLOCK_HASH_COVERS_DATA_FROM_VERSION) {
-    c.catchain_opts.block_hash_covers_data = true;
-  }
-  return c;
-}
-
 bool Config::foreach_config_param(std::function<bool(int, Ref<vm::Cell>)> scan_func) const {
   if (!config_dict) {
     return false;
@@ -368,71 +280,6 @@ bool Config::foreach_config_param(std::function<bool(int, Ref<vm::Cell>)> scan_f
     return n == 32 && cs_ref.not_null() && cs_ref->size_ext() == 0x10000 &&
            scan_func((int)key.get_int(n), cs_ref->prefetch_ref());
   });
-}
-
-std::unique_ptr<vm::Dictionary> ShardConfig::extract_shard_hashes_dict(Ref<vm::Cell> mc_state_root) {
-  gen::ShardStateUnsplit::Record root_info;
-  gen::McStateExtra::Record extra_info;
-  if (mc_state_root.not_null()                       //
-      && tlb::unpack_cell(mc_state_root, root_info)  //
-      && tlb::unpack_cell(root_info.custom->prefetch_ref(), extra_info)) {
-    return std::make_unique<vm::Dictionary>(std::move(extra_info.shard_hashes), 32);
-  } else {
-    return {};
-  }
-}
-
-td::Result<std::vector<int>> Config::unpack_param_dict(vm::Dictionary& dict) {
-  try {
-    std::vector<int> vect;
-    if (dict.check_for_each(
-            [&vect](Ref<vm::CellSlice> value, td::ConstBitPtr key, int key_len) {
-              bool ok = (key_len == 32 && value->empty_ext());
-              if (ok) {
-                vect.push_back((int)key.get_int(32));
-              }
-              return ok;
-            },
-            true)) {
-      return std::move(vect);
-    } else {
-      return td::Status::Error("invalid parameter list dictionary");
-    }
-  } catch (vm::VmError& vme) {
-    return td::Status::Error("error unpacking parameter list dictionary: "s + vme.get_msg());
-  }
-}
-
-td::Result<std::vector<int>> Config::unpack_param_dict(Ref<vm::Cell> dict_root) {
-  vm::Dictionary dict{std::move(dict_root), 32};
-  return unpack_param_dict(dict);
-}
-
-std::unique_ptr<vm::Dictionary> Config::get_param_dict(int idx) const {
-  return std::make_unique<vm::Dictionary>(get_config_param(idx), 32);
-}
-
-td::Result<std::vector<int>> Config::unpack_param_list(int idx) const {
-  return unpack_param_dict(*get_param_dict(idx));
-}
-
-bool Config::all_mandatory_params_defined(int* bad_idx_ptr) const {
-  auto res = get_mandatory_param_list();
-  if (res.is_error()) {
-    if (bad_idx_ptr) {
-      *bad_idx_ptr = -1;
-    }
-    return false;
-  }
-  for (int x : res.move_as_ok()) {
-    if (get_config_param(x).is_null()) {
-      if (bad_idx_ptr) {
-        *bad_idx_ptr = x;
-      }
-      return false;
-    }
-  }
-  return true;
 }
 
 std::unique_ptr<vm::AugmentedDictionary> ConfigInfo::create_accounts_dict() const {
@@ -476,11 +323,6 @@ td::Result<std::pair<WorkchainSet, std::unique_ptr<vm::Dictionary>>> Config::unp
     }
     return std::make_pair(std::move(wc_list), std::move(wc_dict));
   }
-}
-
-td::Result<WorkchainSet> Config::unpack_workchain_list(Ref<vm::Cell> root) {
-  TRY_RESULT(pair, unpack_workchain_list_ext(std::move(root)));
-  return std::move(pair.first);
 }
 
 td::Result<std::unique_ptr<ValidatorSet>> Config::unpack_validator_set(Ref<vm::Cell> vset_root) {
@@ -679,20 +521,6 @@ td::Result<GasLimitsPrices> Config::do_get_gas_limits_prices(vm::CellSlice cs, i
   return res;
 }
 
-td::Result<ton::StdSmcAddress> Config::get_dns_root_addr() const {
-  auto cell = get_config_param(4);
-  if (cell.is_null()) {
-    return td::Status::Error(PSLICE() << "configuration parameter " << 4 << " with dns root address is absent");
-  }
-  auto cs = vm::load_cell_slice(std::move(cell));
-  if (cs.size() != 0x100) {
-    return td::Status::Error(PSLICE() << "configuration parameter " << 4 << " with dns root address has wrong size");
-  }
-  ton::StdSmcAddress res;
-  CHECK(cs.fetch_bits_to(res));
-  return res;
-}
-
 td::Result<GasLimitsPrices> Config::get_gas_limits_prices(bool is_masterchain) const {
   auto id = is_masterchain ? 20 : 21;
   auto cell = get_config_param(id);
@@ -718,36 +546,6 @@ td::Result<MsgPrices> Config::do_get_msg_prices(vm::CellSlice cs, int id) {
                                       << " with msg prices is invalid - can't parse");
   }
   return MsgPrices(rec.lump_price, rec.bit_price, rec.cell_price, rec.ihr_price_factor, rec.first_frac, rec.next_frac);
-}
-
-CatchainValidatorsConfig Config::unpack_catchain_validators_config(Ref<vm::Cell> cell) {
-  if (cell.not_null()) {
-    block::gen::CatchainConfig::Record_catchain_config cfg;
-    if (tlb::unpack_cell(cell, cfg)) {
-      return {cfg.mc_catchain_lifetime, cfg.shard_catchain_lifetime, cfg.shard_validators_lifetime,
-              cfg.shard_validators_num};
-    }
-    block::gen::CatchainConfig::Record_catchain_config_new cfg2;
-    if (tlb::unpack_cell(std::move(cell), cfg2)) {
-      return {cfg2.mc_catchain_lifetime, cfg2.shard_catchain_lifetime, cfg2.shard_validators_lifetime,
-              cfg2.shard_validators_num, cfg2.shuffle_mc_validators};
-    }
-  }
-  return {default_mc_catchain_lifetime, default_shard_catchain_lifetime, default_shard_validators_lifetime,
-          default_shard_validators_num};
-}
-
-CatchainValidatorsConfig Config::get_catchain_validators_config() const {
-  return unpack_catchain_validators_config(get_config_param(28));
-}
-
-// compares all fields except fsm*, before_merge_, nx_cc_updated_, next_catchain_seqno_
-bool McShardHash::basic_info_equal(const McShardHash& other, bool compare_fees, bool compare_reg_seqno) const {
-  return blk_ == other.blk_ && start_lt_ == other.start_lt_ && end_lt_ == other.end_lt_ &&
-         (!compare_reg_seqno || reg_mc_seqno_ == other.reg_mc_seqno_) && gen_utime_ == other.gen_utime_ &&
-         min_ref_mc_seqno_ == other.min_ref_mc_seqno_ && before_split_ == other.before_split_ &&
-         want_split_ == other.want_split_ && want_merge_ == other.want_merge_ &&
-         (!compare_fees || (fees_collected_ == other.fees_collected_ && funds_created_ == other.funds_created_));
 }
 
 void McShardHash::set_fsm(FsmState fsm, ton::UnixTime fsm_utime, ton::UnixTime fsm_interval) {
@@ -855,32 +653,6 @@ bool McShardHash::pack(vm::CellBuilder& cb) const {
          && cb.store_builder_ref_bool(std::move(cb2));  // = ShardDescr;
 }
 
-Ref<McShardHash> McShardHash::from_block(Ref<vm::Cell> block_root, const ton::FileHash& fhash, bool init_fees) {
-  if (block_root.is_null()) {
-    return {};
-  }
-  block::gen::Block::Record rec;
-  block::gen::BlockInfo::Record info;
-  block::ShardId shard;
-  if (!(tlb::unpack_cell(block_root, rec) && tlb::unpack_cell(rec.info, info) &&
-        shard.deserialize(info.shard.write()))) {
-    return {};
-  }
-  ton::RootHash rhash = block_root->get_hash().bits();
-  CurrencyCollection fees_collected, funds_created;
-  if (init_fees) {
-    block::ValueFlow flow;
-    if (!flow.unpack(vm::load_cell_slice_ref(rec.value_flow))) {
-      return {};
-    }
-    fees_collected = flow.fees_collected;
-    funds_created = flow.created;
-  }
-  return Ref<McShardHash>(true, ton::BlockId{ton::ShardIdFull(shard), (unsigned)info.seq_no}, info.start_lt,
-                          info.end_lt, info.gen_utime, rhash, fhash, fees_collected, funds_created, ~0U,
-                          info.min_ref_mc_seqno, info.gen_catchain_seqno, shard.shard_pfx, false, info.before_split,
-                          false, info.want_split, info.want_merge);
-}
 
 McShardDescr::McShardDescr(const McShardDescr& other)
     : McShardHash(other)
@@ -897,48 +669,6 @@ McShardDescr& McShardDescr::operator=(const McShardDescr& other) {
   processed_upto = other.processed_upto;
   set_queue_root(other.outmsg_root);
   return *this;
-}
-
-Ref<McShardDescr> McShardDescr::from_block(Ref<vm::Cell> block_root, Ref<vm::Cell> state_root,
-                                           const ton::FileHash& fhash, bool init_fees) {
-  if (block_root.is_null()) {
-    return {};
-  }
-  block::gen::Block::Record rec;
-  block::gen::BlockInfo::Record info;
-  block::ShardId shard;
-  if (!(tlb::unpack_cell(block_root, rec) && tlb::unpack_cell(rec.info, info) &&
-        shard.deserialize(info.shard.write()))) {
-    return {};
-  }
-  // TODO: use a suitable vm::MerkleUpdate method here
-  vm::CellSlice cs(vm::NoVmSpec(), rec.state_update);
-  if (!cs.is_valid() || cs.special_type() != vm::Cell::SpecialType::MerkleUpdate) {
-    LOG(ERROR) << "state update in a block is not a Merkle update";
-    return {};
-  }
-  if (cs.size_refs() != 2 || cs.prefetch_ref(1)->get_hash(0) != state_root->get_hash()) {
-    LOG(ERROR) << "invalid Merkle update for block state : resulting state hash mismatch";
-    return {};
-  }
-  ton::RootHash rhash = block_root->get_hash().bits();
-  CurrencyCollection fees_collected, funds_created;
-  if (init_fees) {
-    block::ValueFlow flow;
-    if (!flow.unpack(vm::load_cell_slice_ref(rec.value_flow))) {
-      return {};
-    }
-    fees_collected = flow.fees_collected;
-    funds_created = flow.created;
-  }
-  auto res = Ref<McShardDescr>(true, ton::BlockId{ton::ShardIdFull(shard), (unsigned)info.seq_no}, info.start_lt,
-                               info.end_lt, info.gen_utime, rhash, fhash, fees_collected, funds_created, ~0U,
-                               info.min_ref_mc_seqno, info.gen_catchain_seqno, shard.shard_pfx, false,
-                               info.before_split, false, info.want_split, info.want_merge);
-  auto& descr = res.unique_write();
-  descr.block_root = std::move(block_root);
-  descr.state_root = std::move(state_root);
-  return res;
 }
 
 Ref<McShardDescr> McShardDescr::from_state(ton::BlockIdExt blkid, Ref<vm::Cell> state_root) {
@@ -1074,47 +804,6 @@ Ref<McShardHash> ShardConfig::get_shard_hash(ton::ShardIdFull id, bool exact) co
   }
 }
 
-bool McShardHash::extract_cc_seqno(vm::CellSlice& cs, ton::CatchainSeqno* cc) {
-  auto get = [&cs, cc](auto& rec) {
-    if (tlb::unpack_exact(cs, rec)) {
-      *cc = rec.next_catchain_seqno;
-      return true;
-    } else {
-      *cc = std::numeric_limits<ton::CatchainSeqno>::max();
-      return false;
-    }
-  };
-  if (block::gen::t_ShardDescr.get_tag(cs) == block::gen::ShardDescr::shard_descr) {
-    gen::ShardDescr::Record_shard_descr rec;
-    return get(rec);
-  } else {
-    gen::ShardDescr::Record_shard_descr_new rec;
-    return get(rec);
-  }
-}
-
-ton::CatchainSeqno ShardConfig::get_shard_cc_seqno(ton::ShardIdFull shard) const {
-  if (shard.is_masterchain() || !shard.is_valid()) {
-    return std::numeric_limits<ton::CatchainSeqno>::max();
-  }
-  ton::ShardIdFull true_id;
-  ton::CatchainSeqno cc_seqno, cc_seqno2;
-  vm::CellSlice cs;
-  if (!(get_shard_hash_raw(cs, shard - 1, true_id, false) &&
-        (ton::shard_is_ancestor(true_id, shard) || ton::shard_is_parent(shard, true_id)) &&
-        McShardHash::extract_cc_seqno(cs, &cc_seqno))) {
-    return std::numeric_limits<ton::CatchainSeqno>::max();
-  }
-  if (ton::shard_is_ancestor(true_id, shard)) {
-    return cc_seqno;
-  }
-  if (!(get_shard_hash_raw(cs, shard + 1, true_id, false) && ton::shard_is_parent(shard, true_id) &&
-        McShardHash::extract_cc_seqno(cs, &cc_seqno2))) {
-    return std::numeric_limits<ton::CatchainSeqno>::max();
-  }
-  return std::max(cc_seqno, cc_seqno2) + 1;
-}
-
 ton::LogicalTime ShardConfig::get_shard_end_lt_ext(ton::AccountIdPrefixFull acc, ton::ShardIdFull& actual_shard) const {
   if (!acc.is_valid()) {
     actual_shard.workchain = ton::workchainInvalid;
@@ -1142,127 +831,6 @@ ton::LogicalTime ShardConfig::get_shard_end_lt(ton::AccountIdPrefixFull acc) con
 bool ShardConfig::contains(ton::BlockIdExt blkid) const {
   auto entry = get_shard_hash(blkid.shard_full());
   return entry.not_null() && entry->blk_ == blkid;
-}
-
-static int process_workchain_shard_hashes(Ref<vm::Cell>& branch, ton::ShardIdFull shard,
-                                          std::function<int(McShardHash&)>& func) {
-  auto cs = vm::load_cell_slice(branch);
-  int f = (int)cs.fetch_ulong(1);
-  if (f == 1) {
-    if ((shard.shard & 1) || cs.size_ext() != 0x20000) {
-      return -1;
-    }
-    auto left = cs.prefetch_ref(0), right = cs.prefetch_ref(1);
-    int r = process_workchain_shard_hashes(left, ton::shard_child(shard, true), func);
-    if (r < 0) {
-      return r;
-    }
-    r |= process_workchain_shard_hashes(right, ton::shard_child(shard, false), func);
-    if (r <= 0) {
-      return r;
-    }
-    vm::CellBuilder cb;
-    return cb.store_bool_bool(true) && cb.store_ref_bool(std::move(left)) && cb.store_ref_bool(std::move(right)) &&
-                   cb.finalize_to(branch)
-               ? r
-               : -1;
-  } else if (!f) {
-    auto shard_info = McShardHash::unpack(cs, shard);
-    if (shard_info.is_null()) {
-      return -1;
-    }
-    int r = func(shard_info.write());
-    if (r <= 0) {
-      return r;
-    }
-    vm::CellBuilder cb;
-    return cb.store_bool_bool(false) && shard_info->pack(cb) && cb.finalize_to(branch) ? r : -1;
-  } else {
-    return -1;
-  }
-}
-
-bool ShardConfig::process_shard_hashes(std::function<int(McShardHash&)> func) {
-  if (!shard_hashes_dict_) {
-    return false;
-  }
-  bool ok = true;
-  shard_hashes_dict_->map(
-      [&ok, &func](vm::CellBuilder& cb, Ref<vm::CellSlice> csr, td::ConstBitPtr key, int n) -> bool {
-        Ref<vm::Cell> root;
-        ok = ok && (n == 32) && csr->size_ext() == 0x10000 && std::move(csr)->prefetch_ref_to(root) &&
-             process_workchain_shard_hashes(root, ton::ShardIdFull{(int)key.get_int(32)}, func) >= 0 &&
-             cb.store_ref_bool(std::move(root));
-        return true;
-      });
-  return ok;
-}
-
-static int process_workchain_sibling_shard_hashes(Ref<vm::Cell>& branch, Ref<vm::Cell> sibling, ton::ShardIdFull shard,
-                                                  std::function<int(McShardHash&, const McShardHash*)>& func) {
-  auto cs = vm::load_cell_slice(branch);
-  int f = (int)cs.fetch_ulong(1);
-  if (f == 1) {
-    if ((shard.shard & 1) || cs.size_ext() != 0x20000) {
-      return false;
-    }
-    auto left = cs.prefetch_ref(0), right = cs.prefetch_ref(1);
-    auto orig_left = left;
-    int r = process_workchain_sibling_shard_hashes(left, right, ton::shard_child(shard, true), func);
-    if (r < 0) {
-      return r;
-    }
-    r |= process_workchain_sibling_shard_hashes(right, std::move(orig_left), ton::shard_child(shard, false), func);
-    if (r <= 0) {
-      return r;
-    }
-    vm::CellBuilder cb;
-    return cb.store_bool_bool(true) && cb.store_ref_bool(std::move(left)) && cb.store_ref_bool(std::move(right)) &&
-                   cb.finalize_to(branch)
-               ? r
-               : -1;
-  } else if (!f) {
-    auto shard_info = McShardHash::unpack(cs, shard);
-    if (shard_info.is_null()) {
-      return -1;
-    }
-    Ref<McShardHash> sibling_info;
-    if (sibling.not_null()) {
-      auto cs2 = vm::load_cell_slice(sibling);
-      if (!cs2.fetch_ulong(1)) {
-        sibling_info = McShardHash::unpack(cs2, ton::shard_sibling(shard));
-        if (sibling_info.is_null()) {
-          return -1;
-        }
-      }
-    }
-    int r = func(shard_info.write(), sibling_info.get());
-    if (r <= 0) {
-      return r;
-    }
-    vm::CellBuilder cb;
-    return cb.store_bool_bool(false) && shard_info->pack(cb) && cb.finalize_to(branch) ? r : -1;
-  } else {
-    return -1;
-  }
-}
-
-bool ShardConfig::process_sibling_shard_hashes(std::function<int(McShardHash&, const McShardHash*)> func) {
-  if (!shard_hashes_dict_) {
-    return false;
-  }
-  bool ok = true;
-  shard_hashes_dict_->map([&ok, &func](vm::CellBuilder& cb, Ref<vm::CellSlice> csr, td::ConstBitPtr key,
-                                       int n) -> bool {
-    Ref<vm::Cell> root;
-    ok = ok && (n == 32) && csr->size_ext() == 0x10000 && std::move(csr)->prefetch_ref_to(root) &&
-         process_workchain_sibling_shard_hashes(root, Ref<vm::Cell>{}, ton::ShardIdFull{(int)key.get_int(32)}, func) >=
-             0;
-    bool f = cb.store_ref_bool(std::move(root));
-    ok &= f;
-    return f;
-  });
-  return ok;
 }
 
 std::vector<ton::BlockId> ShardConfig::get_shard_hash_ids(
@@ -1382,233 +950,6 @@ std::vector<ton::WorkchainId> ShardConfig::get_workchains() const {
   return res;
 }
 
-bool ShardConfig::new_workchain(ton::WorkchainId workchain, ton::BlockSeqno reg_mc_seqno,
-                                const ton::RootHash& zerostate_root_hash, const ton::FileHash& zerostate_file_hash) {
-  if (!shard_hashes_dict_ || has_workchain(workchain)) {
-    return false;
-  }
-  vm::CellBuilder cb;
-  Ref<vm::Cell> cell;
-  return cb.store_long_bool(11, 1 + 4)               // bt_leaf$0 ; shard_descr#b
-         && cb.store_zeroes_bool(32)                 // seq_no:uint32
-         && cb.store_long_bool(reg_mc_seqno, 32)     // reg_mc_seqno:uint32
-         && cb.store_zeroes_bool(64 * 2)             // start_lt:uint64 end_lt:uint64
-         && cb.store_bits_bool(zerostate_root_hash)  // root_hash:bits256
-         && cb.store_bits_bool(zerostate_file_hash)  // file_hash:bits256
-         && cb.store_long_bool(0, 8)                 // ... nx_cc_updated:Bool ...
-         && cb.store_long_bool(0, 32)                // next_catchain_seqno:uint32
-         && cb.store_long_bool(1ULL << 63, 64)       // next_validator_shard:uint64
-         && cb.store_long_bool(~0U, 32)              // min_ref_mc_seqno:uint32
-         && cb.store_long_bool(0, 32)                // gen_utime:uint32
-         &&
-         cb.store_zeroes_bool(
-             1 + 5 +
-             5)  // split_merge_at:FutureSplitMerge fees_collected:CurrencyCollection funds_created:CurrencyCollection
-         && cb.finalize_to(cell) && block::gen::t_BinTree_ShardDescr.validate_ref(1024, cell) &&
-         shard_hashes_dict_->set_ref(td::BitArray<32>{workchain}, std::move(cell), vm::Dictionary::SetMode::Add);
-}
-
-td::Result<bool> ShardConfig::may_update_shard_block_info(Ref<McShardHash> new_info,
-                                                          const std::vector<ton::BlockIdExt>& old_blkids,
-                                                          ton::LogicalTime lt_limit, Ref<McShardHash>* ancestor) const {
-  if (!shard_hashes_dict_) {
-    return td::Status::Error(-666, "no shard top block dictionary present");
-  }
-  if (new_info.is_null()) {
-    return td::Status::Error(-666, "suggested new top shard block info is empty");
-  }
-  if (!new_info->is_valid()) {
-    return td::Status::Error(-666, "new top shard block description is invalid");
-  }
-  auto wc = new_info->shard().workchain;
-  if (wc == ton::workchainInvalid || wc == ton::masterchainId) {
-    return td::Status::Error(-666, "new top shard block description belongs to an invalid workchain");
-  }
-  if (!has_workchain(wc)) {
-    return td::Status::Error(-666, "new top shard block belongs to an unknown or disabled workchain");
-  }
-  if (old_blkids.size() != 1 && old_blkids.size() != 2) {
-    return td::Status::Error(-666, "must have either one or two start blocks in a top shard block update");
-  }
-  bool before_split = ton::shard_is_parent(old_blkids[0].shard_full(), new_info->shard());
-  bool before_merge = (old_blkids.size() == 2);
-  if (before_merge) {
-    if (!ton::shard_is_sibling(old_blkids[0].shard_full(), old_blkids[1].shard_full())) {
-      return td::Status::Error(-666, "the two start blocks of a top shard block update must be siblings");
-    }
-    if (!ton::shard_is_parent(new_info->shard(), old_blkids[0].shard_full())) {
-      return td::Status::Error(
-          -666,
-          std::string{"the two start blocks of a top shard block update do not merge into expected final shard "} +
-              old_blkids[0].shard_full().to_str());
-    }
-  } else if (new_info->shard() != old_blkids[0].shard_full() && !before_split) {
-    return td::Status::Error(
-        -666, "the start block of a top shard block update must either coincide with the final shard or be its parent");
-  }
-  if (ancestor) {
-    ancestor->clear();
-  }
-  ton::CatchainSeqno old_cc_seqno = 0;
-  for (const auto& ob : old_blkids) {
-    auto odef = get_shard_hash(ob.shard_full());
-    if (odef.is_null() || odef->blk_ != ob) {
-      return td::Status::Error(-666,
-                               std::string{"the start block "} + ob.to_str() +
-                                   " of a top shard block update is not contained in the previous shard configuration");
-    }
-    old_cc_seqno = std::max(old_cc_seqno, odef->next_catchain_seqno_);
-    if (shards_updated_.find(ob.shard_full()) != shards_updated_.end()) {
-      return td::Status::Error(
-          -666, std::string{"the shard of the start block "} + ob.to_str() +
-                    " of a top shard block update has been already updated in the current shard configuration");
-    }
-    if (odef->before_split_ != before_split) {
-      return td::Status::Error(
-          -666, PSTRING() << "the shard of the start block " << ob.to_str()
-                          << " had before_split=" << odef->before_split_
-                          << " but the top shard block update is valid only if before_split=" << before_split);
-    }
-    if (odef->before_merge_ != before_merge) {
-      return td::Status::Error(
-          -666, PSTRING() << "the shard of the start block " << ob.to_str()
-                          << " had before_merge=" << odef->before_merge_
-                          << " but the top shard block update is valid only if before_merge=" << before_merge);
-    }
-    if (new_info->before_split_) {
-      if (before_merge || before_split) {
-        return td::Status::Error(
-            -666, PSTRING() << "cannot register a before-split block " << new_info->top_block_id().to_str()
-                            << " at the end of a chain that itself starts with a split/merge event");
-      }
-      if (odef->fsm_state() != block::McShardHash::FsmState::fsm_split) {
-        return td::Status::Error(-666, PSTRING() << "cannot register a before-split block "
-                                                 << new_info->top_block_id().to_str()
-                                                 << " because fsm_split state was not set for this shard beforehand");
-      }
-      if (new_info->gen_utime_ < odef->fsm_utime_ || new_info->gen_utime_ >= odef->fsm_utime_ + odef->fsm_interval_) {
-        return td::Status::Error(-666, PSTRING() << "cannot register a before-split block "
-                                                 << new_info->top_block_id().to_str()
-                                                 << " because fsm_split state was enabled for unixtime "
-                                                 << odef->fsm_utime_ << " .. " << odef->fsm_utime_ + odef->fsm_interval_
-                                                 << " but the block is generated at " << new_info->gen_utime_);
-      }
-    }
-    if (before_merge) {
-      if (odef->fsm_state() != block::McShardHash::FsmState::fsm_merge) {
-        return td::Status::Error(-666, PSTRING() << "cannot register merged block " << new_info->top_block_id().to_str()
-                                                 << " because fsm_merge state was not set for shard "
-                                                 << odef->top_block_id().shard_full().to_str() << " beforehand");
-      }
-      if (new_info->gen_utime_ < odef->fsm_utime_ || new_info->gen_utime_ >= odef->fsm_utime_ + odef->fsm_interval_) {
-        return td::Status::Error(-666, PSTRING() << "cannot register merged block " << new_info->top_block_id().to_str()
-                                                 << " because fsm_merge state was enabled for shard "
-                                                 << odef->top_block_id().shard_full().to_str() << " for unixtime "
-                                                 << odef->fsm_utime_ << " .. " << odef->fsm_utime_ + odef->fsm_interval_
-                                                 << " but the block is generated at " << new_info->gen_utime_);
-      }
-    }
-    if (ancestor && !before_merge && !before_split) {
-      *ancestor = odef;
-    }
-  }
-  if (old_cc_seqno + before_merge != new_info->next_catchain_seqno_) {
-    return td::Status::Error(-666, PSTRING()
-                                       << "the top shard block update is generated with catchain_seqno="
-                                       << new_info->next_catchain_seqno_ << " but previous shard configuration expects "
-                                       << old_cc_seqno + before_merge);
-  }
-  if (new_info->end_lt_ >= lt_limit) {
-    return td::Status::Error(-666, PSTRING() << "the top shard block update has end_lt " << new_info->end_lt_
-                                             << " which is larger than the current limit " << lt_limit);
-  }
-  return !before_split;
-}
-
-td::Result<bool> ShardConfig::update_shard_block_info(Ref<McShardHash> new_info,
-                                                      const std::vector<ton::BlockIdExt>& old_blkids) {
-  Ref<McShardHash> ancestor;
-  auto res = may_update_shard_block_info(new_info, old_blkids, ~0ULL, &ancestor);
-  if (res.is_error()) {
-    return res;
-  }
-  if (!res.move_as_ok()) {
-    return td::Status::Error(-666, std::string{"cannot apply the after-split update for "} + new_info->blk_.to_str() +
-                                       " without a corresponding sibling update");
-  }
-  if (ancestor.not_null() && ancestor->fsm_ != McShardHash::FsmState::fsm_none) {
-    new_info.write().set_fsm(ancestor->fsm_, ancestor->fsm_utime_, ancestor->fsm_interval_);
-  }
-  auto blk = new_info->blk_;
-  bool ok = do_update_shard_info(std::move(new_info));
-  if (!ok) {
-    return td::Status::Error(
-        -666,
-        std::string{
-            "unknown serialization error for (BinTree ShardDescr) while updating shard configuration to include "} +
-            blk.to_str());
-  } else {
-    return true;
-  }
-}
-
-td::Result<bool> ShardConfig::update_shard_block_info2(Ref<McShardHash> new_info1, Ref<McShardHash> new_info2,
-                                                       const std::vector<ton::BlockIdExt>& old_blkids) {
-  auto res1 = may_update_shard_block_info(new_info1, old_blkids);
-  if (res1.is_error()) {
-    return res1;
-  }
-  auto res2 = may_update_shard_block_info(new_info2, old_blkids);
-  if (res2.is_error()) {
-    return res2;
-  }
-  if (res1.move_as_ok() || res2.move_as_ok()) {
-    return td::Status::Error(-666, "the two updates in update_shard_block_info2 must follow a shard split event");
-  }
-  if (new_info1->blk_.id.shard > new_info2->blk_.id.shard) {
-    std::swap(new_info1, new_info2);
-  }
-  auto blk1 = new_info1->blk_, blk2 = new_info2->blk_;
-  bool ok = do_update_shard_info2(std::move(new_info1), std::move(new_info2));
-  if (!ok) {
-    return td::Status::Error(
-        -666,
-        std::string{
-            "unknown serialization error for (BinTree ShardDescr) while updating shard configuration to include "} +
-            blk1.to_str() + " and " + blk2.to_str());
-  } else {
-    return true;
-  }
-}
-
-bool ShardConfig::do_update_shard_info(Ref<McShardHash> new_info) {
-  vm::CellBuilder cb;
-  Ref<vm::Cell> ref;
-  return new_info.not_null() && cb.store_bool_bool(false)  // bt_leaf$0
-         && new_info->pack(cb)                             // leaf:ShardDescr
-         && cb.finalize_to(ref) && set_shard_info(new_info->shard(), std::move(ref));
-}
-
-bool ShardConfig::do_update_shard_info2(Ref<McShardHash> new_info1, Ref<McShardHash> new_info2) {
-  if (new_info1.is_null() || new_info2.is_null() || !ton::shard_is_sibling(new_info1->shard(), new_info2->shard())) {
-    return false;
-  }
-  if (new_info1->blk_.id.shard > new_info2->blk_.id.shard) {
-    std::swap(new_info1, new_info2);
-  }
-  vm::CellBuilder cb, cb1;
-  Ref<vm::Cell> ref;
-  return cb.store_bool_bool(true)              // bt_node$1
-         && cb1.store_bool_bool(false)         // ( bt_leaf$0
-         && new_info1->pack(cb1)               //   leaf:ShardDescr
-         && cb1.finalize_to(ref)               // ) -> ref
-         && cb.store_ref_bool(std::move(ref))  // left:^(BinTree ShardDescr)
-         && cb1.store_bool_bool(false)         // ( bt_leaf$0
-         && new_info2->pack(cb1)               //   leaf:ShardDescr
-         && cb1.finalize_to(ref)               // ) -> ref
-         && cb.store_ref_bool(std::move(ref))  // right:^(BinTree ShardDescr)
-         && cb.finalize_to(ref) && set_shard_info(ton::shard_parent(new_info1->shard()), std::move(ref));
-}
 
 static bool btree_set(Ref<vm::Cell>& root, ton::ShardId shard, Ref<vm::Cell> value) {
   if (!shard) {
@@ -1664,30 +1005,6 @@ bool Config::is_special_smartcontract(const ton::StdSmcAddress& addr) const {
   return special_smc_dict->lookup(addr).not_null() || addr == config_addr;
 }
 
-td::Result<std::vector<ton::StdSmcAddress>> Config::get_special_smartcontracts(bool without_config) const {
-  if (!special_smc_dict) {
-    return td::Status::Error(-666, "configuration loaded without fundamental smart contract list");
-  }
-  std::vector<ton::StdSmcAddress> res;
-  if (!special_smc_dict->check_for_each([&res, &without_config, conf_addr = config_addr.bits()](
-                                            Ref<vm::CellSlice> cs_ref, td::ConstBitPtr key, int n) {
-        if (cs_ref->size_ext() || n != 256) {
-          return false;
-        }
-        res.emplace_back(key);
-        if (!without_config && key.equals(conf_addr, 256)) {
-          without_config = true;
-        }
-        return true;
-      })) {
-    return td::Status::Error(-666, "invalid fundamental smart contract set in configuration parameter 31");
-  }
-  if (!without_config) {
-    res.push_back(config_addr);
-  }
-  return std::move(res);
-}
-
 td::Result<std::vector<std::pair<ton::StdSmcAddress, int>>> ConfigInfo::get_special_ticktock_smartcontracts(
     int tick_tock) const {
   if (!special_smc_dict) {
@@ -1740,52 +1057,6 @@ int ConfigInfo::get_smc_tick_tock(td::ConstBitPtr smc_addr) const {
              : -2;
 }
 
-ton::CatchainSeqno ConfigInfo::get_shard_cc_seqno(ton::ShardIdFull shard) const {
-  return shard.is_masterchain() ? cc_seqno_ : ShardConfig::get_shard_cc_seqno(shard);
-}
-
-std::vector<ton::ValidatorDescr> Config::compute_validator_set(ton::ShardIdFull shard, const block::ValidatorSet& vset,
-                                                               ton::UnixTime time, ton::CatchainSeqno cc_seqno) const {
-  return do_compute_validator_set(get_catchain_validators_config(), shard, vset, cc_seqno);
-}
-
-std::vector<ton::ValidatorDescr> Config::compute_validator_set(ton::ShardIdFull shard, ton::UnixTime time,
-                                                               ton::CatchainSeqno cc_seqno) const {
-  if (!cur_validators_) {
-    LOG(DEBUG) << "failed to compute validator set: cur_validators_ is empty";
-    return {};
-  } else {
-    return compute_validator_set(shard, *cur_validators_, time, cc_seqno);
-  }
-}
-
-std::vector<ton::ValidatorDescr> ConfigInfo::compute_validator_set_cc(ton::ShardIdFull shard,
-                                                                      const block::ValidatorSet& vset,
-                                                                      ton::UnixTime time,
-                                                                      ton::CatchainSeqno* cc_seqno_delta) const {
-  if (cc_seqno_delta && (*cc_seqno_delta & -2)) {
-    return {};
-  }
-  ton::CatchainSeqno cc_seqno = get_shard_cc_seqno(shard);
-  if (cc_seqno == ~0U) {
-    return {};
-  }
-  if (cc_seqno_delta) {
-    cc_seqno = *cc_seqno_delta += cc_seqno;
-  }
-  return do_compute_validator_set(get_catchain_validators_config(), shard, vset, cc_seqno);
-}
-
-std::vector<ton::ValidatorDescr> ConfigInfo::compute_validator_set_cc(ton::ShardIdFull shard, ton::UnixTime time,
-                                                                      ton::CatchainSeqno* cc_seqno_delta) const {
-  auto vset = get_cur_validator_set();
-  if (!vset) {
-    return {};
-  } else {
-    return compute_validator_set_cc(shard, *vset, time, cc_seqno_delta);
-  }
-}
-
 void validator_set_descr::incr_seed() {
   for (int i = 31; i >= 0 && !++(seed[i]); --i) {
   }
@@ -1795,137 +1066,8 @@ void validator_set_descr::hash_to(unsigned char hash_buffer[64]) const {
   digest::hash_str<digest::SHA512>(hash_buffer, (const void*)this, sizeof(*this));
 }
 
-td::uint64 ValidatorSetPRNG::next_ulong() {
-  if (pos < limit) {
-    return td::bswap64(hash_longs[pos++]);
-  }
-  data.hash_to(hash);
-  data.incr_seed();
-  pos = 1;
-  limit = 8;
-  return td::bswap64(hash_longs[0]);
-}
-
-td::uint64 ValidatorSetPRNG::next_ranged(td::uint64 range) {
-  td::uint64 y = next_ulong();
-  return td::uint128(range).mult(y).hi();
-}
-
 inline bool operator<(td::uint64 pos, const ValidatorDescr& descr) {
   return pos < descr.cum_weight;
-}
-
-const ValidatorDescr& ValidatorSet::at_weight(td::uint64 weight_pos) const {
-  CHECK(weight_pos < total_weight);
-  auto it = std::upper_bound(list.begin(), list.end(), weight_pos);
-  CHECK(it != list.begin());
-  return *--it;
-}
-
-std::vector<ton::ValidatorDescr> ValidatorSet::export_validator_set() const {
-  std::vector<ton::ValidatorDescr> l;
-  l.reserve(list.size());
-  for (const auto& node : list) {
-    l.emplace_back(node.pubkey, node.weight, node.adnl_addr);
-  }
-  return l;
-}
-
-std::map<ton::Bits256, int> ValidatorSet::compute_validator_map() const {
-  std::map<ton::Bits256, int> res;
-  for (int i = 0; i < (int)list.size(); i++) {
-    res.emplace(list[i].pubkey.as_bits256(), i);
-  }
-  return res;
-}
-
-std::vector<double> ValidatorSet::export_scaled_validator_weights() const {
-  std::vector<double> res;
-  for (const auto& node : list) {
-    res.push_back((double)node.weight / (double)total_weight);
-  }
-  return res;
-}
-
-int ValidatorSet::lookup_public_key(td::ConstBitPtr pubkey) const {
-  for (int i = 0; i < (int)list.size(); i++) {
-    if (list[i].pubkey.as_bits256() == pubkey) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-std::vector<ton::ValidatorDescr> Config::do_compute_validator_set(const CatchainValidatorsConfig& ccv_conf,
-                                                                  ton::ShardIdFull shard, const ValidatorSet& vset,
-                                                                  ton::CatchainSeqno cc_seqno) {
-  // LOG(DEBUG) << "in Config::do_compute_validator_set() for " << shard.to_str() << " ; cc_seqno=" << cc_seqno;
-  std::vector<ton::ValidatorDescr> nodes;
-  bool is_mc = shard.is_masterchain();
-  unsigned count = std::min<unsigned>(is_mc ? vset.main : ccv_conf.shard_val_num, vset.total);
-  CHECK((unsigned)vset.total == vset.list.size());
-  if (!count) {
-    return {};  // no validators?
-  }
-  nodes.reserve(count);
-  ValidatorSetPRNG gen{shard, cc_seqno};  // use zero seed (might use a non-trivial seed from ccv_conf in the future)
-  if (is_mc) {
-    if (ccv_conf.shuffle_mc_val) {
-      // shuffle mc validators from the head of the list
-      std::vector<unsigned> idx(count);
-      CHECK(idx.size() == count);
-      for (unsigned i = 0; i < count; i++) {
-        unsigned j = (unsigned)gen.next_ranged(i + 1);  // number 0 .. i
-        CHECK(j <= i);
-        idx[i] = idx[j];
-        idx[j] = i;
-      }
-      for (unsigned i = 0; i < count; i++) {
-        const auto& v = vset.list[idx[i]];
-        nodes.emplace_back(v.pubkey, v.weight, v.adnl_addr);
-      }
-    } else {
-      // simply take needed number of validators from the head of the list
-      for (unsigned i = 0; i < count; i++) {
-        const auto& v = vset.list[i];
-        nodes.emplace_back(v.pubkey, v.weight, v.adnl_addr);
-      }
-    }
-    return nodes;
-  }
-  // this is the "true" algorithm for generating shardchain validator subgroups
-  std::vector<std::pair<td::uint64, td::uint64>> holes;
-  holes.reserve(count);
-  td::uint64 total_wt = vset.total_weight;
-  for (unsigned i = 0; i < count; i++) {
-    CHECK(total_wt > 0);
-    auto p = gen.next_ranged(total_wt);  // generate a pseudo-random number 0 .. total_wt-1
-    // auto op = p;
-    for (auto& hole : holes) {
-      if (p < hole.first) {
-        break;
-      }
-      p += hole.second;
-    }
-    auto& entry = vset.at_weight(p);
-    // LOG(DEBUG) << "vset entry #" << i << ": rem_wt=" << total_wt << ", total_wt=" << vset.total_weight << ", op=" << op << ", p=" << p << "; entry.cum_wt=" << entry.cum_weight << ", entry.wt=" << entry.weight << " " << entry.cum_weight / entry.weight;
-    nodes.emplace_back(entry.pubkey, 1, entry.adnl_addr);  // NB: shardchain validator lists have all weights = 1
-    CHECK(total_wt >= entry.weight);
-    total_wt -= entry.weight;
-    std::pair<td::uint64, td::uint64> new_hole{entry.cum_weight, entry.weight};
-    auto it = std::upper_bound(holes.begin(), holes.end(), new_hole);
-    CHECK(it == holes.begin() || *(it - 1) < new_hole);
-    holes.insert(it, new_hole);
-  }
-  return nodes;
-}
-
-std::vector<ton::ValidatorDescr> Config::compute_total_validator_set(int next) const {
-  auto res = unpack_validator_set(get_config_param(next < 0 ? 32 : (next ? 36 : 34)));
-  if (res.is_error()) {
-    return {};
-  }
-  return res.move_as_ok()->export_validator_set();
 }
 
 td::Result<SizeLimitsConfig> Config::get_size_limits_config() const {
@@ -2041,30 +1183,6 @@ PrecompiledContractsConfig Config::get_precompiled_contracts_config() const {
   }
   c.list = vm::Dictionary{rec.list->prefetch_ref(), 256};
   return c;
-}
-
-td::Result<std::pair<ton::UnixTime, ton::UnixTime>> Config::unpack_validator_set_start_stop(Ref<vm::Cell> vset_root) {
-  if (vset_root.is_null()) {
-    return td::Status::Error("validator set absent");
-  }
-  gen::ValidatorSet::Record_validators_ext rec;
-  if (tlb::unpack_cell(vset_root, rec)) {
-    return std::pair<ton::UnixTime, ton::UnixTime>(rec.utime_since, rec.utime_until);
-  }
-  gen::ValidatorSet::Record_validators rec0;
-  if (tlb::unpack_cell(std::move(vset_root), rec0)) {
-    return std::pair<ton::UnixTime, ton::UnixTime>(rec0.utime_since, rec0.utime_until);
-  }
-  return td::Status::Error("validator set is invalid");
-}
-
-std::pair<ton::UnixTime, ton::UnixTime> Config::get_validator_set_start_stop(int next) const {
-  auto res = unpack_validator_set_start_stop(get_config_param(next < 0 ? 32 : (next ? 36 : 34)));
-  if (res.is_error()) {
-    return {0, 0};
-  } else {
-    return res.move_as_ok();
-  }
 }
 
 bool WorkchainInfo::unpack(ton::WorkchainId wc, vm::CellSlice& cs) {

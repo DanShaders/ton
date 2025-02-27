@@ -18,9 +18,24 @@
 */
 #pragma once
 #include "interfaces/shard.h"
+
+#include <memory>
+#include <vector>
+
 #include "vm/db/StaticBagOfCellsDb.h"
 #include "block/mc-config.h"
-#include "config.hpp"
+#include "block.h"
+#include "common/refcnt.hpp"
+#include "utils/Status.h"
+#include "utils/buffer.h"
+#include "utils/int_types.h"
+#include "utils/optional.h"
+#include "ton/ton-types.h"
+#include "vm/cells/Cell.h"
+
+namespace vm {
+class StaticBagOfCellsDb;
+}  // namespace vm
 
 namespace ton {
 
@@ -91,11 +106,7 @@ class ShardStateQ : virtual public ShardState {
   td::Status validate_deep() const override;
   ShardStateQ* make_copy() const override;
   td::Result<Ref<MessageQueue>> message_queue() const override;
-  td::Status apply_block(BlockIdExt id, Ref<BlockData> block) override;
   td::Result<Ref<ShardState>> merge_with(const ShardState& with) const override;
-  td::Result<std::pair<Ref<ShardState>, Ref<ShardState>>> split() const override;
-  td::Result<td::BufferSlice> serialize() const override;
-  td::Status serialize_to_file(td::FileFd& fd) const override;
 };
 
 #if TD_MSVC
@@ -107,14 +118,6 @@ class MasterchainStateQ : public MasterchainState, public ShardStateQ {
   MasterchainStateQ(const BlockIdExt& _id, td::BufferSlice _data);
   MasterchainStateQ(const BlockIdExt& _id, Ref<vm::Cell> _root, td::BufferSlice _data = {});
   virtual ~MasterchainStateQ() = default;
-  td::Status apply_block(BlockIdExt id, Ref<BlockData> block) override;
-  Ref<ValidatorSet> get_validator_set(ShardIdFull shard) const override;
-  Ref<ValidatorSet> get_next_validator_set(ShardIdFull shard) const override;
-  Ref<ValidatorSet> get_total_validator_set(int next) const override;  // next = -1 -> prev, next = 0 -> cur
-  Ref<ValidatorSet> get_validator_set(ShardIdFull shard, UnixTime ts, CatchainSeqno cc_seqno) const;
-  bool rotated_all_shards() const override;
-  std::vector<Ref<McShardHash>> get_shards() const override;
-  td::Ref<McShardHash> get_shard_from_config(ShardIdFull shard) const override;
   bool ancestor_is_valid(BlockIdExt id) const override {
     return check_old_mc_block_id(id);
   }
@@ -130,9 +133,6 @@ class MasterchainStateQ : public MasterchainState, public ShardStateQ {
   td::Status prepare() override;
   ZeroStateIdExt get_zerostate_id() const {
     return zerostate_id_;
-  }
-  ValidatorSessionConfig get_consensus_config() const override {
-    return config_->get_consensus_config();
   }
   block::SizeLimitsConfig::ExtMsgLimits get_ext_msg_limits() const override {
     auto R = config_->get_size_limits_config();
@@ -160,13 +160,6 @@ class MasterchainStateQ : public MasterchainState, public ShardStateQ {
   std::shared_ptr<block::ConfigInfo> get_config() const {
     return config_;
   }
-  td::Result<td::Ref<ConfigHolder>> get_config_holder() const override {
-    if (!config_) {
-      return td::Status::Error(ErrorCode::notready, "config not found");
-    } else {
-      return td::make_ref<ConfigHolderQ>(config_);
-    }
-  }
   block::WorkchainSet get_workchain_list() const override {
     return config_ ? config_->get_workchain_list() : block::WorkchainSet();
   }
@@ -178,8 +171,6 @@ class MasterchainStateQ : public MasterchainState, public ShardStateQ {
   MasterchainStateQ(const MasterchainStateQ& other) = default;
   td::Status mc_init();
   td::Status mc_reinit();
-  Ref<ValidatorSet> compute_validator_set(ShardIdFull shard, const block::ValidatorSet& vset, UnixTime time,
-                                          CatchainSeqno cc_seqno) const;
 };
 #if TD_MSVC
 #pragma warning(pop)

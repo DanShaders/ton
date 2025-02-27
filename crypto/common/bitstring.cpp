@@ -17,12 +17,16 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "common/bitstring.h"
+
 #include <cstring>
 #include <limits>
-#include "td/utils/as.h"
-#include "td/utils/bits.h"
-#include "td/utils/misc.h"
+
+#include "utils/as.h"
+#include "utils/bits.h"
+#include "utils/misc.h"
 #include "crypto/openssl/digest.hpp"
+#include "utils/check.h"
+#include "utils/int_types.h"
 
 namespace td {
 

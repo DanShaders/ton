@@ -17,12 +17,23 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "vm/cells/MerkleProof.h"
+
+#include <absl/container/flat_hash_map.h>
+#include <absl/hash/hash.h>
+#include <stddef.h>
+
 #include "vm/cells/CellBuilder.h"
 #include "vm/cells/CellSlice.h"
 #include "vm/boc.h"
-
-#include "td/utils/HashMap.h"
-#include "td/utils/HashSet.h"
+#include "utils/HashMap.h"
+#include "utils/HashSet.h"
+#include "utils/check.h"
+#include "utils/int_types.h"
+#include "vm/cells/CellHash.h"
+#include "vm/cells/CellTraits.h"
+#include "vm/cells/DataCell.h"
+#include "vm/cells/LevelMask.h"
+#include "vm/cells/UsageCell.h"
 
 namespace vm {
 namespace detail {
@@ -372,50 +383,6 @@ Ref<Cell> MerkleProof::combine_fast_raw(Ref<Cell> a, Ref<Cell> b) {
     return {};
   }
   return res.move_as_ok();
-}
-
-MerkleProofBuilder::MerkleProofBuilder(Ref<Cell> root)
-    : usage_tree(std::make_shared<CellUsageTree>()), orig_root(std::move(root)) {
-  usage_root = UsageCell::create(orig_root, usage_tree->root_ptr());
-}
-
-Ref<Cell> MerkleProofBuilder::init(Ref<Cell> root) {
-  usage_tree = std::make_shared<CellUsageTree>();
-  orig_root = std::move(root);
-  usage_root = UsageCell::create(orig_root, usage_tree->root_ptr());
-  return usage_root;
-}
-
-bool MerkleProofBuilder::clear() {
-  usage_tree.reset();
-  orig_root.clear();
-  usage_root.clear();
-  return true;
-}
-
-td::Result<Ref<Cell>> MerkleProofBuilder::extract_proof() const {
-  Ref<Cell> proof = MerkleProof::generate(orig_root, usage_tree.get());
-  if (proof.is_null()) {
-    return td::Status::Error("cannot create Merkle proof");
-  }
-  return proof;
-}
-
-bool MerkleProofBuilder::extract_proof_to(Ref<Cell> &proof_root) const {
-  if (orig_root.is_null()) {
-    return false;
-  }
-  auto R = extract_proof();
-  if (R.is_error()) {
-    return false;
-  }
-  proof_root = R.move_as_ok();
-  return true;
-}
-
-td::Result<td::BufferSlice> MerkleProofBuilder::extract_proof_boc() const {
-  TRY_RESULT(proof_root, extract_proof());
-  return std_boc_serialize(std::move(proof_root));
 }
 
 }  // namespace vm

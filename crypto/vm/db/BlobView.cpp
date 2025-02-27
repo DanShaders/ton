@@ -18,12 +18,12 @@
 */
 #include "vm/db/BlobView.h"
 
-#include "td/utils/port/FileFd.h"
-#include "td/utils/HashMap.h"
+#include "utils/port/FileFd.h"
+#include "utils/HashMap.h"
 
-#include "td/utils/format.h"
-#include "td/utils/port/RwMutex.h"
-#include "td/utils/port/MemoryMapping.h"
+#include "utils/format.h"
+#include "utils/port/RwMutex.h"
+#include "utils/port/MemoryMapping.h"
 
 #include <limits>
 #include <mutex>

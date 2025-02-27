@@ -17,11 +17,15 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
-#include "vm/dispatch.h"
 #include <functional>
 #include <utility>
 #include <vector>
 #include <map>
+#include <string>
+
+#include "vm/dispatch.h"
+#include "vm/cells/CellSlice.h"
+#include "vm/vm.h"
 
 namespace vm {
 

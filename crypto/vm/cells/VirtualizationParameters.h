@@ -18,8 +18,8 @@
 */
 #pragma once
 
-#include "td/utils/int_types.h"
-#include "td/utils/logging.h"
+#include "utils/int_types.h"
+#include "utils/logging.h"
 
 #include <limits>
 

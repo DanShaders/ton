@@ -17,6 +17,9 @@
     Copyright 2020 Telegram Systems LLP
 */
 #include "vm/memo.h"
+
+#include <memory>
+
 #include "vm/excno.hpp"
 #include "vm/vm.h"
 

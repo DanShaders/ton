@@ -18,6 +18,8 @@
 */
 #include "LevelMask.h"
 
+#include "utils/StringBuilder.h"
+
 namespace vm {
 namespace detail {
 td::StringBuilder& operator<<(td::StringBuilder& sb, LevelMask level_mask) {

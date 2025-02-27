@@ -17,8 +17,13 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "symtable.h"
+
+
 #include <sstream>
 #include <cassert>
+
+#include "parser/lexer.h"
+#include "parser/srcread.h"
 
 namespace sym {
 

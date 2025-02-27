@@ -16,12 +16,14 @@
 */
 
 #include "secp256k1.h"
-#include "td/utils/check.h"
-#include "td/utils/logging.h"
 
 #include <secp256k1_recovery.h>
 #include <secp256k1_extrakeys.h>
-#include <cstring>
+
+#include "utils/check.h"
+#include "utils/logging.h"
+#include "utils/Slice-decl.h"
+#include "utils/int_types.h"
 
 namespace td::secp256k1 {
 

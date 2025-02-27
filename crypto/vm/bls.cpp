@@ -16,9 +16,20 @@
 */
 
 #include "bls.h"
+
+#include <memory>
+#include <string>
+
 #include "blst.h"
 #include "blst.hpp"
 #include "excno.hpp"
+#include "common/bigint.hpp"
+#include "common/refcnt.hpp"
+#include "utils/Slice.h"
+#include "utils/buffer.h"
+#include "utils/check.h"
+#include "utils/int_types.h"
+#include "utils/logging.h"
 
 namespace vm {
 namespace bls {

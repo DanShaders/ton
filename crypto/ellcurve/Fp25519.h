@@ -20,6 +20,10 @@
 #include "common/refcnt.hpp"
 #include "openssl/residue.h"
 
+namespace arith {
+class Bignum;
+}  // namespace arith
+
 namespace ellcurve {
 using namespace arith;
 

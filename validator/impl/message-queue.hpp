@@ -19,11 +19,17 @@
 #pragma once
 #include "interfaces/message-queue.h"
 
+#include <utility>
+
+#include "common/bitstring.h"
+#include "common/refcnt.hpp"
+#include "ton/ton-types.h"
+#include "vm/cells/Cell.h"
+
 namespace ton {
 namespace validator {
 using td::Ref;
 
-class ShardStateQ;
 
 class MessageQueueQ : public MessageQueue {
   BlockIdExt blkid;
@@ -32,7 +38,6 @@ class MessageQueueQ : public MessageQueue {
   MessageQueueQ* make_copy() const override;
 
  protected:
-  friend class ShardStateQ;
   MessageQueueQ(const MessageQueueQ& other) = default;
   MessageQueueQ(MessageQueueQ&& other) = default;
 

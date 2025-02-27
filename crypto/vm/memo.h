@@ -17,10 +17,15 @@
     Copyright 2020 Telegram Systems LLP
 */
 #pragma once
+#include <utility>
+#include <vector>
+
 #include "common/refcnt.hpp"
 #include "vm/cells.h"
 #include "vm/vmstate.h"
-#include "td/utils/optional.h"
+#include "utils/optional.h"
+#include "common/bitstring.h"
+#include "vm/cells/Cell.h"
 
 namespace vm {
 using td::Ref;
