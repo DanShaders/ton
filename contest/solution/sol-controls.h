@@ -2,7 +2,7 @@
 // Turn on or off some optimizations - a control panel for the contest solution optimizations. Handle with care.
 
 // Disable parallel executions, they significantly sacrifice CPU time for total time
-// #define OPTIMIZE_FOR_CPU_TIME
+#define OPTIMIZE_FOR_CPU_TIME
 
 // Enable actor workers for accounts (transactions) checking
 // #define OPTIMIZE_FOR_PROFILING
@@ -38,7 +38,7 @@
 #define CVQ_CHECK_TX_PARALLEL
 
 // Enable CUT mutex manually (auto enabled if needed) - to measure perf
-#define CELL_USAGE_TREE_MUTEX
+// #define CELL_USAGE_TREE_MUTEX
 
 // Use Actor Workers multithreading for accounts (transactions) checking
 #define CVQ_CHECK_TX_WITH_ACTORS
