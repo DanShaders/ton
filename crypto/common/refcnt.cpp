@@ -57,8 +57,8 @@ thread_local td::int64 SafeDeleter::delete_count{0};
 
 TD_THREAD_LOCAL SafeDeleter *deleter;
 void safe_delete(const CntObject *ptr) {
-  init_thread_local<SafeDeleter>(deleter);
-  deleter->retire(ptr);
+  // init_thread_local<SafeDeleter>(deleter);
+  // deleter->retire(ptr);
 }
 }  // namespace detail
 int64 ref_get_delete_count() {

@@ -198,6 +198,8 @@ void ContestValidateQuery::start_up() {
   LOG(INFO) << "validate query for " << id_.to_str() << " started";
   rand_seed_.set_zero();
 
+  vm::DataCell::task_id++;
+
   if (ShardIdFull(id_) != shard_) {
     soft_reject_query(PSTRING() << "block candidate belongs to shard " << ShardIdFull(id_).to_str()
                                 << " different from current shard " << shard_.to_str());
@@ -316,7 +318,7 @@ bool ContestValidateQuery::unpack_block_candidate() {
   }
   // ...
   // 8. deserialize collated data
-  auto res2 = boc2.deserialize(collated_data);
+  auto res2 = boc2.deserialize(collated_data, 12500);
   if (res2.is_error()) {
     return reject_query("cannot deserialize collated data", res2.move_as_error());
   }
@@ -4849,10 +4851,12 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
                                     << addr.to_hex());
     }
   }
+  
   if (!trs->prepare_compute_phase(compute_phase_cfg_)) {
     return reject_query(PSTRING() << "cannot re-create compute phase of transaction " << lt << " for smart contract "
                                   << addr.to_hex());
   }
+  
   if (!trs->compute_phase->accepted) {
     if (external) {
       return reject_query(PSTRING() << "inbound external message claimed to be processed by ordinary transaction " << lt
@@ -4863,10 +4867,12 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
                                     << " of account " << addr.to_hex() << " was not processed without any reason");
     }
   }
+  
   if (trs->compute_phase->success && !trs->prepare_action_phase(action_phase_cfg_)) {
     return reject_query(PSTRING() << "cannot re-create action phase of transaction " << lt << " for smart contract "
                                   << addr.to_hex());
   }
+  
   if (trs->bounce_enabled &&
       (!trs->compute_phase->success || trs->action_phase->state_exceeds_limits || trs->action_phase->bounce) &&
       !trs->prepare_bounce_phase(action_phase_cfg_)) {
@@ -4877,6 +4883,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     return reject_query(PSTRING() << "cannot re-create the serialization of  transaction " << lt
                                   << " for smart contract " << addr.to_hex());
   }
+  
   if (!trs->update_limits(*block_limit_status_, /* with_gas = */ false, /* with_size = */ false)) {
     return fatal_error(PSTRING() << "cannot update block limit status to include transaction " << lt << " of account "
                                  << addr.to_hex());
@@ -5005,6 +5012,7 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
   if (account.total_state->get_hash() != account.orig_total_state->get_hash()) {
     // account changed
     if (account.orig_status == block::Account::acc_nonexist) {
+      
       // account created
       CHECK(account.status != block::Account::acc_nonexist);
       vm::CellBuilder cb;
@@ -5025,6 +5033,7 @@ bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_a
         return fatal_error(std::string{"cannot delete account "} + account.addr.to_hex() + " from ShardAccounts");
       }
     } else {
+      
       // existing account modified
       if (verbosity > 4) {
         std::cerr << "modifying account " << account.addr.to_hex() << " to ";
@@ -5076,7 +5085,7 @@ bool ContestValidateQuery::check_transactions() {
         CHECK(key_len == 256);
         return check_account_transactions(key, std::move(value));
       });
-
+      
   return ok;
 }
 
@@ -5258,49 +5267,55 @@ bool ContestValidateQuery::try_validate() {
         return true;
       }
     }
-    LOG(INFO) << "try_validate stage 1";
-    LOG(INFO) << "running automated validity checks for block candidate " << id_.to_str();
-    if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
-      return reject_query("block "s + id_.to_str() + " failed to pass automated validity checks");
-    }
-    if (!fix_all_processed_upto()) {
-      return fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks");
-    }
-    if (!add_trivial_neighbor()) {
-      return fatal_error("cannot add previous block as a trivial neighbor");
-    }
-    if (!unpack_block_data()) {
-      return reject_query("cannot unpack block data");
-    }
-    if (!precheck_account_transactions()) {
-      return reject_query("invalid collection of account transactions in ShardAccountBlocks");
-    }
-    if (!build_new_message_queue()) {
-      return reject_query("cannot build a new message queue");
-    }
-    if (!precheck_message_queue_update()) {
-      return reject_query("invalid OutMsgQueue update");
-    }
-    if (!unpack_dispatch_queue_update()) {
-      return reject_query("invalid DispatchQueue update");
-    }
-    if (!check_in_msg_descr()) {
-      return reject_query("invalid InMsgDescr");
-    }
-    if (!check_out_msg_descr()) {
-      return reject_query("invalid OutMsgDescr");
-    }
-    if (!check_dispatch_queue_update()) {
-      return reject_query("invalid OutMsgDescr");
-    }
-    if (!check_processed_upto()) {
-      return reject_query("invalid ProcessedInfo");
-    }
-    if (!check_in_queue()) {
-      return reject_query("cannot check inbound message queues");
-    }
-    if (!check_transactions()) {
-      return reject_query("invalid collection of account transactions in ShardAccountBlocks");
+    if (stage_ == 1) {
+      LOG(INFO) << "try_validate stage 1";
+      LOG(INFO) << "running automated validity checks for block candidate " << id_.to_str();
+      if (!block::gen::t_BlockRelaxed.validate_ref(10000000, block_root_)) {
+        return reject_query("block "s + id_.to_str() + " failed to pass automated validity checks");
+      }
+      if (!fix_all_processed_upto()) {
+        return fatal_error("cannot adjust all ProcessedUpto of neighbor and previous blocks");
+      }
+      if (!add_trivial_neighbor()) {
+        return fatal_error("cannot add previous block as a trivial neighbor");
+      }
+      if (!unpack_block_data()) {
+        return reject_query("cannot unpack block data");
+      }
+      if (!precheck_account_transactions()) {
+        return reject_query("invalid collection of account transactions in ShardAccountBlocks");
+      }
+      if (!build_new_message_queue()) {
+        return reject_query("cannot build a new message queue");
+      }
+      if (!precheck_message_queue_update()) {
+        return reject_query("invalid OutMsgQueue update");
+      }
+      if (!unpack_dispatch_queue_update()) {
+        return reject_query("invalid DispatchQueue update");
+      }
+      if (!check_in_msg_descr()) {
+        return reject_query("invalid InMsgDescr");
+      }
+      if (!check_out_msg_descr()) {
+        return reject_query("invalid OutMsgDescr");
+      }
+      if (!check_dispatch_queue_update()) {
+        return reject_query("invalid OutMsgDescr");
+      }
+      if (!check_processed_upto()) {
+        return reject_query("invalid ProcessedInfo");
+      }
+      if (!check_in_queue()) {
+        return reject_query("cannot check inbound message queues");
+      }
+      if (!check_transactions()) {
+        return reject_query("invalid collection of account transactions in ShardAccountBlocks");
+      }
+      stage_ = 2;
+      if (pending) {
+        return true;
+      }
     }
     if (!postcheck_account_updates()) {
       return reject_query("invalid AccountState update");

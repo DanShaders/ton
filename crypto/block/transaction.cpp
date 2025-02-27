@@ -27,6 +27,7 @@
 #include "vm/vm.h"
 #include "td/utils/Timer.h"
 
+
 namespace {
 /**
  * Logger that stores the tail of log messages.
@@ -2850,6 +2851,10 @@ static td::uint32 get_public_libraries_diff_count(const td::Ref<vm::Cell>& old_l
  *          - If the state limits are within the allowed range, returns OK.
  *          - If the state limits exceed the maximum allowed range, returns an error.
  */
+
+// static td::HashSet<vm::Cell::Hash, std::hash<vm::CellHash>> seen;
+static unsigned long long dedup_id_c = 1;
+
 td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, bool update_storage_stat) {
   auto cell_equal = [](const td::Ref<vm::Cell>& a, const td::Ref<vm::Cell>& b) -> bool {
     if (a.is_null()) {
@@ -2867,21 +2872,26 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
   vm::CellStorageStat storage_stat;
   storage_stat.limit_cells = size_limits.max_acc_state_cells;
   storage_stat.limit_bits = size_limits.max_acc_state_bits;
+  storage_stat.dedup_id = dedup_id_c++;
   {
     TD_PERF_COUNTER(transaction_storage_stat_a);
+    int w = 0;
     td::Timer timer;
-    auto add_used_storage = [&](const td::Ref<vm::Cell>& cell) -> td::Status {
+    auto add_used_storage = [&](const td::Ref<vm::Cell>& cell, int tt) -> td::Status {
       if (cell.not_null()) {
-        TRY_RESULT(res, storage_stat.add_used_storage(cell));
+        TRY_RESULT(res, storage_stat.add_used_storage(cell, true));
         if (res.max_merkle_depth > max_allowed_merkle_depth) {
           return td::Status::Error("too big merkle depth");
         }
       }
       return td::Status::OK();
     };
-    TRY_STATUS(add_used_storage(new_code));
-    TRY_STATUS(add_used_storage(new_data));
-    TRY_STATUS(add_used_storage(new_library));
+
+    // storage_stat.seen.reserve(60000);
+    TRY_STATUS(add_used_storage(new_code, 4));
+    TRY_STATUS(add_used_storage(new_data, 4));
+    TRY_STATUS(add_used_storage(new_library, 4));
+
     if (timer.elapsed() > 0.1) {
       LOG(INFO) << "Compute used storage took " << timer.elapsed() << "s";
     }
@@ -3538,7 +3548,7 @@ Ref<vm::Cell> Transaction::commit(Account& acc) {
   acc.last_trans_end_lt_ = end_lt;
   acc.last_trans_hash_ = root->get_hash().bits();
   acc.last_paid = last_paid;
-  acc.storage_stat = new_storage_stat;
+  acc.storage_stat = std::move(new_storage_stat);
   acc.storage = new_storage;
   acc.balance = std::move(balance);
   acc.due_payment = std::move(due_payment);

@@ -76,7 +76,7 @@ struct CellHash {
 
 inline size_t cell_hash_slice_hash(td::Slice hash) {
   // use offset 8, because in db keys are grouped by first bytes.
-  return td::as<size_t>(hash.substr(8, 8).ubegin());
+  return td::as<size_t>(hash.ubegin() + 8);
 }
 namespace std {
 template <>
@@ -84,13 +84,13 @@ struct hash<vm::CellHash> {
   typedef vm::CellHash argument_type;
   typedef std::size_t result_type;
   result_type operator()(argument_type const& s) const noexcept {
-    return cell_hash_slice_hash(s.as_slice());
+    return td::as<size_t>(s.as_array().data());
   }
 };
 }  // namespace std
-namespace vm {
-template <class H>
-H AbslHashValue(H h, const CellHash& cell_hash) {
-  return H::combine(std::move(h), std::hash<vm::CellHash>()(cell_hash));
-}
-}  // namespace vm
+// namespace vm {
+// template <class H>
+// H AbslHashValue(H h, const CellHash& cell_hash) {
+//   return H::combine(std::move(h), std::hash<vm::CellHash>()(cell_hash));
+// }
+// }  // namespace vm

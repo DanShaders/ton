@@ -30,6 +30,8 @@ class DataCell : public Cell {
   // NB: cells created with use_arena=true are never freed
   static thread_local bool use_arena;
 
+  static int task_id;
+
   DataCell(const DataCell& other) = delete;
   ~DataCell() override;
 
@@ -39,6 +41,20 @@ class DataCell : public Cell {
   static td::uint16 load_depth(const td::uint8* src) {
     return td::bitstring::bits_load_ulong(src, depth_bits) & 0xffff;
   }
+
+  static bool NEW_COLLATED;
+
+  mutable bool collated = 0;
+
+  void set_dedup_id(unsigned long long d) const{
+    dedup_id = d;
+  }
+
+  void set_collated(bool d) const{
+    collated = d;
+  }
+
+  mutable unsigned long long dedup_id;
 
  protected:
   struct Info {
@@ -211,7 +227,7 @@ class DataCell : public Cell {
     static auto res = td::NamedThreadSafeCounter::get_default().get_counter("DataCell");
     return res;
   }
-  static std::unique_ptr<DataCell> create_empty_data_cell(Info info);
+  static DataCell* create_empty_data_cell(Info info);
 
   const Hash do_get_hash(td::uint32 level) const override;
   td::uint16 do_get_depth(td::uint32 level) const override;

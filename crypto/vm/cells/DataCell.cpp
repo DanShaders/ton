@@ -25,27 +25,52 @@
 #include "vm/cells/CellWithStorage.h"
 
 namespace vm {
-thread_local bool DataCell::use_arena = false;
+thread_local bool DataCell::use_arena = true;
+bool DataCell::NEW_COLLATED = false;
+int DataCell::task_id = 0;
+thread_local int arena_task = 0;
+thread_local std::vector<td::MutableSlice> batch_list1(0);
+thread_local std::vector<td::MutableSlice> batch_list2(0);
+thread_local std::vector<td::MutableSlice>* batch_list = &batch_list1;
+// thread_local std::vector<td::MutableSlice> batch_storage_(0);
+thread_local size_t batch_position = 0;
 
 namespace {
 template <class CellT>
 struct ArenaAllocator {
   template <class T, class... ArgsT>
-  std::unique_ptr<CellT> make_unique(ArgsT&&... args) {
+  CellT* make_unique(ArgsT&&... args) {
     auto* ptr = fast_alloc(sizeof(T));
     T* obj = new (ptr) T(std::forward<ArgsT>(args)...);
-    return std::unique_ptr<T>(obj);
+    return obj;
   }
 private:
   td::MutableSlice alloc_batch() {
-    size_t batch_size = 1 << 20;
-    auto batch = std::make_unique<char[]>(batch_size);
-    return td::MutableSlice(batch.release(), batch_size);
+    if (batch_position != batch_list->size()) {
+      auto batch = batch_list[0][batch_position++];
+      memset(batch.data(), 0, batch.size());
+      return batch;
+    }
+    size_t batch_size = 1 << 23;
+    // auto batch = std::make_unique<char[]>(batch_size);
+    auto batch = static_cast<char*>(malloc(batch_size));
+    batch_list->push_back(td::MutableSlice(batch, batch_size));
+    return batch_list[0][batch_position++];
   }
   char* fast_alloc(size_t size) {
     thread_local td::MutableSlice batch;
     auto aligned_size = (size + 7) / 8 * 8;
-    if (batch.size() < size) {
+    if (arena_task != DataCell::task_id) {
+      if (DataCell::task_id & 1) {
+        batch_list = &batch_list2;
+      } else {
+        batch_list = &batch_list1;
+      }
+      arena_task = DataCell::task_id;
+      batch_position = 0;
+      batch = alloc_batch();
+    }
+    if (batch.size() < aligned_size) {
       batch = alloc_batch();
     }
     auto res = batch.begin();
@@ -54,16 +79,16 @@ private:
   }
 };
 }
-std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
-  if (use_arena) {
+DataCell* DataCell::create_empty_data_cell(Info info) {
+  // if (use_arena) {
     ArenaAllocator<DataCell> allocator;
     auto res = detail::CellWithArrayStorage<DataCell>::create(allocator, info.get_storage_size(), info);
     // this is dangerous
-    Ref<DataCell>(res.get()).release();
+    // Ref<DataCell>(res.get()).release();
     return res;
-  }
+  // }
 
-  return detail::CellWithUniquePtrStorage<DataCell>::create(info.get_storage_size(), info);
+  // return detail::CellWithUniquePtrStorage<DataCell>::create(info.get_storage_size(), info);
 }
 
 DataCell::DataCell(Info info) : info_(std::move(info)) {
@@ -74,10 +99,10 @@ DataCell::~DataCell() {
 }
 
 void DataCell::destroy_storage(char* storage) {
-  auto* refs = info_.get_refs(storage);
-  for (size_t i = 0; i < get_refs_cnt(); i++) {
-    Ref<Cell>(refs[i], Ref<Cell>::acquire_t{});  // call destructor
-  }
+  // auto* refs = info_.get_refs(storage);
+  // for (size_t i = 0; i < get_refs_cnt(); i++) {
+  //   Ref<Cell>(refs[i], Ref<Cell>::acquire_t{});  // call destructor
+  // }
 }
 
 td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, td::Span<Ref<Cell>> refs,
@@ -229,6 +254,8 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
   info.virtualization_ = virtualization & 7;
 
   auto data_cell = create_empty_data_cell(info);
+  data_cell->collated = false;
+  data_cell->dedup_id = 0;
   auto* storage = data_cell->get_storage();
 
   // init data
@@ -321,7 +348,7 @@ td::Result<Ref<DataCell>> DataCell::create(td::ConstBitPtr data, unsigned bits, 
     DCHECK(extracted_size == hash_bytes);
   }
 
-  return Ref<DataCell>(data_cell.release(), Ref<DataCell>::acquire_t{});
+  return Ref<DataCell>(data_cell);
 }
 
 const DataCell::Hash DataCell::do_get_hash(td::uint32 level) const {

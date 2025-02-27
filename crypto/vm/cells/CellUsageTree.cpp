@@ -17,6 +17,7 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "vm/cells/CellUsageTree.h"
+#include "vm/cells/DataCell.h"
 
 namespace vm {
 //
@@ -76,6 +77,10 @@ bool CellUsageTree::is_loaded(NodeId node_id) const {
   return nodes_[node_id].is_loaded;
 }
 
+bool CellUsageTree::subtree_is_loaded(NodeId node_id) const {
+  return nodes_[node_id].subtrees_not_loaded == 0;
+}
+
 bool CellUsageTree::has_mark(NodeId node_id) const {
   return nodes_[node_id].has_mark;
 }
@@ -111,9 +116,22 @@ void CellUsageTree::set_use_mark_for_is_loaded(bool use_mark) {
   use_mark_ = use_mark;
 }
 
+void CellUsageTree::on_child_subtree_loaded(NodeId node_id) {
+  if (node_id == 0) {
+    return;
+  }
+  nodes_[node_id].subtrees_not_loaded--;
+  if (nodes_[node_id].subtrees_not_loaded == 0) {
+    on_child_subtree_loaded(nodes_[node_id].parent);
+  }
+}
+
 void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
   if (nodes_[node_id].is_loaded) {
     return;
+  }
+  if (cell->size_refs()) {
+    on_child_subtree_loaded(nodes_[node_id].parent);
   }
   nodes_[node_id].is_loaded = true;
   if (cell_load_callback_) {
@@ -124,6 +142,7 @@ void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
 CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_id) {
   DCHECK(ref_id < CellTraits::max_refs);
   NodeId res = nodes_[node_id].children[ref_id];
+  nodes_[node_id].subtrees_not_loaded++;
   if (res) {
     return res;
   }

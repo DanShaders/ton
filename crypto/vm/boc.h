@@ -20,7 +20,6 @@
 #include "td/utils/CancellationToken.h"
 
 #include <set>
-#include <map>
 #include "vm/db/DynamicBagOfCellsDb.h"
 #include "vm/cells.h"
 #include "td/utils/Status.h"
@@ -117,7 +116,14 @@ struct CellStorageStat {
   struct CellInfo {
     td::uint32 max_merkle_depth = 0;
   };
-  std::map<vm::Cell::Hash, CellInfo> seen;
+  // struct CellHashA {
+  //   std::size_t operator()(const vm::Cell::Hash& hash) const {
+  //     // return hash.as_array() first bytes as size_t
+  //     return td::as<size_t>(hash.as_slice().ubegin());
+  //   }
+  // };
+  td::HashSet<vm::Cell::Hash, std::hash<vm::CellHash>> seen;
+  unsigned long long dedup_id = 0;
   CellStorageStat() : cells(0), bits(0), public_cells(0) {
   }
   explicit CellStorageStat(unsigned long long limit_cells)
@@ -125,6 +131,7 @@ struct CellStorageStat {
   }
   void clear_seen() {
     seen.clear();
+    dedup_id=0;
   }
   void clear() {
     cells = bits = public_cells = 0;
@@ -287,7 +294,8 @@ class BagOfCells {
   int max_depth{1024};
   Info info;
   unsigned long long data_bytes{0};
-  td::HashMap<Hash, int> cells;
+  
+  td::HashMap<Hash, int, std::hash<Hash>> cells;
   struct CellInfo {
     Ref<DataCell> dc_ref;
     std::array<int, 4> ref_idx;
@@ -379,6 +387,7 @@ class BagOfCells {
   td::Result<td::Slice> get_cell_slice(int index, td::Slice data);
   td::Result<td::Ref<vm::DataCell>> deserialize_cell(int index, td::Slice data, td::Span<td::Ref<DataCell>> cells,
                                                      std::vector<td::uint8>* cell_should_cache);
+  std::array<int, 4> get_ref_idxs(int index, td::Slice data, std::vector<td::uint8>* cell_should_cache);
 };
 
 td::Result<Ref<Cell>> std_boc_deserialize(td::Slice data, bool can_be_empty = false, bool allow_nonzero_level = false);

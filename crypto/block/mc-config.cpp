@@ -483,7 +483,19 @@ td::Result<WorkchainSet> Config::unpack_workchain_list(Ref<vm::Cell> root) {
   return std::move(pair.first);
 }
 
+#define CONTEST_TD_VALIDATOR_MEMOIZE_LAST 2
+thread_local std::array<ValidatorSet, CONTEST_TD_VALIDATOR_MEMOIZE_LAST> last_validator_sets;
+thread_local std::array<vm::Cell::Hash, CONTEST_TD_VALIDATOR_MEMOIZE_LAST> last_validator_set_hashes;
+thread_local int last_index = 0;
+
 td::Result<std::unique_ptr<ValidatorSet>> Config::unpack_validator_set(Ref<vm::Cell> vset_root) {
+  auto hash = vset_root->get_hash();
+  for (int i = 0; i < CONTEST_TD_VALIDATOR_MEMOIZE_LAST; ++i) {
+    if (vset_root->get_hash() == last_validator_set_hashes[i]) {
+      return std::make_unique<ValidatorSet>(last_validator_sets[i]);
+    }
+  }
+
   if (vset_root.is_null()) {
     return td::Status::Error("validator set is absent");
   }
@@ -513,38 +525,52 @@ td::Result<std::unique_ptr<ValidatorSet>> Config::unpack_validator_set(Ref<vm::C
         "maximal index in a validator set dictionary must be one less than the total number of validators");
   }
   auto ptr = std::make_unique<ValidatorSet>(rec.utime_since, rec.utime_until, rec.total, rec.main);
-  for (int i = 0; i < rec.total; i++) {
-    key_buffer.store_ulong(i);
-    auto descr_cs = dict.lookup(key_buffer.bits(), 16);
-    if (descr_cs.is_null()) {
-      return td::Status::Error("indices in a validator set dictionary must be integers 0..total-1");
-    }
-    gen::ValidatorDescr::Record_validator_addr descr;
-    if (!tlb::csr_unpack(descr_cs, descr)) {
-      descr.adnl_addr.set_zero();
-      if (!(gen::t_ValidatorDescr.unpack_validator(descr_cs.write(), descr.public_key, descr.weight) &&
-            descr_cs->empty_ext())) {
-        return td::Status::Error(PSLICE() << "validator #" << i
-                                          << " has an invalid ValidatorDescr record in the validator set dictionary");
-      }
-    }
-    gen::SigPubKey::Record sig_pubkey;
-    if (!tlb::csr_unpack(std::move(descr.public_key), sig_pubkey)) {
-      return td::Status::Error(PSLICE() << "validator #" << i
-                                        << " has no public key or its public key is in unsupported format");
-    }
-    if (!descr.weight) {
-      return td::Status::Error(PSLICE() << "validator #" << i << " has zero weight");
-    }
-    if (descr.weight > ~(ptr->total_weight)) {
-      return td::Status::Error("total weight of all validators in validator set exceeds 2^64");
-    }
-    ptr->list.emplace_back(sig_pubkey.pubkey, descr.weight, ptr->total_weight, descr.adnl_addr);
-    ptr->total_weight += descr.weight;
+  
+  // var for seen keys 1..total
+  std::vector<bool> seen_keys_short(rec.total, false);
+
+  if (!dict.check_for_each([&ptr, &rec, &seen_keys_short](Ref<vm::CellSlice> cs_ref, td::ConstBitPtr key, int n) -> bool {
+        //
+        gen::ValidatorDescr::Record_validator_addr descr;
+        // check seen keys 
+        int i = (int)key.get_int(n);
+        if (i < 0 || i >= rec.total) {
+          return false;
+        }
+        if (seen_keys_short[i]) {
+          return false;
+        }
+        seen_keys_short[i] = true;
+        if (!tlb::csr_unpack(cs_ref, descr)) {
+          descr.adnl_addr.set_zero();
+          if (!(gen::t_ValidatorDescr.unpack_validator(cs_ref.write(), descr.public_key, descr.weight) &&
+                cs_ref->empty_ext())) {
+            return false;
+          }
+        }
+        gen::SigPubKey::Record sig_pubkey;
+        if (!tlb::csr_unpack(std::move(descr.public_key), sig_pubkey)) {
+          return false;
+        }
+        if (!descr.weight) {
+          return false;
+        }
+        if (descr.weight > ~(ptr->total_weight)) {
+          return false;
+        }
+        ptr->list.emplace_back(sig_pubkey.pubkey, descr.weight, ptr->total_weight, descr.adnl_addr);
+        ptr->total_weight += descr.weight;
+        return true;
+      })) {
+    return td::Status::Error("validator set dictionary is invalid");
   }
   if (rec.total_weight && rec.total_weight != ptr->total_weight) {
     return td::Status::Error("validator set declares incorrect total weight");
   }
+
+  last_index = (last_index + 1) % CONTEST_TD_VALIDATOR_MEMOIZE_LAST;
+  last_validator_sets[last_index] = *ptr;
+  last_validator_set_hashes[last_index] = hash;
   return std::move(ptr);
 }
 

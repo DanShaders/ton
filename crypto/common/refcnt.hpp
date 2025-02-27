@@ -33,21 +33,22 @@ class Ref;
 
 class CntObject {
  private:
-  mutable std::atomic<int> cnt_;
+  mutable int cnt_;
   template <class T>
   friend class Ref;
 
   void inc() const {
-    cnt_.fetch_add(1, std::memory_order_relaxed);
+    cnt_++;
   }
   bool dec() const {
-    return cnt_.fetch_sub(1, std::memory_order_acq_rel) == 1;
+    return cnt_-- == 1;
   }
   void inc(int cnt) const {
-    cnt_.fetch_add(cnt, std::memory_order_relaxed);
+    cnt_ +=cnt;
   }
   bool dec(int cnt) const {
-    return cnt_.fetch_sub(cnt, std::memory_order_acq_rel) == cnt;
+    cnt_ -= cnt;
+    return cnt_ == 0;
   }
 
  public:
@@ -65,20 +66,20 @@ class CntObject {
     return *this;
   }
   virtual ~CntObject() {
-    auto cnt = cnt_.load(std::memory_order_relaxed);
-    (void)cnt;
-    //TODO: assert(cnt == 0) will fail if object is allocated on stack
-    assert(cnt == 0 || cnt == 1);
+    // auto cnt = cnt_.load(std::memory_order_relaxed);
+    // (void)cnt;
+    // //TODO: assert(cnt == 0) will fail if object is allocated on stack
+    // assert(cnt == 0 || cnt == 1);
   }
   virtual CntObject* make_copy() const {
     throw WriteError();
   }
   bool is_unique() const {
-    return cnt_.load(std::memory_order_acquire) == 1;
+    return cnt_ == 1;
   }
   int get_refcnt() const {
     // use std::memory_order_acquire
-    return cnt_.load(std::memory_order_acquire);
+    return cnt_;
   }
   void assert_unique() const {
     assert(is_unique());
@@ -285,14 +286,14 @@ class Ref {
   Ref& operator=(Ref<S>&& r);
   const typename RefValue<T>::Type* operator->() const {
     if (!ptr) {
-      CHECK(ptr && "deferencing null Ref");
+      CHECK(ptr && "dereferencing null Ref");
       throw NullRef{};
     }
     return RefValue<T>::make_const_ptr(ptr);
   }
   const typename RefValue<T>::Type& operator*() const {
     if (!ptr) {
-      CHECK(ptr && "deferencing null Ref");
+      CHECK(ptr && "dereferencing null Ref");
       throw NullRef{};
     }
     return RefValue<T>::make_const_ref(ptr);
@@ -308,7 +309,7 @@ class Ref {
   }
   bool is_unique() const {
     if (!ptr) {
-      CHECK(ptr && "defererencing null Ref");
+      CHECK(ptr && "dereferencing null Ref");
       throw NullRef{};
     }
     return ptr->is_unique();

@@ -99,10 +99,15 @@ class MerkleUpdateValidator {
   }
 
  private:
-  td::HashSet<Cell::Hash> known_cells_;
+  td::HashSet<Cell::Hash, std::hash<Cell::Hash>> known_cells_;
   using Key = std::pair<Cell::Hash, int>;
-  td::HashSet<Key> visited_from_;
-  td::HashSet<Key> visited_to_;
+  struct KeyHash {
+    std::size_t operator()(const Key &key) const {
+      return std::hash<Cell::Hash>()(key.first);
+    }
+  };
+  td::HashSet<Key, KeyHash> visited_from_;
+  td::HashSet<Key, KeyHash> visited_to_;
 
   void dfs_from(Ref<Cell> cell, int merkle_depth) {
     if (!visited_from_.emplace(cell->get_hash(), merkle_depth).second) {

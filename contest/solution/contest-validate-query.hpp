@@ -96,7 +96,7 @@ class ContestValidateQuery : public td::actor::Actor {
 
  private:
   int verbosity{0};
-  int pending{0};
+  std::atomic<int> pending{0};
   const ShardIdFull shard_;
   const BlockIdExt id_;
   std::vector<BlockIdExt> prev_blocks;

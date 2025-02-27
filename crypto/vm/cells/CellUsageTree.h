@@ -55,6 +55,7 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   NodePtr root_ptr();
   NodeId root_id() const;
   bool is_loaded(NodeId node_id) const;
+  bool subtree_is_loaded(NodeId node_id) const;
   bool has_mark(NodeId node_id) const;
   void set_mark(NodeId node_id, bool mark = true);
   void mark_path(NodeId node_id);
@@ -71,6 +72,7 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   struct Node {
     bool is_loaded{false};
     bool has_mark{false};
+    short subtrees_not_loaded{0};
     NodeId parent{0};
     std::array<td::uint32, CellTraits::max_refs> children{};
   };
@@ -79,6 +81,7 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   std::function<void(const td::Ref<vm::DataCell>&)> cell_load_callback_;
 
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);
+  void on_child_subtree_loaded(NodeId node_id);
   NodeId create_node(NodeId parent);
 };
 }  // namespace vm

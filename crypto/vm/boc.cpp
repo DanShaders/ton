@@ -29,6 +29,8 @@
 #include "td/utils/misc.h"
 #include "td/utils/Slice-decl.h"
 
+#include "td/actor/actor.h"
+
 namespace vm {
 using td::Ref;
 
@@ -85,6 +87,36 @@ td::Result<int> CellSerializationInfo::get_bits(td::Slice cell) const {
     return td::narrow_cast<int>(data_len * 8);
   }
 }
+
+
+struct CellStore {
+  td::HashMap<Cell::Hash, Ref<DataCell>, std::hash<Cell::Hash>> left;
+  td::HashMap<Cell::Hash, Ref<DataCell>, std::hash<Cell::Hash>> right;
+
+  auto hash_map_of(Cell::Hash hash) {
+    if (
+      hash.as_array()[16] & 0b10000000
+    ) {
+      return &left;
+    } else {
+      return &right;
+    }
+  }
+  // emplace
+  auto emplace(Cell::Hash hash, Ref<DataCell> cell) {
+    return hash_map_of(hash)->emplace(hash, std::move(cell));
+  }
+
+  void reserve(size_t size) {
+    left.reserve(size / 2);
+    right.reserve(size / 2);
+  }
+
+  void clear() {
+    left.clear();
+    right.clear();
+  }
+};
 
 // TODO: check usage when result is empty
 td::Result<Ref<DataCell>> CellSerializationInfo::create_data_cell(td::Slice cell_slice,
@@ -764,6 +796,8 @@ td::Result<td::Slice> BagOfCells::get_cell_slice(int idx, td::Slice data) {
   return data.substr(offs, td::narrow_cast<size_t>(offs_end - offs));
 }
 
+static CellStore cells_set = {};
+
 td::Result<td::Ref<vm::DataCell>> BagOfCells::deserialize_cell(int idx, td::Slice cells_slice,
                                                                td::Span<td::Ref<DataCell>> cells_span,
                                                                std::vector<td::uint8>* cell_should_cache) {
@@ -798,6 +832,42 @@ td::Result<td::Ref<vm::DataCell>> BagOfCells::deserialize_cell(int idx, td::Slic
   }
 
   return cell_info.create_data_cell(cell_slice, refs);
+}
+
+std::array<int, 4> BagOfCells::get_ref_idxs(int idx, td::Slice cells_slice, std::vector<td::uint8>* cell_should_cache) {
+  auto cell_slice = get_cell_slice(idx, cells_slice);
+  if (cell_slice.is_error()) {
+    return {};
+  }
+  CellSerializationInfo cell_info;
+  auto status = cell_info.init(cell_slice.move_as_ok(), info.ref_byte_size);
+  if (status.is_error()) {
+    return {};
+  }
+  std::array<int, 4> refs{};
+  for (int k = 0; k < cell_info.refs_cnt; k++) {
+    int ref_idx = (int)info.read_ref(cell_slice.move_as_ok().ubegin() + cell_info.refs_offset + k * info.ref_byte_size);
+    refs[k] = ref_idx;
+    if (cell_should_cache) {
+      auto& cnt = (*cell_should_cache)[ref_idx];
+      if (cnt < 2) {
+        cnt++;
+      }
+    }
+  }
+  return refs;
+}
+
+bool can_process_yet(std::array<int, 4> refs, int count, td::Span<td::Ref<DataCell>> cells_span) {
+  for (int ref : refs) {
+    if (ref == 0) {
+      break;
+    }
+    if (cells_span[count - ref - 1].is_null()) { // not really safe?
+      return false;
+    }
+  }
+  return true;
 }
 
 td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roots) {
@@ -881,7 +951,7 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
                                         << cur << " is different from total data size " << info.data_size);
     }
   }
-  auto cells_slice = data.substr(info.data_offset, info.data_size);
+ auto cells_slice = data.substr(info.data_offset, info.data_size);
   std::vector<Ref<DataCell>> cell_list;
   cell_list.reserve(cell_count);
   std::array<td::Ref<Cell>, 4> refs_buf;
@@ -893,7 +963,8 @@ td::Result<long long> BagOfCells::deserialize(const td::Slice& data, int max_roo
       return td::Status::Error(PSLICE() << "invalid bag-of-cells failed to deserialize cell #" << idx << " "
                                         << r_cell.error());
     }
-    cell_list.push_back(r_cell.move_as_ok());
+    auto cell = r_cell.move_as_ok();
+    cell_list.push_back(std::move(cell));
     DCHECK(cell_list.back().not_null());
   }
   if (info.has_cache_bits) {
@@ -1003,6 +1074,7 @@ td::Result<std::vector<Ref<Cell>>> std_boc_deserialize_multi(td::Slice data, int
 }
 
 td::Result<td::BufferSlice> std_boc_serialize(Ref<Cell> root, int mode) {
+  cells_set.clear();
   if (root.is_null()) {
     return td::Status::Error("cannot serialize a null cell reference into a bag of cells");
   }
@@ -1142,19 +1214,88 @@ td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(CellSlic
   return res;
 }
 
+static std::list<Ref<Cell>> to_process = {};
+
+static unsigned long long dedup_id_c = 0xffffffffffffffffULL;
+
 td::Result<CellStorageStat::CellInfo> CellStorageStat::add_used_storage(Ref<vm::Cell> cell, bool kill_dup,
                                                                         unsigned skip_count_root) {
+  if (dedup_id == 0) {
+    dedup_id = dedup_id_c--;
+  }
+
   if (cell.is_null()) {
     return td::Status::Error("cell is null");
   }
+  
+  TRY_RESULT(loaded_cell, cell->load_cell());
+  auto data_cell = loaded_cell.data_cell;
+
+  int ignore = 0;
   if (kill_dup) {
-    auto ins = seen.emplace(cell->get_hash(), CellInfo{});
-    if (!ins.second) {
-      return ins.first->second;
+    auto data_cell2 = data_cell;
+    if (!data_cell2->collated or loaded_cell.virt.get_virtualization() != 0) {
+      auto ins2 = cells_set.emplace(cell->get_hash(), data_cell2);
+      if (!ins2.second) {
+        data_cell2 = ins2.first->second;
+      } else {
+        data_cell2->set_collated(true);
+      }
+    }
+    if (data_cell2->dedup_id == dedup_id) {
+      // if (ins.second) {
+      //   dup = 0;
+      // }
+      return CellInfo{};
+    }
+    // if (!ins.second) {
+    //   dup = 1;
+    // }
+    data_cell2->set_dedup_id(dedup_id);
+  }
+
+  if (!ignore) {
+    if (!(skip_count_root & 1)) {
+      ++cells;
+      if (cells > limit_cells) {
+        return td::Status::Error("too many cells");
+      }
+    }
+    if (!(skip_count_root & 2)) {
+      bits += data_cell->size();
+      if (bits > limit_bits) {
+        return td::Status::Error("too many bits");
+      }
     }
   }
-  vm::CellSlice cs{vm::NoVm{}, std::move(cell)};
-  return add_used_storage(std::move(cs), kill_dup, skip_count_root);
+  CellInfo res;
+  int handled_mask = 0;
+  for (unsigned i = 0; i < data_cell->size_refs(); i++) {
+    auto ref = data_cell->get_ref(i);
+    // if (((DataCell*) ref.get())->collated) {
+    //   continue;
+    // }
+    // handled_mask |= 1 << i;
+
+    auto level = loaded_cell.virt.get_level();
+    if (level == Cell::VirtualizationParameters::max_level()) {
+      level = level;
+    } else if (data_cell->special_type() == CellTraits::SpecialType::MerkleProof ||
+               data_cell->special_type() == CellTraits::SpecialType::MerkleUpdate) {
+      level++;
+    }
+
+    auto child_virt = Cell::VirtualizationParameters(static_cast<td::uint8>(level),
+                                          loaded_cell.virt.get_virtualization()); // maybe also add usagecell from cellslice.cpp:fetch_ref
+
+    TRY_RESULT(child, add_used_storage(data_cell->get_ref(i)->virtualize(child_virt), kill_dup));
+    res.max_merkle_depth = std::max(res.max_merkle_depth, child.max_merkle_depth);
+  }
+  if (data_cell->special_type() == CellTraits::SpecialType::MerkleProof ||
+      data_cell->special_type() == CellTraits::SpecialType::MerkleUpdate) {
+    ++res.max_merkle_depth;
+  }
+  return res;
 }
 
 void NewCellStorageStat::add_cell(Ref<Cell> cell) {
