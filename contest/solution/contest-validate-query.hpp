@@ -82,224 +82,194 @@ inline ErrorCtxSet ErrorCtx::set_guard(std::vector<std::string> str_list) {
   return ErrorCtxSet(*this, std::move(str_list));
 }
 
-
-
 #ifndef __CPP11OM_RWLOCK_H__
 #define __CPP11OM_RWLOCK_H__
 
 #include <cassert>
 #include <atomic>
 //#include <random>
-#include "bitfield.h"
-
+// #include "bitfield.h"
 
 //---------------------------------------------------------
 // LightweightSemaphore
 //---------------------------------------------------------
-class LightweightSemaphore
-{
-private:
-    std::atomic<int> m_count;
-    vm::Semaphore m_sema;
+class LightweightSemaphore {
+ private:
+  std::atomic<int> m_count;
+  vm::Semaphore m_sema;
 
-    void waitWithPartialSpinning()
-    {
-        int oldCount;
-        // Is there a better way to set the initial spin count?
-        // If we lower it to 1000, testBenaphore becomes 15x slower on my Core i7-5930K Windows PC,
-        // as threads start hitting the kernel semaphore.
-        int spin = 10000;
-        while (spin--)
-        {
-            oldCount = m_count.load(std::memory_order_relaxed);
-            if ((oldCount > 0) && m_count.compare_exchange_strong(oldCount, oldCount - 1, std::memory_order_acquire))
-                return;
-            std::atomic_signal_fence(std::memory_order_acquire);     // Prevent the compiler from collapsing the loop.
-        }
-        oldCount = m_count.fetch_sub(1, std::memory_order_acquire);
-        if (oldCount <= 0)
-        {
-            m_sema.wait();
-        }
+  void waitWithPartialSpinning() {
+    int oldCount;
+    // Is there a better way to set the initial spin count?
+    // If we lower it to 1000, testBenaphore becomes 15x slower on my Core i7-5930K Windows PC,
+    // as threads start hitting the kernel semaphore.
+    int spin = 10000;
+    while (spin--) {
+      oldCount = m_count.load(std::memory_order_relaxed);
+      if ((oldCount > 0) && m_count.compare_exchange_strong(oldCount, oldCount - 1, std::memory_order_acquire))
+        return;
+      std::atomic_signal_fence(std::memory_order_acquire);  // Prevent the compiler from collapsing the loop.
     }
+    oldCount = m_count.fetch_sub(1, std::memory_order_acquire);
+    if (oldCount <= 0) {
+      m_sema.wait();
+    }
+  }
 
-public:
-    LightweightSemaphore(int initialCount = 0) : m_count(initialCount)
-    {
-        assert(initialCount >= 0);
-    }
+ public:
+  LightweightSemaphore(int initialCount = 0) : m_count(initialCount) {
+    assert(initialCount >= 0);
+  }
 
-    bool tryWait()
-    {
-        int oldCount = m_count.load(std::memory_order_relaxed);
-        return (oldCount > 0 && m_count.compare_exchange_strong(oldCount, oldCount - 1, std::memory_order_acquire));
-    }
+  bool tryWait() {
+    int oldCount = m_count.load(std::memory_order_relaxed);
+    return (oldCount > 0 && m_count.compare_exchange_strong(oldCount, oldCount - 1, std::memory_order_acquire));
+  }
 
-    void wait()
-    {
-        if (!tryWait())
-            waitWithPartialSpinning();
-    }
+  void wait() {
+    if (!tryWait())
+      waitWithPartialSpinning();
+  }
 
-    void signal(int count = 1)
-    {
-        int oldCount = m_count.fetch_add(count, std::memory_order_release);
-        int toRelease = -oldCount < count ? -oldCount : count;
-        if (toRelease > 0)
-        {
-            m_sema.signal(toRelease);
-        }
+  void signal(int count = 1) {
+    int oldCount = m_count.fetch_add(count, std::memory_order_release);
+    int toRelease = -oldCount < count ? -oldCount : count;
+    if (toRelease > 0) {
+      m_sema.signal(toRelease);
     }
+  }
 };
-
 
 typedef LightweightSemaphore DefaultSemaphoreType;
 
 //---------------------------------------------------------
 // NonRecursiveRWLock
 //---------------------------------------------------------
-class NonRecursiveRWLock
-{
-private:
-    BEGIN_BITFIELD_TYPE(Status, uint32_t)
-        ADD_BITFIELD_MEMBER(readers, 0, 10)
-        ADD_BITFIELD_MEMBER(waitToRead, 10, 10)
-        ADD_BITFIELD_MEMBER(writers, 20, 10)
-    END_BITFIELD_TYPE()
+class NonRecursiveRWLock {
+ private:
+  struct Status {
+    unsigned readers = 0;
+    unsigned waitToRead = 0;
+    unsigned writers = 0;
 
-    std::atomic<uint32_t> m_status;
-    DefaultSemaphoreType m_readSema;
-    DefaultSemaphoreType m_writeSema;
-
-public:
-    NonRecursiveRWLock() : m_status(0) {}
-    
-    void lockReader()
-    {
-        Status oldStatus = m_status.load(std::memory_order_relaxed);
-        Status newStatus;
-        do
-        {
-            newStatus = oldStatus;
-            if (oldStatus.writers > 0)
-            {
-                newStatus.waitToRead++;
-            }
-            else
-            {
-                newStatus.readers++;
-            }
-            // CAS until successful. On failure, oldStatus will be updated with the latest value.
-        }
-        while (!m_status.compare_exchange_weak(oldStatus, newStatus,
-                                               std::memory_order_acquire, std::memory_order_relaxed));
-
-        if (oldStatus.writers > 0)
-        {
-            m_readSema.wait();
-        }
+    static Status from_u32(uint32_t value) {
+      return {
+          .readers = (value >> 0) & 1023,
+          .waitToRead = (value >> 10) & 1023,
+          .writers = (value >> 20) & 1023,
+      };
     }
 
-    void unlockReader()
-    {
-        Status oldStatus = m_status.fetch_sub(Status().readers.one(), std::memory_order_release);
-        assert(oldStatus.readers > 0);
-        if (oldStatus.readers == 1 && oldStatus.writers > 0)
-        {
-            m_writeSema.signal();
-        }
+    uint32_t to_u32() const {
+      return (readers & 1023) | (waitToRead & 1023 << 10) | (writers & 1023 << 20);
     }
+  };
 
-    void lockWriter()
-    {
-        Status oldStatus = m_status.fetch_add(Status().writers.one(), std::memory_order_acquire);
-        assert(oldStatus.writers + 1 <= Status().writers.maximum());
-        if (oldStatus.readers > 0 || oldStatus.writers > 0)
-        {
-            m_writeSema.wait();
-        }
+  std::atomic<uint32_t> m_status;
+  DefaultSemaphoreType m_readSema;
+  DefaultSemaphoreType m_writeSema;
+
+ public:
+  NonRecursiveRWLock() : m_status(0) {
+  }
+
+  void lockReader() {
+    uint32_t oldStatus = m_status.load(std::memory_order_relaxed);
+    Status newStatus;
+    do {
+      newStatus = Status::from_u32(oldStatus);
+      if (newStatus.writers > 0) {
+        newStatus.waitToRead++;
+      } else {
+        newStatus.readers++;
+      }
+      // CAS until successful. On failure, oldStatus will be updated with the latest value.
+    } while (!m_status.compare_exchange_weak(oldStatus, newStatus.to_u32(), std::memory_order_acquire,
+                                             std::memory_order_relaxed));
+
+    if (Status::from_u32(oldStatus).writers > 0) {
+      m_readSema.wait();
     }
+  }
 
-    void unlockWriter()
-    {
-        Status oldStatus = m_status.load(std::memory_order_relaxed);
-        Status newStatus;
-        uint32_t waitToRead = 0;
-        do
-        {
-            assert(oldStatus.readers == 0);
-            newStatus = oldStatus;
-            newStatus.writers--;
-            waitToRead = oldStatus.waitToRead;
-            if (waitToRead > 0)
-            {
-                newStatus.waitToRead = 0;
-                newStatus.readers = waitToRead;
-            }
-            // CAS until successful. On failure, oldStatus will be updated with the latest value.
-        }
-        while (!m_status.compare_exchange_weak(oldStatus, newStatus,
-                                               std::memory_order_release, std::memory_order_relaxed));
-
-        if (waitToRead > 0)
-        {
-            m_readSema.signal(waitToRead);
-        }
-        else if (oldStatus.writers > 1)
-        {
-            m_writeSema.signal();
-        }
+  void unlockReader() {
+    Status oldStatus = Status::from_u32(m_status.fetch_sub(Status{.readers = 1}.to_u32(), std::memory_order_release));
+    assert(oldStatus.readers > 0);
+    if (oldStatus.readers == 1 && oldStatus.writers > 0) {
+      m_writeSema.signal();
     }
+  }
+
+  void lockWriter() {
+    Status oldStatus = Status::from_u32(m_status.fetch_add(Status{.writers = 1}.to_u32(), std::memory_order_acquire));
+    assert(oldStatus.writers + 1 <= Status().writers.maximum());
+    if (oldStatus.readers > 0 || oldStatus.writers > 0) {
+      m_writeSema.wait();
+    }
+  }
+
+  void unlockWriter() {
+    uint32_t oldStatus = m_status.load(std::memory_order_relaxed);
+    Status newStatus;
+    uint32_t waitToRead = 0;
+    do {
+      assert(oldStatus.readers == 0);
+      newStatus = Status::from_u32(oldStatus);
+      newStatus.writers--;
+      waitToRead = newStatus.waitToRead;
+      if (waitToRead > 0) {
+        newStatus.waitToRead = 0;
+        newStatus.readers = waitToRead;
+      }
+      // CAS until successful. On failure, oldStatus will be updated with the latest value.
+    } while (!m_status.compare_exchange_weak(oldStatus, newStatus.to_u32(), std::memory_order_release,
+                                             std::memory_order_relaxed));
+
+    if (waitToRead > 0) {
+      m_readSema.signal(waitToRead);
+    } else if (Status::from_u32(oldStatus).writers > 1) {
+      m_writeSema.signal();
+    }
+  }
 };
-
 
 //---------------------------------------------------------
 // ReadLockGuard
 //---------------------------------------------------------
 template <class LockType>
-class ReadLockGuard
-{
-private:
-    LockType& m_lock;
+class ReadLockGuard {
+ private:
+  LockType& m_lock;
 
-public:
-    ReadLockGuard(LockType& lock) : m_lock(lock)
-    {
-        m_lock.lockReader();
-    }
+ public:
+  ReadLockGuard(LockType& lock) : m_lock(lock) {
+    m_lock.lockReader();
+  }
 
-    ~ReadLockGuard()
-    {
-        m_lock.unlockReader();
-    }
+  ~ReadLockGuard() {
+    m_lock.unlockReader();
+  }
 };
-
 
 //---------------------------------------------------------
 // WriteLockGuard
 //---------------------------------------------------------
 template <class LockType>
-class WriteLockGuard
-{
-private:
-    LockType& m_lock;
+class WriteLockGuard {
+ private:
+  LockType& m_lock;
 
-public:
-    WriteLockGuard(LockType& lock) : m_lock(lock)
-    {
-        m_lock.lockWriter();
-    }
+ public:
+  WriteLockGuard(LockType& lock) : m_lock(lock) {
+    m_lock.lockWriter();
+  }
 
-    ~WriteLockGuard()
-    {
-        m_lock.unlockWriter();
-    }
+  ~WriteLockGuard() {
+    m_lock.unlockWriter();
+  }
 };
 
-
-#endif // __CPP11OM_RWLOCK_H__
-
-
+#endif  // __CPP11OM_RWLOCK_H__
 
 class ContestValidateQuery : public td::actor::Actor {
   static constexpr int supported_version() {
