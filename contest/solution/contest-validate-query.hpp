@@ -388,6 +388,9 @@ class ContestValidateQuery : public td::actor::Actor {
   std::vector<block::StoragePrices> storage_prices_;
   block::StoragePhaseConfig storage_phase_cfg_{&storage_prices_};
   block::ComputePhaseConfig compute_phase_cfg_;
+  NonRecursiveRWLock comp_cfg_mtx;
+  NonRecursiveRWLock strg_cfg_mtx;
+  NonRecursiveRWLock actp_cfg_mtx;
   block::ActionPhaseConfig action_phase_cfg_;
   td::RefInt256 masterchain_create_fee_, basechain_create_fee_;
 
@@ -409,6 +412,7 @@ class ContestValidateQuery : public td::actor::Actor {
   //std::atomic<int> pushed_all_jobs_flag = {0};
 
   std::unique_ptr<vm::AugmentedDictionary> in_msg_dict_, out_msg_dict_, account_blocks_dict_;
+  NonRecursiveRWLock out_msg_dict_mtx;
   block::ValueFlow value_flow_;
   block::CurrencyCollection import_created_, transaction_fees_, total_burned_{0}, fees_burned_{0};
   td::RefInt256 import_fees_;

@@ -33,7 +33,7 @@ namespace vm {
 #include <cassert>
 #include <atomic>
 //#include <random>
-#include "trbitfield.h"
+//#include "trbitfield.h"
 
 //preshing's semaphore
 
@@ -247,7 +247,7 @@ public:
 
 
 typedef LightweightSemaphore DefaultSemaphoreType;
-
+/*
 //---------------------------------------------------------
 // NonRecursiveRWLock
 //---------------------------------------------------------
@@ -387,7 +387,7 @@ public:
     {
         m_lock.unlockWriter();
     }
-};
+};*/
 
 
 class DataCell;

@@ -1853,7 +1853,7 @@ bool ContestValidateQuery::postcheck_one_account_update(td::ConstBitPtr acc_id, 
                                                         Ref<vm::CellSlice> new_value) {
   LOG(DEBUG) << "checking update of account " << acc_id.to_hex(256);
   {
-    WriteLockGuard<NonRecursiveRWLock> lock(account_dict_mtx);
+    //WriteLockGuard<NonRecursiveRWLock> lock(account_dict_mtx);
     old_value = ps_.account_dict_->extract_value(std::move(old_value));
     new_value = ns_.account_dict_->extract_value(std::move(new_value));
   }
@@ -4472,13 +4472,16 @@ std::unique_ptr<block::Account> ContestValidateQuery::make_account_from(td::Cons
  *          Returns nullptr if an error occured.
  */
 std::unique_ptr<block::Account> ContestValidateQuery::unpack_account(td::ConstBitPtr addr) {
-  std::pair<Ref<vm::CellSlice>, Ref<vm::CellSlice>> dict_entry;
+  Ref<vm::CellSlice> efirst;
   {
+    std::pair<Ref<vm::CellSlice>, Ref<vm::CellSlice>> dict_entry;
+    
     WriteLockGuard<NonRecursiveRWLock> lock(account_dict_mtx);
     dict_entry = ps_.account_dict_->lookup_extra(addr, 256);
+    efirst = std::move(dict_entry.first);
   }
   
-  auto new_acc = make_account_from(addr, std::move(dict_entry.first));
+  auto new_acc = make_account_from(addr, efirst);
   if (!new_acc) {
     reject_query("cannot load state of account "s + addr.to_hex(256) + " from previous shardchain state");
     return {};
@@ -4621,7 +4624,12 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   for (int i = 0; i < trans.outmsg_cnt; i++) {
     auto out_msg_root = out_dict.lookup_ref(td::BitArray<15>{i});
     CHECK(out_msg_root.not_null());  // we have pre-checked this
-    auto out_descr_cs = out_msg_dict_->lookup(out_msg_root->get_hash().as_bitslice());
+    
+    Ref<vm::CellSlice> out_descr_cs;
+    {
+      WriteLockGuard<NonRecursiveRWLock> lock(out_msg_dict_mtx);
+      out_descr_cs = out_msg_dict_->lookup(out_msg_root->get_hash().as_bitslice());
+    }
     if (out_descr_cs.is_null()) {
       return false;/*return reject_query(PSTRING() << "outbound message #" << i + 1 << " with hash "
                                     << out_msg_root->get_hash().to_hex() << " of transaction " << lt << " of account "
@@ -4862,8 +4870,11 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
     }
   }
   if (trs->bounce_enabled) {
-    if (!trs->prepare_storage_phase(storage_phase_cfg_, true)) {
-      return false;//return reject_query(PSTRING() << "cannot re-create storage phase of transaction " << lt << " for smart contract " << addr.to_hex());
+    {
+      WriteLockGuard<NonRecursiveRWLock> lock(strg_cfg_mtx);
+      if (!trs->prepare_storage_phase(storage_phase_cfg_, true)) {
+        return false;//return reject_query(PSTRING() << "cannot re-create storage phase of transaction " << lt << " for smart contract " << addr.to_hex());
+      }
     }
     if (need_credit_phase && !trs->prepare_credit_phase()) {
       return false;/*reject_query(PSTRING() << "cannot create re-credit phase of transaction " << lt << " for smart contract "
@@ -4874,14 +4885,20 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
       return false;/*return false;return reject_query(PSTRING() << "cannot re-create credit phase of transaction " << lt << " for smart contract "
                                     << addr.to_hex());*/
     }
-    if (!trs->prepare_storage_phase(storage_phase_cfg_, true, need_credit_phase)) {
-      return false;/*return reject_query(PSTRING() << "cannot re-create storage phase of transaction " << lt << " for smart contract "
-                                    << addr.to_hex());*/
+    {
+      WriteLockGuard<NonRecursiveRWLock> lock(strg_cfg_mtx);
+      if (!trs->prepare_storage_phase(storage_phase_cfg_, true, need_credit_phase)) {
+        return false;/*return reject_query(PSTRING() << "cannot re-create storage phase of transaction " << lt << " for smart contract "
+                      << addr.to_hex());*/
+      }
     }
   }
-  if (!trs->prepare_compute_phase(compute_phase_cfg_)) {
-    return false;/*return reject_query(PSTRING() << "cannot re-create compute phase of transaction " << lt << " for smart contract "
-                                  << addr.to_hex());*/
+  {
+    WriteLockGuard<NonRecursiveRWLock> lock(comp_cfg_mtx);
+    if (!trs->prepare_compute_phase(compute_phase_cfg_)) {
+      return false;/*return reject_query(PSTRING() << "cannot re-create compute phase of transaction " << lt << " for smart contract "
+                    << addr.to_hex());*/
+    }
   }
   if (!trs->compute_phase->accepted) {
     if (external) {
@@ -4890,13 +4907,17 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
       return false;//return reject_query(PSTRING() << "inbound internal message processed by ordinary transaction " << lt << " of account " << addr.to_hex() << " was not processed without any reason");
     }
   }
-  if (trs->compute_phase->success && !trs->prepare_action_phase(action_phase_cfg_)) {
-    return false;//return reject_query(PSTRING() << "cannot re-create action phase of transaction " << lt << " for smart contract " << addr.to_hex());
-  }
-  if (trs->bounce_enabled &&
-      (!trs->compute_phase->success || trs->action_phase->state_exceeds_limits || trs->action_phase->bounce) &&
-      !trs->prepare_bounce_phase(action_phase_cfg_)) {
-    return false;//return reject_query(PSTRING() << "cannot re-create bounce phase of  transaction " << lt << " for smart contract " << addr.to_hex());
+  
+  {
+    WriteLockGuard<NonRecursiveRWLock> lock(actp_cfg_mtx);
+    if (trs->compute_phase->success && !trs->prepare_action_phase(action_phase_cfg_)) {
+      return false;//return reject_query(PSTRING() << "cannot re-create action phase of transaction " << lt << " for smart contract " << addr.to_hex());
+    }
+    if (trs->bounce_enabled &&
+        (!trs->compute_phase->success || trs->action_phase->state_exceeds_limits || trs->action_phase->bounce) &&
+        !trs->prepare_bounce_phase(action_phase_cfg_)) {
+      return false;//return reject_query(PSTRING() << "cannot re-create bounce phase of  transaction " << lt << " for smart contract " << addr.to_hex());
+    }
   }
   if (!trs->serialize()) {
     return false;//return reject_query(PSTRING() << "cannot re-create the serialization of  transaction " << lt << " for smart contract " << addr.to_hex());
@@ -4912,18 +4933,24 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
   if (!is_special_tx && !trs->gas_limit_overridden && trans_type == block::transaction::Transaction::tr_ord) {
     (account.is_special ? total_special_gas_used_ : total_gas_used_) += trs->gas_used();
   }
-  if (total_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.gas_limit) {
-    return false;/*return reject_query(PSTRING() << "gas block limits are exceeded: total_gas_used > gas_limit_hard + trx_gas_limit ("
-                                  << "total_gas_used=" << total_gas_used_
-                                  << ", gas_limit_hard=" << block_limits_->gas.hard()
-                                  << ", trx_gas_limit=" << compute_phase_cfg_.gas_limit << ")");*/
+  {
+    WriteLockGuard<NonRecursiveRWLock> lock(comp_cfg_mtx);
+    if (total_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.gas_limit) {
+      return false;/*return reject_query(PSTRING() << "gas block limits are exceeded: total_gas_used > gas_limit_hard + trx_gas_limit ("
+                    << "total_gas_used=" << total_gas_used_
+                    << ", gas_limit_hard=" << block_limits_->gas.hard()
+                    << ", trx_gas_limit=" << compute_phase_cfg_.gas_limit << ")");*/
+    }
   }
-  if (total_special_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.special_gas_limit) {
-    return false;/*return reject_query(
-        PSTRING() << "gas block limits are exceeded: total_special_gas_used > gas_limit_hard + special_gas_limit ("
-                  << "total_special_gas_used=" << total_special_gas_used_
-                  << ", gas_limit_hard=" << block_limits_->gas.hard()
-                  << ", special_gas_limit=" << compute_phase_cfg_.special_gas_limit << ")");*/
+  {
+    WriteLockGuard<NonRecursiveRWLock> lock(comp_cfg_mtx);
+    if (total_special_gas_used_ > block_limits_->gas.hard() + compute_phase_cfg_.special_gas_limit) {
+      return false;/*return reject_query(
+                    PSTRING() << "gas block limits are exceeded: total_special_gas_used > gas_limit_hard + special_gas_limit ("
+                    << "total_special_gas_used=" << total_special_gas_used_
+                    << ", gas_limit_hard=" << block_limits_->gas.hard()
+                    << ", special_gas_limit=" << compute_phase_cfg_.special_gas_limit << ")");*/
+    }
   }
 
   auto trans_root2 = trs->commit(account);
@@ -5164,7 +5191,8 @@ bool ContestValidateQuery::check_transactions() {
         auto value_copy = Ref<vm::CellSlice>{true, value->clone()};
         std::function<void()> proc_func = [this, value = std::move(value_copy), key_array = key_array](){
           
-          if(check_account_transactions(td::ConstBitPtr(key_array.data()), value) == false)
+          auto value_arg = value;
+          if(check_account_transactions(td::ConstBitPtr(key_array.data()), std::move(value_arg)) == false)
           {
             printf("setting encountered invalid\n");
             flag_encountered_invalid.store(1, std::memory_order_relaxed);
