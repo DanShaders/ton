@@ -158,7 +158,7 @@ struct ValidatorManagerOptionsImpl : public ValidatorManagerOptions {
     return collators_list_;
   }
   bool check_collator_node_whitelist(adnl::AdnlNodeIdShort id) const override {
-    return !collator_node_whitelist_enabled_ || collator_node_whitelist_.contains(id);
+    return !collator_node_whitelist_enabled_ || collator_node_whitelist_.count(id) > 0;
   }
 
   void set_zero_block_id(BlockIdExt block_id) override {

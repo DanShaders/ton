@@ -23,6 +23,7 @@ using td::Ref;
 class ErrorCtxAdd;
 class ErrorCtxSet;
 
+
 struct ErrorCtx {
  protected:
   friend class ErrorCtxAdd;
@@ -131,7 +132,7 @@ class ContestValidateQuery : public td::actor::Actor {
 
   Ref<vm::Cell> block_root_;
   std::vector<Ref<vm::Cell>> collated_roots_;
-  std::map<RootHash, Ref<vm::Cell>> virt_roots_;
+  std::unordered_map<RootHash, Ref<vm::Cell>> virt_roots_;
   std::unique_ptr<vm::Dictionary> top_shard_descr_dict_;
   block::gen::ExtraCollatedData::Record extra_collated_data_;
   bool have_extra_collated_data_ = false;

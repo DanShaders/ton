@@ -15,6 +15,8 @@
 #include "common/errorlog.h"
 #include "fabric.h"
 #include <ctime>
+#include <future>
+
 
 namespace solution {
 
@@ -291,17 +293,41 @@ void ContestValidateQuery::start_up() {
  */
 bool ContestValidateQuery::unpack_block_candidate() {
   vm::BagOfCells boc1, boc2;
-  // 1. deserialize block itself
-  auto res1 = boc1.deserialize(block_data);
-  if (res1.is_error()) {
-    return reject_query("cannot deserialize block", res1.move_as_error());
+
+  // Start deserializing block data asynchronously
+  auto future_block = std::async(std::launch::async, [&]() {
+    auto res1 = boc1.deserialize(block_data.as_slice());
+    if (res1.is_error()) {
+      return reject_query("cannot deserialize block", res1.move_as_error());
+    }
+    if (boc1.get_root_count() != 1) {
+      return reject_query("block BoC must contain exactly one root");
+    }
+    block_root_ = boc1.get_root_cell();
+    CHECK(block_root_.not_null());
+    return true;
+  });
+
+  // Start deserializing collated data asynchronously
+  auto future_collated = std::async(std::launch::async, [&]() {
+    auto res2 = boc2.deserialize(collated_data.as_slice());
+    if (res2.is_error()) {
+      return reject_query("cannot deserialize collated data", res2.move_as_error());
+    }
+    int n = boc2.get_root_count();
+    CHECK(n >= 0);
+    for (int i = 0; i < n; i++) {
+      collated_roots_.emplace_back(boc2.get_root_cell(i));
+    }
+    return true;
+  });
+
+  // Wait for both async tasks to complete
+  if (!future_block.get() || !future_collated.get()) {
+    return false;  // One of the tasks failed
   }
-  if (boc1.get_root_count() != 1) {
-    return reject_query("block BoC must contain exactly one root");
-  }
-  block_root_ = boc1.get_root_cell();
-  CHECK(block_root_.not_null());
-  // 3. initial block parse
+
+  // Initial block parse
   {
     auto guard = error_ctx_add_guard("parsing block header");
     try {
@@ -314,18 +340,8 @@ bool ContestValidateQuery::unpack_block_candidate() {
       return reject_query(err.get_msg());
     }
   }
-  // ...
-  // 8. deserialize collated data
-  auto res2 = boc2.deserialize(collated_data);
-  if (res2.is_error()) {
-    return reject_query("cannot deserialize collated data", res2.move_as_error());
-  }
-  int n = boc2.get_root_count();
-  CHECK(n >= 0);
-  for (int i = 0; i < n; i++) {
-    collated_roots_.emplace_back(boc2.get_root_cell(i));
-  }
-  // 9. extract/classify collated data
+
+  // Extract and classify collated data
   return extract_collated_data();
 }
 
@@ -470,20 +486,20 @@ bool ContestValidateQuery::extract_collated_data_from(Ref<vm::Cell> croot, int i
  * @returns True if the extraction is successful, False otherwise.
  */
 bool ContestValidateQuery::extract_collated_data() {
-  int i = -1;
-  for (auto croot : collated_roots_) {
-    ++i;
-    auto guard = error_ctx_add_guard(PSTRING() << "collated datum #" << i);
-    try {
+  try {
+    for (size_t i = 0; i < collated_roots_.size(); ++i) {
+      auto& croot = collated_roots_[i];
+      auto guard = error_ctx_add_guard(PSTRING() << "collated datum #" << i);
       if (!extract_collated_data_from(croot, i)) {
         return reject_query("cannot unpack collated datum");
       }
-    } catch (vm::VmError& err) {
-      return reject_query(PSTRING() << "vm error " << err.get_msg());
-    } catch (vm::VmVirtError& err) {
-      return reject_query(PSTRING() << "virtualization error " << err.get_msg());
     }
+  } catch (vm::VmError& err) {
+      return reject_query(PSTRING() << "vm error " << err.get_msg());
+  } catch (vm::VmVirtError& err) {
+      return reject_query(PSTRING() << "virtualization error " << err.get_msg());
   }
+
   if (!have_extra_collated_data_) {
     return reject_query("no extra collated data");
   }
@@ -971,13 +987,11 @@ bool ContestValidateQuery::compute_prev_state() {
 
   prev_state_root_ = prev_states[0]->root_cell();
   CHECK(prev_state_root_.not_null());
+
   if (after_merge_) {
-    Ref<vm::Cell> aux_root = prev_states[1]->root_cell();
-    if (!block::gen::t_ShardState.cell_pack_split_state(prev_state_root_, prev_states[0]->root_cell(),
-                                                        prev_states[1]->root_cell())) {
-      return fatal_error(-667, "cannot construct mechanically merged previously state");
-    }
+    prev_state_root_ = vm::UsageCell::create(prev_states[0]->root_cell(), state_usage_tree_->root_ptr());
   }
+
   state_usage_tree_ = std::make_shared<vm::CellUsageTree>();
   prev_state_root_ = vm::UsageCell::create(prev_state_root_, state_usage_tree_->root_ptr());
   return true;
@@ -1345,35 +1359,41 @@ void ContestValidateQuery::after_get_aux_shard_state(ton::BlockIdExt blkid, td::
  * @returns True if the utime and logical time pass checks, False otherwise.
  */
 bool ContestValidateQuery::check_utime_lt() {
-  if (start_lt_ <= ps_.lt_) {
-    return reject_query(PSTRING() << "block has start_lt " << start_lt_ << " less than or equal to lt " << ps_.lt_
-                                  << " of the previous state");
+  // Precompute limits
+  auto lt_bound = std::max({ps_.lt_, config_->lt, max_shard_lt_});
+  auto lt_limit = lt_bound + config_->get_lt_align() * 4;
+  auto lt_diff = end_lt_ - start_lt_;
+
+  // Batch failure conditions
+  if (start_lt_ <= ps_.lt_ || now_ <= ps_.utime_ || now_ <= config_->utime || start_lt_ <= config_->lt) {
+    std::ostringstream err_msg;
+    if (start_lt_ <= ps_.lt_)
+      err_msg << "start_lt " << start_lt_ << " <= previous state lt " << ps_.lt_;
+    else if (now_ <= ps_.utime_)
+      err_msg << "creation time " << now_ << " <= previous state time (" << ps_.utime_ << ")";
+    else if (now_ <= config_->utime)
+      err_msg << "creation time " << now_ << " <= masterchain state time (" << config_->utime << ")";
+    else
+      err_msg << "start_lt " << start_lt_ << " <= reference masterchain lt " << config_->lt;
+    return reject_query(err_msg.str());
   }
-  if (now_ <= ps_.utime_) {
-    return reject_query(PSTRING() << "block has creation time " << now_
-                                  << " less than or equal to that of the previous state (" << ps_.utime_ << ")");
+
+  // Check start_lt upper bound
+  if (start_lt_ > lt_limit) {
+    return reject_query(
+        PSTRING() << "start_lt " << start_lt_ << " too large (limit: " << lt_limit << ")");
   }
-  if (now_ <= config_->utime) {
-    return reject_query(PSTRING() << "block has creation time " << now_
-                                  << " less than or equal to that of the reference masterchain state ("
-                                  << config_->utime << ")");
+
+  // Ensure logical time delta does not exceed block limit
+  if (lt_diff > block_limits_->lt_delta.hard()) {
+    return reject_query(
+        PSTRING() << "block logical time increased by " << lt_diff
+                  << " (limit: " << block_limits_->lt_delta.hard() << ")");
   }
-  if (start_lt_ <= config_->lt) {
-    return reject_query(PSTRING() << "block has start_lt " << start_lt_ << " less than or equal to lt " << config_->lt
-                                  << " of the reference masterchain state");
-  }
-  auto lt_bound = std::max(ps_.lt_, std::max(config_->lt, max_shard_lt_));
-  if (start_lt_ > lt_bound + config_->get_lt_align() * 4) {
-    return reject_query(PSTRING() << "block has start_lt " << start_lt_
-                                  << " which is too large without a good reason (lower bound is " << lt_bound + 1
-                                  << ")");
-  }
-  if (end_lt_ - start_lt_ > block_limits_->lt_delta.hard()) {
-    return reject_query(PSTRING() << "block increased logical time by " << end_lt_ - start_lt_
-                                  << " which is larger than the hard limit " << block_limits_->lt_delta.hard());
-  }
+
   return true;
 }
+
 
 /**
  * Reads the size of the outbound message queue from the previous state(s), or requests it if needed.

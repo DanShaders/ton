@@ -645,6 +645,8 @@ class BitArray {
   }
 };
 
+
+
 using Bits256 = BitArray<256>;
 using Bits128 = BitArray<128>;
 
@@ -669,3 +671,12 @@ Ref<BitString> make_bitstring_ref(const BitArray<N>& value) {
 }
 
 }  // namespace td
+
+namespace std {
+template <unsigned n>
+struct hash<td::BitArray<n>> {
+  size_t operator()(const td::BitArray<n>& x) const {
+    return hash<string>{}(string(reinterpret_cast<const char*>(x.data()), (n + 7) / 8));
+  }
+};
+}

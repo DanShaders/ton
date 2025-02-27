@@ -3629,7 +3629,7 @@ void ValidatorManagerImpl::init_validator_telemetry() {
     }
   }
   for (auto it = validator_telemetry_.begin(); it != validator_telemetry_.end();) {
-    if (processed.contains(it->first)) {
+    if (processed.count(it->first) == 0) {
       ++it;
     } else {
       it = validator_telemetry_.erase(it);
