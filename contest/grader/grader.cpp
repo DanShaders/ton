@@ -38,6 +38,8 @@ class ContestGrader : public td::actor::Actor {
   }
 
   void start_up() override {
+    vm::detail::push_thread_pool::tpool_init();
+    
     vm::init_vm().ensure();
     scan_tests_dir();
     run_next_test();

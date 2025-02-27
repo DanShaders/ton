@@ -20,8 +20,12 @@
 #include "vm/cells/Cell.h"
 #include "td/utils/buffer.h"
 
+#include "td/utils/HashMap.h"
+#include "td/utils/HashSet.h"
+
 #include <utility>
 #include <functional>
+#include <thread>
 
 namespace vm {
 
@@ -50,6 +54,85 @@ class MerkleProof {
   static Ref<Cell> combine_raw(Ref<Cell> a, Ref<Cell> b);
   static Ref<Cell> combine_fast_raw(Ref<Cell> a, Ref<Cell> b);
 };
+
+namespace detail {
+
+
+
+class ContestValidateQuery;
+
+class alignas(128) thread_pool_out_data
+{
+public:
+  //Ref<Cell> out_data_cell;
+  
+  std::atomic<int> out_data_flag = { 0 };
+  Semaphore out_data_sema;
+};
+
+
+//64 is based on x86's hardware destructive interference size, should also be 128 for arm
+class alignas(128) push_thread_pool_data
+{
+public:
+  
+  //we know we will do dfs, just store data
+  //ContestValidateQuery* in_data_context_obj = 0;
+  //const StdSmcAddress& in_data_acc_addr;
+  //Ref<vm::CellSlice> in_data_acc_blk_root = 0;
+  
+  thread_pool_out_data* out_data_memptr = 0;
+  std::function<void()> in_data_exec_lambda;
+  
+  std::atomic<int> flag = { 0 };
+  Semaphore sema;
+};
+
+class push_thread_pool
+{
+public:
+  static push_thread_pool_data task_pushed_data[8];
+  
+  static std::atomic<int> thread_ready_bitset; //we use this for search from pusher's perspective and we use separated flag values for false sharing prevention
+  
+  //find first bit set
+  //set bit through | 1 << bit_num_from_zero
+  //check bit through __builtin_ctz(bitset), if bitset is 0 it would be ub
+  
+  static std::thread worker_threads[8];
+  
+  static uint32_t try_find_and_set_thread_work(std::function<void()> in_data_exec_lambda, thread_pool_out_data* out_data_arr);
+  static void tpool_thread_main(uint32_t thread_idx);
+  
+  static void tpool_init();
+  static void tpool_prepare(); //for reuse
+  
+  static void tpool_thread_wait_for_out_data(thread_pool_out_data* out_data_ptr);
+  static void tpool_wait_for_all_threads(thread_pool_out_data* out_data, uint8_t* thread_was_used);
+};
+
+class MerkleProofImpl {
+public:
+  explicit MerkleProofImpl(MerkleProof::IsPrunnedFunction is_prunned);
+  explicit MerkleProofImpl(CellUsageTree *usage_tree);
+  
+  Ref<Cell> create_from(Ref<Cell> cell);
+  
+  using Key = std::pair<Cell::Hash, int>;
+  td::HashMap<Key, Ref<Cell>> cells_;
+  td::HashSet<Cell::Hash> visited_cells_;
+  CellUsageTree *usage_tree_{nullptr};
+  MerkleProof::IsPrunnedFunction is_prunned_;
+  
+  std::mutex cells_hm_mutex;
+  std::mutex visited_cells_mutex;
+  std::mutex usage_tree_mutex;
+  
+  void dfs_usage_tree(Ref<Cell> cell, CellUsageTree::NodeId node_id);
+  
+  Ref<Cell> dfs(Ref<Cell> cell, int merkle_depth);
+};
+}
 
 class MerkleProofBuilder {
   std::shared_ptr<CellUsageTree> usage_tree;
