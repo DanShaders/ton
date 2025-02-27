@@ -4686,28 +4686,28 @@ bool ContestValidateQuery::check_one_transaction_ts(block::Account& account, ton
                                        << " of account " << addr.to_hex()
                                        << " refers to a different processing transaction");
     }
-    // if (tag != block::gen::OutMsg::msg_export_ext) {
-    //   bool is_deferred = tag == block::gen::OutMsg::msg_export_new_defer;
-    //   if (account_expected_defer_all_messages_.count(ss_addr) && !is_deferred) {
-    //     return reject_query_ts(
-    //         PSTRING() << "outbound message #" << i + 1 << " on account " << workchain() << ":" << ss_addr.to_hex()
-    //                   << " must be deferred because this account has earlier messages in DispatchQueue");
-    //   }
-    //   if (is_deferred) {
-    //     LOG(INFO) << "message from account " << workchain() << ":" << ss_addr.to_hex() << " with lt " << message_lt
-    //               << " was deferred";
-    //     if (!deferring_messages_enabled_ && !account_expected_defer_all_messages_.count(ss_addr)) {
-    //       return reject_query_ts(PSTRING() << "outbound message #" << i + 1 << " on account " << workchain() << ":"
-    //                                     << ss_addr.to_hex() << " is deferred, but deferring messages is disabled");
-    //     }
-    //     if (i == 0 && !account_expected_defer_all_messages_.count(ss_addr)) {
-    //       return reject_query_ts(PSTRING() << "outbound message #1 on account " << workchain() << ":" << ss_addr.to_hex()
-    //                                     << " must not be deferred (the first message cannot be deferred unless some "
-    //                                        "prevoius messages are deferred)");
-    //     }
-    //     account_expected_defer_all_messages_.insert(ss_addr);
-    //   }
-    // }
+    if (tag != block::gen::OutMsg::msg_export_ext) {
+      bool is_deferred = tag == block::gen::OutMsg::msg_export_new_defer;
+      if (ctx.defer_all_messages && !is_deferred) {
+        return reject_query_ts(
+            PSTRING() << "outbound message #" << i + 1 << " on account " << workchain() << ":" << ss_addr.to_hex()
+                      << " must be deferred because this account has earlier messages in DispatchQueue");
+      }
+      if (is_deferred) {
+        LOG(INFO) << "message from account " << workchain() << ":" << ss_addr.to_hex() << " with lt " << message_lt
+                  << " was deferred";
+        if (!deferring_messages_enabled_ && !ctx.defer_all_messages) {
+          return reject_query_ts(PSTRING() << "outbound message #" << i + 1 << " on account " << workchain() << ":"
+                                        << ss_addr.to_hex() << " is deferred, but deferring messages is disabled");
+        }
+        if (i == 0 && !ctx.defer_all_messages) {
+          return reject_query_ts(PSTRING() << "outbound message #1 on account " << workchain() << ":" << ss_addr.to_hex()
+                                        << " must not be deferred (the first message cannot be deferred unless some "
+                                           "prevoius messages are deferred)");
+        }
+        ctx.defer_all_messages = true;
+      }
+    }
   }
   CHECK(money_exported.is_valid());
   // check general transaction data
@@ -4946,7 +4946,7 @@ bool ContestValidateQuery::check_one_transaction_ts(block::Account& account, ton
   }
   // now compare the re-created transaction with the one we have
   if (trans_root2->get_hash() != trans_root->get_hash()) {
-    if (verbosity >= 3 * 0) {
+    if (verbosity >= 3) {
       std::cerr << "original transaction " << lt << " of " << addr.to_hex() << ": ";
       block::gen::t_Transaction.print_ref(std::cerr, trans_root);
       std::cerr << "re-created transaction " << lt << " of " << addr.to_hex() << ": ";
@@ -5130,6 +5130,7 @@ bool ContestValidateQuery::check_transactions() {
 
         account_contexts.emplace_back();
         CheckAccountTxsCtx& ctx = account_contexts.back();
+        ctx.defer_all_messages = account_expected_defer_all_messages_.count(address);
 
         account_tasks.emplace_back(
             [this, address, &ctx, acc_tr = account_blocks_dict_->extract_value(std::move(tr_extra)),
@@ -5153,6 +5154,7 @@ bool ContestValidateQuery::check_transactions() {
     return rej.rethrow_in(*this);
   }
 
+  account_expected_defer_all_messages_.clear();
   for (size_t pos = 0; pos < account_addresses.size(); pos++) {
     for (auto& e : account_contexts[pos].msg_proc_lt) {
       msg_proc_lt_.emplace_back(std::move(e));
@@ -5162,6 +5164,9 @@ bool ContestValidateQuery::check_transactions() {
       ns_.account_dict_->lookup_delete(account_addresses[pos]);
     } else {
       ns_.account_dict_->set(account_addresses[pos], account_contexts[pos].state);
+    }
+    if (account_contexts[pos].defer_all_messages) {
+      account_expected_defer_all_messages_.insert(account_addresses[pos]);
     }
   }
 
