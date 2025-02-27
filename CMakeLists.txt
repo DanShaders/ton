@@ -114,6 +114,8 @@ if ((ARCHITECTURE MATCHES "arm64") AND (CMAKE_SYSTEM_NAME STREQUAL "Darwin") AND
 endif()
 #END M1 support
 
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMake" ${CMAKE_MODULE_PATH})
+
 if (TON_USE_ABSEIL)
   message("Add abseil-cpp")
   set(ABSL_PROPAGATE_CXX_STD TRUE)
@@ -177,6 +179,22 @@ if (USE_LIBRAPTORQ)
   endif()
   message("Add libraptorq")
   add_subdirectory(third-party/libraptorq EXCLUDE_FROM_ALL)
+endif()
+
+option(USE_GPERFTOOLS "Use gperftools" OFF)
+if (USE_GPERFTOOLS)
+  message("Add gperftools")
+  find_package(gperftools)
+  if(NOT gperftools_FOUND)
+    message(STATUS "gperftools not found!")
+  endif()
+endif()
+
+option(USE_SNMALLOC "Use snmalloc" ON)
+if (USE_SNMALLOC)
+  set(SNMALLOC_HEADER_ONLY_LIBRARY ON)
+  add_subdirectory(third-party/snmalloc EXCLUDE_FROM_ALL)
+  set(SNMALLOC_FOUND 1)
 endif()
 
 message("Add ton")

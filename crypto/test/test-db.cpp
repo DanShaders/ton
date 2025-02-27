@@ -371,7 +371,7 @@ class CellExplorer {
   struct Exploration {
     std::vector<Op> ops;
     std::string log;
-    std::set<Cell::Hash> visited;
+    std::unordered_set<Cell::Hash> visited;
     std::vector<Ref<Cell>> visited_cells;
   };
 
@@ -403,8 +403,8 @@ class CellExplorer {
   std::vector<Ref<Cell>> cells_;
   Ref<CellSlice> cs_;
   std::vector<Op> ops_;
-  std::set<Cell::Hash> visited_;
-  std::map<Cell::Hash, Ref<Cell>> visited_cells_;
+  std::unordered_set<Cell::Hash> visited_;
+  std::unordered_map<Cell::Hash, Ref<Cell>> visited_cells_;
   td::StringBuilder log_{{}, true};
 
   void do_op(Op op) {
@@ -496,7 +496,7 @@ class RandomBagOfCells {
  public:
   template <class T>
   RandomBagOfCells(size_t size, T &rnd, bool with_prunned_branches, std::vector<Ref<Cell>> cells) {
-    std::map<CellHash, int> depth;
+    std::unordered_map<CellHash, int> depth;
 
     for (auto &cell : cells) {
       nodes_.emplace_back(cell, calc_depth(cell, depth));
@@ -580,7 +580,7 @@ class RandomBagOfCells {
   };
   std::vector<Node> nodes_;
 
-  auto calc_depth(const Ref<Cell> &root, std::map<CellHash, int> &depth) -> int {
+  auto calc_depth(const Ref<Cell> &root, std::unordered_map<CellHash, int> &depth) -> int {
     auto it_flag = depth.emplace(root->get_hash(), 0);
     if (!it_flag.second) {
       return it_flag.first->second;
@@ -1133,7 +1133,7 @@ void test_dynamic_boc2(BocOptions options) {
     }
     return from_root;
   };
-  std::map<CellHash, int> root_cnt;
+  std::unordered_map<CellHash, int> root_cnt;
   auto new_root = [&] {
     if (last_root_id == total_roots) {
       return;
@@ -1343,7 +1343,7 @@ class CompactArray {
   }
 
   Ref<Cell> merkle_proof(std::vector<size_t> keys) {
-    std::set<Cell::Hash> hashes;
+    std::unordered_set<Cell::Hash> hashes;
     for (auto key : keys) {
       get(root_, size_, key, &hashes);
     }
@@ -1380,7 +1380,7 @@ class CompactArray {
     return create_node(create(value.substr(0, value.size() / 2)), create(value.substr(value.size() / 2)));
   }
 
-  static td::uint64 get(Ref<Cell> any_cell, size_t size, size_t pos, std::set<Cell::Hash> *hashes) {
+  static td::uint64 get(Ref<Cell> any_cell, size_t size, size_t pos, std::unordered_set<Cell::Hash> *hashes) {
     if (hashes) {
       hashes->insert(any_cell->get_hash());
     }

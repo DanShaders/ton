@@ -39,9 +39,6 @@ struct CellHash {
   bool operator==(const CellHash& other) const {
     return hash_ == other.hash_;
   }
-  bool operator<(const CellHash& other) const {
-    return hash_ < other.hash_;
-  }
   bool operator!=(const CellHash& other) const {
     return hash_ != other.hash_;
   }

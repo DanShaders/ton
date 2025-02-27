@@ -60,9 +60,6 @@ struct CellInfo {
   Cell::Hash key() const {
     return cell->get_hash();
   }
-  bool operator<(const CellInfo &other) const {
-    return key() < other.key();
-  }
 
   struct Eq {
     using is_transparent = void;  // Pred to use
@@ -79,13 +76,6 @@ struct CellInfo {
   };
 };
 
-bool operator<(const CellInfo &a, td::Slice b) {
-  return a.key().as_slice() < b;
-}
-
-bool operator<(td::Slice a, const CellInfo &b) {
-  return a < b.key().as_slice();
-}
 
 class DynamicBagOfCellsDbImpl : public DynamicBagOfCellsDb, private ExtCellCreator {
  public:
@@ -605,17 +595,6 @@ class DynamicBagOfCellsDbImpl : public DynamicBagOfCellsDb, private ExtCellCreat
       unsigned remaining_children = 0;
       Cell::Hash key() const {
         return info->key();
-      }
-      bool operator<(const CellInfo2 &other) const {
-        return key() < other.key();
-      }
-
-      friend bool operator<(const CellInfo2 &a, td::Slice b) {
-        return a.key().as_slice() < b;
-      }
-
-      friend bool operator<(td::Slice a, const CellInfo2 &b) {
-        return a < b.key().as_slice();
       }
 
       struct Eq {

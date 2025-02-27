@@ -21,7 +21,7 @@
 #define TD_DUMMY_CHECK(condition) ((void)(condition))
 
 #define CHECK(condition)                                               \
-  if (!(condition)) {                                                  \
+  if (!(condition)) [[unlikely]] {                                                  \
     ::td::detail::process_check_error(#condition, __FILE__, __LINE__); \
   }
 

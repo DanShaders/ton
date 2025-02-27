@@ -73,10 +73,10 @@ struct NewOutMsg {
       : lt(_lt), msg(std::move(_msg)), trans(std::move(_trans)), msg_idx(_msg_idx) {
   }
   bool operator<(const NewOutMsg& other) const& {
-    return lt < other.lt || (lt == other.lt && msg->get_hash() < other.msg->get_hash());
+    return lt < other.lt || (lt == other.lt && msg->get_hash().as_array() < other.msg->get_hash().as_array());
   }
   bool operator>(const NewOutMsg& other) const& {
-    return lt > other.lt || (lt == other.lt && other.msg->get_hash() < msg->get_hash());
+    return lt > other.lt || (lt == other.lt && other.msg->get_hash().as_array() < msg->get_hash().as_array());
   }
 };
 

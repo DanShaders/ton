@@ -1,0 +1,37 @@
+include(ExternalProject)
+
+set(GPERFTOOLS_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/third-party/gperftools")
+
+set(GPERFTOOLS_CONFIGURE_ARGS
+    "AR=${CMAKE_AR}"
+    "RANLIB=${CMAKE_RANLIB}"
+    "CC=${CMAKE_C_COMPILER}"
+    "CXX=${CMAKE_CXX_COMPILER}"
+    "--disable-shared"
+    "--enable-hidden-visibility"
+    "--prefix=${GPERFTOOLS_PREFIX}"
+    "CFLAGS=-fPIC"
+    "CXXFLAGS=-fPIC")
+
+ExternalProject_Add(gperftools
+  GIT_REPOSITORY https://github.com/gperftools/gperftools.git
+  GIT_TAG 0576523a6028626a7760dabf591c6713d6f69d73
+  SOURCE_DIR ${GPERFTOOLS_PREFIX}
+  UPDATE_COMMAND "./autogen.sh"
+  CONFIGURE_COMMAND ./configure ${GPERFTOOLS_CONFIGURE_ARGS}
+  BUILD_COMMAND ""
+  INSTALL_COMMAND make install
+  BUILD_IN_SOURCE true
+  INSTALL_DIR ${GPERFTOOLS_PREFIX}
+  BUILD_BYPRODUCTS ${GPERFTOOLS_PREFIX}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}profiler${CMAKE_STATIC_LIBRARY_SUFFIX}
+)
+
+ExternalProject_Get_Property(gperftools INSTALL_DIR)
+
+set(GPERFTOOLS_INCLUDE_DIR ${INSTALL_DIR}/include)
+message(STATUS "gperftools include dir: ${GPERFTOOLS_INCLUDE_DIR}")
+
+set(GPERFTOOLS_PROFILER_LIB ${INSTALL_DIR}/lib/${CMAKE_STATIC_LIBRARY_PREFIX}profiler${CMAKE_STATIC_LIBRARY_SUFFIX})
+message(STATUS "gperftools profiler static library: ${GPERFTOOLS_PROFILER_LIB}")
+
+FIND_PACKAGE_HANDLE_STANDARD_ARGS(gperftools DEFAULT_MSG GPERFTOOLS_INCLUDE_DIR GPERFTOOLS_PROFILER_LIB)
