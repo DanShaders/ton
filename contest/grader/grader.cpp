@@ -127,7 +127,7 @@ class ContestGrader : public td::actor::Actor {
     }
 
     run_contest_solution(
-        threads_, block_id, std::move(block_data), std::move(collated_data),
+        block_id, std::move(block_data), std::move(collated_data),
         [=, SelfId = actor_id(this), timer = td::Timer{}, start_cpu = get_cpu_usage()](td::Result<td::BufferSlice> R) {
           td::actor::send_closure(SelfId, &ContestGrader::got_solution_result, std::move(R), valid,
                                   original_merkle_update, timer.elapsed(),

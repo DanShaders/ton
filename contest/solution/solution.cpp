@@ -4,7 +4,7 @@
 #include "block-auto.h"
 #include "contest-validate-query.hpp"
 
-void run_contest_solution(size_t threads, ton::BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice colldated_data,
+void run_contest_solution(ton::BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice colldated_data,
                           td::Promise<td::BufferSlice> promise) {
   TRY_RESULT_PROMISE(promise, root, vm::std_boc_deserialize(block_data));
   block::gen::Block::Record rec;
@@ -13,5 +13,5 @@ void run_contest_solution(size_t threads, ton::BlockIdExt block_id, td::BufferSl
   }
   TRY_RESULT_PROMISE(promise, res, vm::std_boc_serialize(rec.state_update));
   td::actor::create_actor<solution::ContestValidateQuery>(
-      "validate", threads, block_id, std::move(block_data), std::move(colldated_data), std::move(promise)).release();
+      "validate", 8, block_id, std::move(block_data), std::move(colldated_data), std::move(promise)).release();
 }
