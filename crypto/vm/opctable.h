@@ -94,6 +94,9 @@ class OpcodeTable final : public DispatchTable {
   struct Instruction {
     unsigned first;
     const OpcodeInstr* second;
+    Instruction() = default;
+    Instruction(unsigned _first, const OpcodeInstr* _second) : first(_first), second(_second) {
+    }
   };
 
   absl::btree_map<unsigned, const OpcodeInstr*> instructions;
