@@ -4,8 +4,12 @@
 #include "block-auto.h"
 #include "contest-validate-query.hpp"
 
+#include <bitcoin-crypto/crypto/sha256.h>
+
 void run_contest_solution(ton::BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice colldated_data,
                           td::Promise<td::BufferSlice> promise) {
+  SHA256AutoDetect();
+
   TRY_RESULT_PROMISE(promise, root, vm::std_boc_deserialize(block_data));
   block::gen::Block::Record rec;
   if (!block::gen::t_Block.cell_unpack(root, rec)) {

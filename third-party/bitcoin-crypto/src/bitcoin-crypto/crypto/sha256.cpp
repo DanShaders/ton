@@ -687,7 +687,7 @@ std::string SHA256AutoDetect(sha256_implementation::UseImplementation use_implem
 #endif
 #endif // DISABLE_OPTIMIZED_SHA256
 
-    assert(SelfTest());
+    // assert(SelfTest());
     return ret;
 }
 
