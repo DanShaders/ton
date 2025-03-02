@@ -140,7 +140,7 @@ class LogManager {
     // Print the sorted results
     for (const auto& [log_name, breakpoints] : sorted_logs) {
       int total_calls_count =
-          std::count_if(logs.begin(), logs.end(), [log_name](const auto& item) { return item.name == log_name; });
+          std::count_if(logs.begin(), logs.end(), [log_name = log_name](const auto& item) { return item.name == log_name; });
       int64_t total_log_duration = std::accumulate(breakpoints.begin(), breakpoints.end(), int64_t(0),
                                                    [](int64_t sum, const auto& entry) { return sum + entry.second; });
 
