@@ -832,7 +832,7 @@ td::Status BagOfCells::prepare_deserialize_cell(int idx, const td::Slice& cells_
       }
     }
   }
-  cells_span.emplace_back(cell_info, td::Ref<vm::DataCell>(), cell_slice, ref_idxs, td::Status::OK(), idx);
+  cells_span.emplace_back(RefDataCell{cell_info, td::Ref<vm::DataCell>(), cell_slice, ref_idxs, td::Status::OK(), idx});
   return td::Status::OK();
 }
 
