@@ -612,6 +612,8 @@ td::Status check_block_signatures(const std::vector<ton::ValidatorDescr>& nodes,
   if (signatures.empty()) {
     return td::Status::Error("empty validator signature set");
   }
+
+  printf("DEBUG: check_block_signatures called\n");
   // compute the string to be signed and its hash
   unsigned char to_sign[68];
   td::as<td::uint32>(to_sign) = 0xc50b6e70;  // ton.blockId root_cell_hash:int256 file_hash:int256 = ton.BlockId;
@@ -626,8 +628,12 @@ td::Status check_block_signatures(const std::vector<ton::ValidatorDescr>& nodes,
     total_weight += nodes[i].weight;
     node_map.emplace_back(compute_node_id_short(nodes[i].key), i);
   }
+
+  printf("DEBUG: total_weight = %llu\n", total_weight);
   std::sort(node_map.begin(), node_map.end());
   std::vector<unsigned> seen;
+  
+  printf("DEBUG: signatures len: %llu\n", signatures.size());
   for (auto& sig : signatures) {
     // lookup node in validator set
     auto& id = sig.node;
@@ -641,6 +647,10 @@ td::Status check_block_signatures(const std::vector<ton::ValidatorDescr>& nodes,
     // check one signature
     td::Ed25519::PublicKey pub_key{td::SecureString{nodes.at(i).key.as_slice()}};
     auto res = pub_key.verify_signature(td::Slice{to_sign, 68}, sig.signature.as_slice());
+
+    td::MutableSlice sigsl = const_cast<td::BufferSlice&>(sig.signature).as_slice();
+    td::StringBuilder sig_strb(sigsl);
+    printf("\tnodeidshort: %s\n\tpubkey: %s\n\tsignature: %s\n\tweight: %llu\n\n\n", id.to_hex().c_str(), nodes.at(i).key._pubkey.to_hex().c_str(), sig_strb.as_cslice().c_str(), nodes[i].weight);
     if (res.is_error()) {
       return res;
     }
@@ -649,6 +659,8 @@ td::Status check_block_signatures(const std::vector<ton::ValidatorDescr>& nodes,
       break;
     }
   }
+
+  printf("DEBUG: signed_weight = %llu\n", signed_weight);
   std::sort(seen.begin(), seen.end());
   for (std::size_t i = 1; i < seen.size(); i++) {
     if (seen[i] == seen[i - 1]) {
@@ -656,6 +668,9 @@ td::Status check_block_signatures(const std::vector<ton::ValidatorDescr>& nodes,
                                compute_node_id_short(nodes.at(seen[i]).key).to_hex());
     }
   }
+
+  printf("DEBUG: checking   3 * %llu <= 2 * %llu \n", signed_weight, total_weight);
+  printf("DEBUG: checking   %llu <= %llu \n", 3 * signed_weight, 2 * total_weight);
   if (3 * signed_weight <= 2 * total_weight) {
     return td::Status::Error(PSTRING() << "insufficient total signature weight: only " << signed_weight << " out of "
                                        << total_weight);
