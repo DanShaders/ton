@@ -16,16 +16,31 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
+
 #include <functional>
+#include <array>
+#include <limits>
+#include <sstream>
+#include <type_traits>
+#include <utility>
+
 #include "vm/cellops.h"
 #include "vm/log.h"
 #include "vm/opctable.h"
 #include "vm/stack.hpp"
 #include "vm/excno.hpp"
-#include "vm/vmstate.h"
 #include "vm/vm.h"
 #include "common/bigint.hpp"
 #include "common/refint.h"
+#include "common/bitstring.h"
+#include "utils/Slice-decl.h"
+#include "utils/Status.h"
+#include "utils/check.h"
+#include "utils/logging.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/CellTraits.h"
+#include "vm/cells/DataCell.h"
+#include "vm/continuation.h"
 
 namespace vm {
 

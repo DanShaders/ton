@@ -17,12 +17,22 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+#include <array>
+#include <compare>
+#include <cstddef>
+#include <memory>
+#include <string>
+#include <utility>
+
 #include "vm/cells/CellTraits.h"
 #include "common/bitstring.h"
+#include "utils/as.h"
+#include "common/refcnt.hpp"
+#include "utils/Slice-decl.h"
+#include "utils/Slice.h"
+#include "utils/check.h"
+#include "utils/int_types.h"
 
-#include "td/utils/as.h"
-
-#include <array>
 namespace td {
 class StringBuilder;
 }

@@ -18,6 +18,19 @@
 */
 #include "utils.h"
 
+#include <string.h>
+#include <utility>
+
+#include "common/bigint.hpp"
+#include "common/bitstring.h"
+#include "common/refcnt.hpp"
+#include "common/refint.h"
+#include "utils/Slice.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/CellSlice.h"
+#include "vm/stack.hpp"
+
 namespace vm {
 
 td::Result<vm::StackEntry> convert_stack_entry(td::Slice word);

@@ -18,11 +18,21 @@
 */
 #pragma once
 
-#include "td/utils/Status.h"
+#include <string>
 
+#include "utils/Status.h"
 #include "vm/cells/CellBuilder.h"
+#include "common/bitstring.h"
+#include "common/refcnt.hpp"
+#include "utils/Slice-decl.h"
+#include "utils/common.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellSlice.h"
+#include "vm/cells/CellTraits.h"
 
 namespace vm {
+class CellBuilder;
+
 class CellString {
  public:
   static constexpr unsigned int max_bytes = 1024;

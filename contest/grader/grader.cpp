@@ -1,28 +1,96 @@
-#include "td/utils/OptionParser.h"
-#include <fstream>
-#include "overlay/overlays.h"
+#include <sys/resource.h>
 
-#include "adnl/adnl-ext-client.h"
-
+#include <printf.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/time.h>
 #include <algorithm>
-#include <list>
-#include "td/utils/JsonBuilder.h"
-#include "mc-config.h"
-#include "td/utils/filesystem.h"
-#include "td/utils/port/path.h"
-#include "terminal/terminal.h"
-#include "vm/cells/MerkleProof.h"
+#include <cstdlib>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "utils/OptionParser.h"
+#include "utils/filesystem.h"
+#include "utils/port/path.h"
 #include "ton/ton-tl.hpp"
 #include "block-auto.h"
 #include "contest/solution/solution.hpp"
-#include "td/utils/PathView.h"
-#include "td/utils/port/signals.h"
+#include "utils/PathView.h"
 #include "vm/vm.h"
 #include "vm/cells/MerkleUpdate.h"
-
-#include <sys/resource.h>
+#include "pg/ton_api.h"
+#include "common/refcnt.hpp"
+#include "actor/ActorId.h"
+#include "actor/ActorOwn.h"
+#include "actor/PromiseFuture.h"
+#include "actor/actor.h"
+#include "actor/common.h"
+#include "actor/core/Actor.h"
+#include "utils/Closure.h"
+#include "utils/ScopeGuard.h"
+#include "utils/Slice-decl.h"
+#include "utils/Slice.h"
+#include "utils/Status.h"
+#include "utils/StringBuilder.h"
+#include "utils/Timer.h"
+#include "utils/buffer.h"
+#include "utils/check.h"
+#include "utils/int_types.h"
+#include "pg/tl_object_parse.h"
+#include "utils/tl_parsers.h"
+#include "utils/logging.h"
+#include "utils/misc.h"
+#include "utils/unique_ptr.h"
+#include "pg/TlObject.h"
+#include "tl/tlblib.hpp"
+#include "ton/ton-types.h"
+#include "vm/boc.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/CellSlice.h"
+#include "vm/cells/CellTraits.h"
+#include "vm/cells/DataCell.h"
 
 using namespace ton;
+
+
+
+template <typename T>
+td::Result<tl_object_ptr<std::enable_if_t<std::is_constructible<T>::value, T>>> fetch_tl_object(td::Slice data,
+                                                                                                bool boxed) {
+  td::TlParser p(data);
+  tl_object_ptr<T> R;
+  if (boxed) {
+    R = TlFetchBoxed<TlFetchObject<T>, T::ID>::parse(p);
+  } else {
+    R = move_tl_object_as<T>(T::fetch(p));
+  }
+  p.fetch_end();
+  if (p.get_status().is_ok()) {
+    return std::move(R);
+  } else {
+    return p.get_status();
+  }
+}
+
+template <typename T>
+td::Result<tl_object_ptr<std::enable_if_t<!std::is_constructible<T>::value, T>>> fetch_tl_object(td::Slice data,
+                                                                                                 bool boxed) {
+  CHECK(boxed);
+  td::TlParser p(data);
+  tl_object_ptr<T> R;
+  R = move_tl_object_as<T>(T::fetch(p));
+  p.fetch_end();
+  if (p.get_status().is_ok()) {
+    return std::move(R);
+  } else {
+    return p.get_status();
+  }
+}
 
 static constexpr td::uint64 CPU_USAGE_PER_SEC = 1000000;
 
@@ -137,7 +205,7 @@ class ContestGrader : public td::actor::Actor {
 
   td::Result<tl_object_ptr<ton_api::contest_test>> read_test_file() {
     TRY_RESULT(data, td::read_file(tests_dir_ + "/" + test_files_[test_idx_]));
-    return ton::fetch_tl_object<ton_api::contest_test>(data, true);
+    return fetch_tl_object<ton_api::contest_test>(data, true);
   }
 
   void got_solution_result(td::Result<td::BufferSlice> res, bool valid, td::Ref<vm::Cell> original_merkle_update,

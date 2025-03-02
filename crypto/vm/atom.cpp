@@ -18,6 +18,12 @@
 */
 #include "atom.h"
 
+
+#include <stdio.h>
+#include <cstddef>
+
+#include "utils/check.h"
+
 namespace vm {
 using td::Ref;
 

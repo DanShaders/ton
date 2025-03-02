@@ -18,8 +18,14 @@
 */
 #pragma once
 #include <atomic>
+#include <ostream>
+#include <string>
+#include <utility>
+
 #include "vm/stack.hpp"
-#include "td/utils/Slice.h"
+#include "utils/Slice.h"
+#include "common/refcnt.hpp"
+#include "utils/Slice-decl.h"
 
 namespace vm {
 using td::Ref;

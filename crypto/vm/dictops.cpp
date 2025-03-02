@@ -16,7 +16,13 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
+
 #include <functional>
+#include <algorithm>
+#include <sstream>
+#include <string>
+#include <utility>
+
 #include "vm/log.h"
 #include "vm/opctable.h"
 #include "vm/stack.hpp"
@@ -26,6 +32,14 @@
 #include "common/refint.h"
 #include "vm/dictops.h"
 #include "vm/dict.h"
+#include "common/bitstring.h"
+#include "common/refcnt.hpp"
+#include "utils/Slice-decl.h"
+#include "utils/logging.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/CellSlice.h"
+#include "vm/continuation.h"
 
 namespace vm {
 

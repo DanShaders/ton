@@ -18,6 +18,8 @@
 */
 #include "ellcurve/Fp25519.h"
 
+#include "openssl/bignum.h"
+
 namespace ellcurve {
 using namespace arith;
 

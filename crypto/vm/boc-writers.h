@@ -15,8 +15,8 @@
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 */
 #pragma once
-#include "td/utils/port/FileFd.h"
-#include "td/utils/crypto.h"
+#include "utils/port/FileFd.h"
+#include "utils/crypto.h"
 #include <vector>
 
 namespace vm {

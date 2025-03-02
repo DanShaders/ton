@@ -17,10 +17,12 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "vm/cells/Cell.h"
-#include "vm/cells/VirtualCell.h"
-#include "vm/cells/DataCell.h"
+
 
 #include <iostream>
+
+#include "vm/cells/VirtualCell.h"
+#include "vm/cells/DataCell.h"
 
 namespace vm {
 td::Status Cell::check_equals_unloaded(const Ref<Cell>& other) const {

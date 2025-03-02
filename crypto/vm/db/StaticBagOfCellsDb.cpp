@@ -18,18 +18,40 @@
 */
 #include "vm/db/StaticBagOfCellsDb.h"
 
-#include "vm/cells/CellWithStorage.h"
-#include "vm/boc.h"
-
-#include "vm/cells/ExtCell.h"
-
-#include "td/utils/crypto.h"
-#include "td/utils/format.h"
-#include "td/utils/misc.h"
-#include "td/utils/port/RwMutex.h"
-#include "td/utils/ConcurrentHashTable.h"
-
+#include <absl/container/flat_hash_set.h>
+#include <absl/hash/hash.h>
 #include <limits>
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <mutex>
+#include <utility>
+#include <vector>
+
+#include "vm/boc.h"
+#include "vm/cells/ExtCell.h"
+#include "utils/crypto.h"
+#include "utils/format.h"
+#include "utils/misc.h"
+#include "utils/port/RwMutex.h"
+#include "utils/ConcurrentHashTable.h"
+#include "db/BlobView.h"
+#include "utils/HashMap.h"
+#include "utils/Slice.h"
+#include "utils/Span.h"
+#include "utils/ThreadSafeCounter.h"
+#include "utils/as.h"
+#include "utils/buffer.h"
+#include "utils/check.h"
+#include "utils/common.h"
+#include "utils/int_types.h"
+#include "utils/logging.h"
+#include "utils/port/platform.h"
+#include "utils/port/thread.h"
+#include "utils/unique_ptr.h"
+#include "vm/cells/CellTraits.h"
+#include "vm/cells/CellUsageTree.h"
+#include "vm/cells/PrunnedCell.h"
 
 namespace vm {
 //

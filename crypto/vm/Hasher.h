@@ -15,11 +15,17 @@
   along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 */
 #pragma once
+#include <stddef.h>
+#include <memory>
+
 #include "common/refcnt.hpp"
-#include "td/utils/buffer.h"
+#include "utils/buffer.h"
 #include "common/bitstring.h"
 #include "vm/cells/Cell.h"
-#include <memory>
+
+namespace td {
+template <class T> class Ref;
+}  // namespace td
 
 namespace vm {
 

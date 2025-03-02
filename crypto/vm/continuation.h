@@ -18,13 +18,20 @@
 */
 #pragma once
 
+#include <ostream>
+#include <string>
+#include <utility>
+
 #include "common/refcnt.hpp"
 #include "vm/cellslice.h"
 #include "vm/stack.hpp"
 #include "vm/vmstate.h"
 #include "vm/log.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellSlice.h"
 
 namespace vm {
+class CellBuilder;
 
 using td::Ref;
 

@@ -18,12 +18,20 @@
 */
 #include "openssl/bignum.h"
 
+
+
+#include <openssl/crypto.h>
+#include <openssl/opensslv.h>
+
 #ifdef OPENSSL_IS_BORINGSSL
 #include <openssl/mem.h>
 #endif
 
 // impl only
 #include <cstring>
+
+#include "utils/Slice-decl.h"
+#include "utils/logging.h"
 
 namespace arith {
 

@@ -18,8 +18,8 @@
 */
 #include "vm/cells/CellHash.h"
 
-#include "td/utils/StringBuilder.h"
-#include "td/utils/Slice.h"
+#include "utils/StringBuilder.h"
+#include "utils/Slice.h"
 
 namespace vm {
 td::StringBuilder &operator<<(td::StringBuilder &sb, const CellHash &hash) {

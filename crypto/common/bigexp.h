@@ -18,7 +18,13 @@
 */
 #pragma once
 
+#include <limits>
+#include <vector>
+
 #include "common/refint.h"
+#include "common/bigint.hpp"
+#include "utils/int_types.h"
+#include "utils/uint128.h"
 
 namespace td {
 

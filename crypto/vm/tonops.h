@@ -17,13 +17,25 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+#include <utility>
+
 #include "vm/vm.h"
 #include "ton/ton-types.h"
 #include "mc-config.h"
+#include "common/refint.h"
+#include "utils/int_types.h"
+#include "utils/optional.h"
+#include "vm/cells/CellSlice.h"
+#include "vm/stack.hpp"
+
+namespace td {
+template <class T> class Ref;
+}  // namespace td
 
 namespace vm {
 
 class OpcodeTable;
+class CellBuilder;
 
 void register_ton_ops(OpcodeTable& cp0);
 

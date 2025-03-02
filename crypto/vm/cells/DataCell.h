@@ -17,11 +17,24 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+#include <stddef.h>
+#include <memory>
+#include <ostream>
+#include <string>
+
 #include "vm/cells/Cell.h"
-
-#include "td/utils/Span.h"
-
-#include "td/utils/ThreadSafeCounter.h"
+#include "utils/Span.h"
+#include "utils/ThreadSafeCounter.h"
+#include "common/bitstring.h"
+#include "common/refcnt.hpp"
+#include "utils/Slice-decl.h"
+#include "utils/Slice.h"
+#include "utils/Status.h"
+#include "utils/check.h"
+#include "utils/int_types.h"
+#include "vm/cells/CellHash.h"
+#include "vm/cells/CellTraits.h"
+#include "vm/cells/CellUsageTree.h"
 
 namespace vm {
 

@@ -18,7 +18,11 @@
 */
 #include "Ed25519.h"
 
-#include "td/utils/Random.h"
+#include <assert.h>
+
+#include "utils/Random.h"
+#include "openssl/digest.hpp"
+#include "openssl/residue.h"
 
 namespace crypto {
 namespace Ed25519 {
@@ -126,8 +130,6 @@ bool PublicKey::check_message_signature(const unsigned char signature[sign_bytes
   return !std::memcmp(pR1_bytes, signature, 32);
 }
 
-// ---------------------
-class PrivateKey;
 
 bool PrivateKey::random_private_key(bool strong) {
   inited = false;
@@ -242,8 +244,6 @@ bool PrivateKey::sign_message(unsigned char signature[sign_bytes], const unsigne
   return true;
 }
 
-// ---------------------------------
-class TempKeyGenerator;
 
 unsigned char *TempKeyGenerator::get_temp_private_key(unsigned char *to, const unsigned char *message, std::size_t size,
                                                       const unsigned char *rand,

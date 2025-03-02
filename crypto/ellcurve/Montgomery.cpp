@@ -19,12 +19,15 @@
 #include "ellcurve/Montgomery.h"
 
 #include <assert.h>
+
 #include <cstring>
+#include <string>
+
+#include "ellcurve/Fp25519.h"
 
 namespace ellcurve {
 using namespace arith;
 
-class MontgomeryCurve;
 
 void MontgomeryCurve::init() {
   assert(!((a_short + 2) & 3) && a_short >= 0);

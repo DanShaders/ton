@@ -21,9 +21,11 @@
 // --- impl
 #include <assert.h>
 
+#include <openssl/bn.h>
+
+#include "openssl/bignum.h"
+
 namespace arith {
-class Residue;
-class ResidueRing;
 
 void ResidueRing::init() {
   Zero = new Residue(0, td::Ref<ResidueRing>(this));

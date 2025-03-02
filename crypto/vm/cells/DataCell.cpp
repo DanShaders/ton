@@ -18,11 +18,23 @@
 */
 #include "vm/cells/DataCell.h"
 
+
+#include <stdio.h>
+
+#include <assert.h>
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <new>
+#include <utility>
+
 #include "openssl/digest.hpp"
-
-#include "td/utils/ScopeGuard.h"
-
+#include "utils/ScopeGuard.h"
 #include "vm/cells/CellWithStorage.h"
+#include "utils/common.h"
+#include "utils/port/thread_local.h"
+#include "utils/unique_ptr.h"
+#include "vm/cells/LevelMask.h"
 
 namespace vm {
 thread_local bool DataCell::use_arena = false;

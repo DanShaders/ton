@@ -17,7 +17,7 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
-#include "td/utils/buffer.h"
+#include "utils/buffer.h"
 
 namespace vm {
 class BlobView {

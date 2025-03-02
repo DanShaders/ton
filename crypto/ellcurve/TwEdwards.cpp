@@ -17,13 +17,17 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "ellcurve/TwEdwards.h"
+
 #include <assert.h>
+
 #include <cstring>
+#include <string>
+
+#include "ellcurve/Fp25519.h"
 
 namespace ellcurve {
 using namespace arith;
 
-class TwEdwardsCurve;
 
 TwEdwardsCurve::TwEdwardsCurve(const Residue& _D, const Residue& _Gy, td::Ref<ResidueRing> _R)
     : ring(_R)

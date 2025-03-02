@@ -18,59 +18,12 @@
 */
 #pragma once
 
-#include "td/utils/SpinLock.h"
+#include "utils/SpinLock.h"
 #include "common/refcnt.hpp"
 
 #include <type_traits>
 
 namespace td {
-template <class T>
-class AtomicRefSpinlock {
- public:
-  AtomicRefSpinlock() = default;
-  AtomicRefSpinlock(Ref<T>&& ref) : ref_(ref.release()) {
-  }
-  ~AtomicRefSpinlock() {
-    Ref<T>(ref_.load(std::memory_order_relaxed), typename Ref<T>::acquire_t{});
-  }
-  AtomicRefSpinlock(AtomicRefSpinlock&&) = delete;
-  AtomicRefSpinlock& operator=(AtomicRefSpinlock&&) = delete;
-  AtomicRefSpinlock(const AtomicRefSpinlock&) = delete;
-  AtomicRefSpinlock& operator=(const AtomicRefSpinlock&) = delete;
-
-  Ref<T> load() const {
-    auto guard = spin_lock_.lock();
-    return Ref<T>(ref_.load(std::memory_order_relaxed));
-  }
-  Ref<T> extract() const {
-    auto guard = spin_lock_.lock();
-    return Ref<T>(ref_.exchange(nullptr, std::memory_order_release), typename Ref<T>::acquire_t{});
-  }
-
-  Ref<T> load_unsafe() const {
-    return Ref<T>(get_unsafe());
-  }
-  const T* get_unsafe() const {
-    return ref_.load(std::memory_order_acquire);
-  }
-  bool store_if_empty(Ref<T>& desired) {
-    auto guard = spin_lock_.lock();
-    if (ref_.load(std::memory_order_relaxed) == nullptr) {
-      ref_.store(desired.release(), std::memory_order_release);
-      return true;
-    }
-    return false;
-  }
-
-  void store(Ref<T>&& ref) {
-    auto guard = spin_lock_.lock();
-    Ref<T>(ref_.exchange(ref.release(), std::memory_order_acq_rel), typename Ref<T>::acquire_t{});
-  }
-
- private:
-  mutable SpinLock spin_lock_;
-  std::atomic<T*> ref_{nullptr};
-};
 
 template <class T>
 class AtomicRefLockfree {

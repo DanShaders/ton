@@ -18,13 +18,24 @@
 */
 #include "vm/cells/CellBuilder.h"
 
+
+#include <stdio.h>
+
+#include <assert.h>
+#include <algorithm>
+#include <cstring>
+#include <limits>
+
 #include "vm/cells/CellSlice.h"
 #include "vm/cells/DataCell.h"
-
-#include "td/utils/misc.h"
-#include "td/utils/format.h"
-
 #include "openssl/digest.hpp"
+#include "utils/Slice.h"
+#include "utils/Span.h"
+#include "utils/bits.h"
+#include "utils/check.h"
+#include "utils/logging.h"
+#include "vm/cells/LevelMask.h"
+#include "vm/vmstate.h"
 
 namespace vm {
 

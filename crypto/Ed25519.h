@@ -18,9 +18,12 @@
 */
 #pragma once
 
-#include "td/utils/common.h"
-#include "td/utils/SharedSlice.h"
-#include "td/utils/Status.h"
+#include "utils/common.h"
+#include "utils/SharedSlice.h"
+#include "utils/Status.h"
+#include "utils/Slice-decl.h"
+#include "utils/config.h"
+#include "utils/int_types.h"
 
 #if TD_HAVE_OPENSSL
 

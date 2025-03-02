@@ -15,11 +15,19 @@
   along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "vm/Hasher.h"
-#include "vm/excno.hpp"
-#include "vm/vm.h"
-#include <iostream>
+
 #include <openssl/evp.h>
+#include <openssl/types.h>
+#include <algorithm>
+
+#include "vm/excno.hpp"
 #include "keccak/keccak.h"
+#include "utils/check.h"
+
+namespace td {
+template <class T> class Ref;
+}  // namespace td
+struct keccak_state;
 
 namespace vm {
 

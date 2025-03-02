@@ -18,7 +18,11 @@
 */
 #include "refcnt.hpp"
 
-#include "td/utils/ScopeGuard.h"
+#include <vector>
+
+#include "utils/ScopeGuard.h"
+#include "utils/port/thread_local.h"
+#include "utils/unique_ptr.h"
 
 namespace td {
 

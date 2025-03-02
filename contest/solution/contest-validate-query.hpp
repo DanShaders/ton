@@ -1,17 +1,43 @@
 #pragma once
 
-#include "interfaces/validator-manager.h"
+#include <stddef.h>
+#include <vector>
+#include <string>
+#include <map>
+#include <memory>
+#include <set>
+#include <tuple>
+#include <utility>
+
 #include "vm/cells.h"
 #include "vm/dict.h"
 #include "block/mc-config.h"
 #include "block/transaction.h"
-#include "shard.hpp"
-#include "signature-set.hpp"
-#include <vector>
-#include <string>
-#include <map>
-#include "common/global-version.h"
-#include "tonlib/tonlib/ExtClient.h"
+#include "impl/shard.hpp"
+#include "block-auto.h"
+#include "block.h"
+#include "common/bigint.hpp"
+#include "common/bitstring.h"
+#include "common/refcnt.hpp"
+#include "common/refint.h"
+#include "interfaces/message-queue.h"
+#include "interfaces/shard.h"
+#include "actor/ActorId.h"
+#include "actor/PromiseFuture.h"
+#include "actor/common.h"
+#include "actor/core/Actor.h"
+#include "utils/Status.h"
+#include "utils/buffer.h"
+#include "utils/int_types.h"
+#include "utils/logging.h"
+#include "ton/ton-types.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellSlice.h"
+
+namespace vm {
+class CellBuilder;
+class CellUsageTree;
+}  // namespace vm
 
 namespace solution {
 
@@ -130,9 +156,10 @@ class ContestValidateQuery : public td::actor::Actor {
   ton::BlockSeqno mc_seqno_{0};
 
   Ref<vm::Cell> block_root_;
+  Ref<vm::Cell> value_flow_root_;
   std::vector<Ref<vm::Cell>> collated_roots_;
   std::map<RootHash, Ref<vm::Cell>> virt_roots_;
-  std::unique_ptr<vm::Dictionary> top_shard_descr_dict_;
+  bool top_shard_descr_dict_;
   block::gen::ExtraCollatedData::Record extra_collated_data_;
   bool have_extra_collated_data_ = false;
 
@@ -217,6 +244,9 @@ class ContestValidateQuery : public td::actor::Actor {
   bool soft_reject_query(std::string error, td::BufferSlice reason = {});
   void start_up() override;
 
+  bool unpack_block_data_func();
+  bool unpack_collated_data_func();
+
   bool fatal_error(td::Status error);
   bool fatal_error(int err_code, std::string err_msg);
   bool fatal_error(int err_code, std::string err_msg, td::Status error);
@@ -236,18 +266,24 @@ class ContestValidateQuery : public td::actor::Actor {
     return actor_id(this);
   }
 
+  std::map<BlockIdExt, Ref<ShardState>> fetched_states_;
+
   td::Result<Ref<ShardState>> fetch_block_state(BlockIdExt block_id) {
-    Ref<vm::Cell> state_root = get_virt_state_root(block_id.root_hash);
-    if (state_root.is_null()) {
-      return td::Status::Error(PSTRING() << "cannot get hash of state root: " << block_id.to_str());
+    auto fetched_state = fetched_states_.find(block_id);
+    if (fetched_state == fetched_states_.end()) {
+      Ref<vm::Cell> state_root = get_virt_state_root(block_id.root_hash);
+      if (state_root.is_null()) {
+        return td::Status::Error(PSTRING() << "cannot get hash of state root: " << block_id.to_str());
+      }
+      td::Bits256 state_root_hash = state_root->get_hash().bits();
+      auto it = virt_roots_.find(state_root_hash);
+      if (it == virt_roots_.end()) {
+        return td::Status::Error(PSTRING() << "cannot get state root from collated data: " << block_id.to_str());
+      }
+      TRY_RESULT(res, ShardStateQ::fetch(block_id, {}, it->second));
+      fetched_states_[block_id] = res;
     }
-    td::Bits256 state_root_hash = state_root->get_hash().bits();
-    auto it = virt_roots_.find(state_root_hash);
-    if (it == virt_roots_.end()) {
-      return td::Status::Error(PSTRING() << "cannot get state root from collated data: " << block_id.to_str());
-    }
-    TRY_RESULT(res, ShardStateQ::fetch(block_id, {}, it->second));
-    return Ref<ShardState>(res);
+    return td::Result<Ref<ShardState>>(fetched_states_[block_id]);
   }
 
   void after_get_mc_state(td::Result<Ref<ShardState>> res);
@@ -287,7 +323,7 @@ class ContestValidateQuery : public td::actor::Actor {
   bool add_trivial_neighbor_after_merge();
   bool add_trivial_neighbor();
   bool unpack_block_data();
-  bool unpack_precheck_value_flow(Ref<vm::Cell> value_flow_root);
+  bool unpack_precheck_value_flow();
   bool compute_minted_amount(block::CurrencyCollection& to_mint);
   bool postcheck_one_account_update(td::ConstBitPtr acc_id, Ref<vm::CellSlice> old_value, Ref<vm::CellSlice> new_value);
   bool postcheck_account_updates();

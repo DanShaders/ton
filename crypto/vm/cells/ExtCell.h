@@ -22,9 +22,9 @@
 #include "common/AtomicRef.h"
 
 #include <mutex>
-#include "td/utils/port/thread_local.h"
-#include "td/utils/HazardPointers.h"
-#include "td/utils/optional.h"
+#include "utils/port/thread_local.h"
+#include "utils/HazardPointers.h"
+#include "utils/optional.h"
 
 namespace vm {
 

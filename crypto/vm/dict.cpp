@@ -17,13 +17,21 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "vm/dict.h"
-#include "vm/cells.h"
-#include "vm/cellslice.h"
-#include "vm/stack.hpp"
-#include "common/bitstring.h"
-#include "td/utils/Random.h"
 
-#include "td/utils/bits.h"
+#include <assert.h>
+#include <algorithm>
+#include <cstddef>
+#include <string>
+#include <tuple>
+
+#include "common/bitstring.h"
+#include "utils/Random.h"
+#include "utils/bits.h"
+#include "common/bigint.hpp"
+#include "utils/Slice-decl.h"
+#include "utils/check.h"
+#include "utils/logging.h"
+#include "vm/excno.hpp"
 
 namespace vm {
 
@@ -457,6 +465,11 @@ Ref<Cell> Dictionary::extract_value_ref(Ref<CellSlice> cs) {
 
 Ref<CellSlice> DictionaryFixed::lookup(td::ConstBitPtr key, int key_len) {
   force_validate();
+  return lookup_without_validate(key, key_len);
+}
+
+
+Ref<CellSlice> DictionaryFixed::lookup_without_validate(td::ConstBitPtr key, int key_len) const {
   if (key_len != get_key_bits() || is_empty()) {
     return {};
   }
@@ -2673,8 +2686,22 @@ Ref<CellSlice> AugmentedDictionary::lookup(td::ConstBitPtr key, int key_len) {
   return extract_value(lookup_with_extra(key, key_len));
 }
 
+
+Ref<CellSlice> AugmentedDictionary::lookup_with_extra_without_validate(td::ConstBitPtr key, int key_len) const {
+  return DictionaryFixed::lookup_without_validate(key, key_len);
+}
+
+
+Ref<CellSlice> AugmentedDictionary::lookup_without_validate(td::ConstBitPtr key, int key_len) const {
+  return extract_value(lookup_with_extra_without_validate(key, key_len));
+}
+
 Ref<Cell> AugmentedDictionary::lookup_ref(td::ConstBitPtr key, int key_len) {
   return extract_value_ref(lookup_with_extra(key, key_len));
+}
+
+std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::lookup_extra_without_validate(td::ConstBitPtr key, int key_len) const {
+  return decompose_value_extra(lookup_with_extra_without_validate(key, key_len));
 }
 
 std::pair<Ref<CellSlice>, Ref<CellSlice>> AugmentedDictionary::lookup_extra(td::ConstBitPtr key, int key_len) {

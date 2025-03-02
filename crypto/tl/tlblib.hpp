@@ -17,10 +17,25 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+
+#include <stdlib.h>
 #include <iostream>
 #include <map>
-#include "vm/cellslice.h"
 #include <functional>
+#include <limits>
+#include <string>
+#include <utility>
+
+#include "vm/cellslice.h"
+#include "common/bigint.hpp"
+#include "common/refcnt.hpp"
+#include "common/refint.h"
+#include "utils/Slice-decl.h"
+#include "utils/bits.h"
+#include "utils/int_types.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/CellSlice.h"
 
 namespace tlb {
 

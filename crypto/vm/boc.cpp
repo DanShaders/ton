@@ -16,20 +16,28 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
-#include <iostream>
-#include <iomanip>
+#include <absl/container/flat_hash_set.h>
 #include <algorithm>
+
 #include "vm/boc.h"
 #include "vm/boc-writers.h"
-#include "vm/cells.h"
-#include "vm/cellslice.h"
-#include "td/utils/bits.h"
-#include "td/utils/crypto.h"
-#include "td/utils/format.h"
-#include "td/utils/misc.h"
-#include "td/utils/Slice-decl.h"
+#include "utils/bits.h"
+#include "utils/crypto.h"
+#include "utils/format.h"
+#include "utils/misc.h"
+#include "utils/Slice-decl.h"
+#include "utils/as.h"
+#include "utils/check.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/LevelMask.h"
+
+namespace td {
+class FileFd;
+}  // namespace td
 
 namespace vm {
+class CellUsageTree;
+
 using td::Ref;
 
 td::Status CellSerializationInfo::init(td::Slice data, int ref_byte_size) {
@@ -183,9 +191,6 @@ int BagOfCells::add_root(td::Ref<vm::Cell> add_root) {
 
 // Changes in this function may require corresponding changes in crypto/vm/large-boc-serializer.cpp
 td::Status BagOfCells::import_cells() {
-  if (logger_ptr_) {
-    logger_ptr_->start_stage("import_cells");
-  }
   cells_clear();
   for (auto& root : roots) {
     auto res = import_cell(root.cell, 0);
@@ -199,9 +204,6 @@ td::Status BagOfCells::import_cells() {
   //LOG(INFO) << "[cells: " << cell_count << ", refs: " << int_refs << ", bytes: " << data_bytes
   //<< ", internal hashes: " << int_hashes << ", top hashes: " << top_hashes << "]";
   CHECK(cell_count != 0);
-  if (logger_ptr_) {
-    logger_ptr_->finish_stage(PSLICE() << cell_count << " cells");
-  }
   return td::Status::OK();
 }
 
@@ -212,9 +214,6 @@ td::Result<int> BagOfCells::import_cell(td::Ref<vm::Cell> cell, int depth) {
   }
   if (cell.is_null()) {
     return td::Status::Error("error while importing a cell into a bag of cells: cell is null");
-  }
-  if (logger_ptr_) {
-    TRY_STATUS(logger_ptr_->on_cell_processed());
   }
   auto it = cells.find(cell->get_hash());
   if (it != cells.end()) {
@@ -544,9 +543,6 @@ td::Result<std::size_t> BagOfCells::serialize_to_impl(WriterT& writer, int mode)
   DCHECK((unsigned)cell_count == cell_list_.size());
   if (info.has_index) {
     std::size_t offs = 0;
-    if (logger_ptr_) {
-      logger_ptr_->start_stage("generate_index");
-    }
     for (int i = cell_count - 1; i >= 0; --i) {
       const Ref<DataCell>& dc = cell_list_[i].dc_ref;
       bool with_hash = (mode & Mode::WithIntHashes) && !cell_list_[i].wt;
@@ -559,20 +555,11 @@ td::Result<std::size_t> BagOfCells::serialize_to_impl(WriterT& writer, int mode)
         fixed_offset = offs * 2 + cell_list_[i].should_cache;
       }
       store_offset(fixed_offset);
-      if (logger_ptr_) {
-        TRY_STATUS(logger_ptr_->on_cell_processed());
-      }
-    }
-    if (logger_ptr_) {
-      logger_ptr_->finish_stage("");
     }
     DCHECK(offs == info.data_size);
   }
   DCHECK(writer.position() == info.data_offset);
   size_t keep_position = writer.position();
-  if (logger_ptr_) {
-    logger_ptr_->start_stage("serialize");
-  }
   for (int i = 0; i < cell_count; ++i) {
     const auto& dc_info = cell_list_[cell_count - 1 - i];
     const Ref<DataCell>& dc = dc_info.dc_ref;
@@ -592,9 +579,6 @@ td::Result<std::size_t> BagOfCells::serialize_to_impl(WriterT& writer, int mode)
       // std::cerr << ' ' << k;
     }
     // std::cerr << std::endl;
-    if (logger_ptr_) {
-      TRY_STATUS(logger_ptr_->on_cell_processed());
-    }
   }
   writer.chk();
   DCHECK(writer.position() - keep_position == info.data_size);
@@ -602,9 +586,6 @@ td::Result<std::size_t> BagOfCells::serialize_to_impl(WriterT& writer, int mode)
   if (info.has_crc32c) {
     unsigned crc = writer.get_crc32();
     writer.store_uint(td::bswap32(crc), 4);
-  }
-  if (logger_ptr_) {
-    logger_ptr_->finish_stage(PSLICE() << cell_count << " cells, " << writer.position() << " bytes");
   }
   DCHECK(writer.empty());
   return writer.position();
@@ -978,29 +959,6 @@ td::Result<Ref<Cell>> std_boc_deserialize(td::Slice data, bool can_be_empty, boo
   return std::move(root);
 }
 
-td::Result<std::vector<Ref<Cell>>> std_boc_deserialize_multi(td::Slice data, int max_roots) {
-  if (data.empty()) {
-    return std::vector<Ref<Cell>>{};
-  }
-  BagOfCells boc;
-  auto res = boc.deserialize(data, max_roots);
-  if (res.is_error()) {
-    return res.move_as_error();
-  }
-  int n = boc.get_root_count();
-  std::vector<Ref<Cell>> roots;
-  for (int i = 0; i < n; i++) {
-    auto root = boc.get_root_cell(i);
-    if (root.is_null()) {
-      return td::Status::Error("bag of cells has a null root cell (?)");
-    }
-    if (root->get_level() != 0) {
-      return td::Status::Error("bag of cells has a root with non-zero level");
-    }
-    roots.emplace_back(std::move(root));
-  }
-  return std::move(roots);
-}
 
 td::Result<td::BufferSlice> std_boc_serialize(Ref<Cell> root, int mode) {
   if (root.is_null()) {
@@ -1015,33 +973,6 @@ td::Result<td::BufferSlice> std_boc_serialize(Ref<Cell> root, int mode) {
   return boc.serialize_to_slice(mode);
 }
 
-td::Result<td::BufferSlice> std_boc_serialize_multi(std::vector<Ref<Cell>> roots, int mode) {
-  if (roots.empty()) {
-    return td::BufferSlice{};
-  }
-  BagOfCells boc;
-  boc.add_roots(std::move(roots));
-  auto res = boc.import_cells();
-  if (res.is_error()) {
-    return res.move_as_error();
-  }
-  return boc.serialize_to_slice(mode);
-}
-td::Status std_boc_serialize_to_file(Ref<Cell> root, td::FileFd& fd, int mode,
-                                     td::CancellationToken cancellation_token) {
-  if (root.is_null()) {
-    return td::Status::Error("cannot serialize a null cell reference into a bag of cells");
-  }
-  td::Timer timer;
-  BagOfCellsLogger logger(std::move(cancellation_token));
-  BagOfCells boc;
-  boc.set_logger(&logger);
-  boc.add_root(std::move(root));
-  TRY_STATUS(boc.import_cells());
-  TRY_STATUS(boc.serialize_to_file(fd, mode));
-  LOG(ERROR) << "serialization took " << timer.elapsed() << "s";
-  return td::Status::OK();
-}
 
 /*
  * 

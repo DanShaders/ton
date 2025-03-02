@@ -20,8 +20,11 @@
 
 #include <limits>
 
-#include "td/utils/crypto.h"
-#include "td/utils/base64.h"
+#include "utils/crypto.h"
+#include "utils/base64.h"
+#include "common/bitstring.h"
+#include "utils/Slice.h"
+#include "utils/check.h"
 
 namespace td {
 

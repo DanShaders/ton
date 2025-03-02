@@ -14,9 +14,34 @@
     You should have received a copy of the GNU Lesser General Public License
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 */
-#include "common.h"
 #include <memory>
+#include <atomic>
+#include <map>
+#include <utility>
+#include <vector>
+
 #include "vm/memo.h"
+#include "block.h"
+#include "common/bigint.hpp"
+#include "common/bitstring.h"
+#include "common/refcnt.hpp"
+#include "common/refint.h"
+#include "mc-config.h"
+#include "precompiled-smc/PrecompiledSmartContract.h"
+#include "utils/Slice-decl.h"
+#include "utils/check.h"
+#include "utils/int_types.h"
+#include "utils/optional.h"
+#include "ton/ton-types.h"
+#include "vm/arithops.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/CellSlice.h"
+#include "vm/cells/DataCell.h"
+#include "vm/excno.hpp"
+#include "vm/stack.hpp"
+#include "vm/tonops.h"
+#include "vm/vmstate.h"
 
 namespace block::precompiled {
 

@@ -22,7 +22,7 @@
 #include <openssl/evp.h>
 #include <openssl/opensslv.h>
 
-#include "td/utils/Slice.h"
+#include "utils/Slice.h"
 
 namespace digest {
 struct OpensslEVP_SHA1 {

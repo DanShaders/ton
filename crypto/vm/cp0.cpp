@@ -17,6 +17,9 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "cp0.h"
+
+#include <string>
+
 #include "opctable.h"
 #include "stackops.h"
 #include "tupleops.h"
@@ -26,6 +29,7 @@
 #include "dictops.h"
 #include "debugops.h"
 #include "tonops.h"
+#include "vm/dispatch.h"
 
 namespace vm {
 

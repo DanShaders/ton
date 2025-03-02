@@ -17,11 +17,19 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+#include <functional>
+#include <utility>
+#include <vector>
+
 #include "common/bitstring.h"
 #include "vm/cells.h"
 #include "vm/cellslice.h"
 #include "vm/stack.hpp"
-#include <functional>
+#include "common/refcnt.hpp"
+#include "common/refint.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/CellSlice.h"
 
 namespace vm {
 using td::BitSlice;
@@ -213,6 +221,7 @@ class DictionaryFixed : public DictionaryBase {
   bool int_key_exists(long long key);
   bool uint_key_exists(unsigned long long key);
   Ref<CellSlice> lookup(td::ConstBitPtr key, int key_len);
+  Ref<CellSlice> lookup_without_validate(td::ConstBitPtr key, int key_len) const;
   Ref<CellSlice> lookup_delete(td::ConstBitPtr key, int key_len);
   Ref<CellSlice> get_minmax_key(td::BitPtr key_buffer, int key_len, bool fetch_max = false, bool invert_first = false);
   Ref<CellSlice> extract_minmax_key(td::BitPtr key_buffer, int key_len, bool fetch_max = false,
@@ -575,9 +584,12 @@ class AugmentedDictionary final : public DictionaryFixed {
   bool append_dict_to_bool(CellBuilder& cb) const &;
   Ref<CellSlice> get_root_extra() const;
   Ref<CellSlice> lookup(td::ConstBitPtr key, int key_len);
+  Ref<CellSlice> lookup_without_validate(td::ConstBitPtr key, int key_len) const;
   Ref<Cell> lookup_ref(td::ConstBitPtr key, int key_len);
   Ref<CellSlice> lookup_with_extra(td::ConstBitPtr key, int key_len);
+  Ref<CellSlice> lookup_with_extra_without_validate(td::ConstBitPtr key, int key_len) const;
   std::pair<Ref<CellSlice>, Ref<CellSlice>> lookup_extra(td::ConstBitPtr key, int key_len);
+  std::pair<Ref<CellSlice>, Ref<CellSlice>> lookup_extra_without_validate(td::ConstBitPtr key, int key_len) const;
   std::pair<Ref<Cell>, Ref<CellSlice>> lookup_ref_extra(td::ConstBitPtr key, int key_len);
   Ref<CellSlice> lookup_delete(td::ConstBitPtr key, int key_len);
   Ref<Cell> lookup_delete_ref(td::ConstBitPtr key, int key_len);
@@ -596,6 +608,11 @@ class AugmentedDictionary final : public DictionaryFixed {
   template <typename T>
   Ref<CellSlice> lookup(const T& key) {
     return lookup(key.bits(), key.size());
+  }
+
+  template <typename T>
+  Ref<CellSlice> lookup_without_validate(const T& key) const{
+    return lookup_without_validate(key.bits(), key.size());
   }
   template <typename T>
   Ref<Cell> lookup_ref(const T& key) {

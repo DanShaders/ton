@@ -17,16 +17,28 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
-#include "vm/cells.h"
-
-#include "td/utils/Slice.h"
-#include "td/utils/Status.h"
-#include "td/actor/PromiseFuture.h"
-
+#include <stddef.h>
 #include <thread>
+#include <functional>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "vm/cells.h"
+#include "utils/Slice.h"
+#include "utils/Status.h"
+#include "actor/PromiseFuture.h"
+#include "common/refcnt.hpp"
+#include "utils/Slice-decl.h"
+#include "utils/check.h"
+#include "utils/int_types.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/DataCell.h"
 
 namespace td {
 class KeyValueReader;
+struct Unit;
 }
 namespace vm {
 class CellLoader;

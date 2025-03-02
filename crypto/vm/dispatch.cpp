@@ -17,10 +17,13 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "vm/dispatch.h"
-#include "vm/excno.hpp"
+
 #include <cassert>
 #include <map>
 #include <mutex>
+#include <utility>
+
+#include "vm/excno.hpp"
 
 namespace vm {
 

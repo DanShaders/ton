@@ -18,10 +18,15 @@
 */
 #pragma once
 
-#include "common/refcnt.hpp"
-#include "common/bigint.hpp"
 #include <utility>
 #include <string>
+#include <cstddef>
+#include <ostream>
+
+#include "common/refcnt.hpp"
+#include "common/bigint.hpp"
+#include "common/bitstring.h"
+#include "utils/Slice-decl.h"
 
 namespace td {
 class StringBuilder;

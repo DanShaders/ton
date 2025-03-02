@@ -15,10 +15,18 @@
     along with TON Blockchain Library.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <stddef.h>
 #include <vector>
-#include "td/utils/buffer.h"
+#include <utility>
+
+#include "utils/buffer.h"
 #include "common/bitstring.h"
 #include "common/refint.h"
+#include "utils/Slice-decl.h"
+
+namespace td {
+class BufferSlice;
+}  // namespace td
 
 namespace vm {
 namespace bls {

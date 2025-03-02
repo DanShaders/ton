@@ -18,12 +18,18 @@
 */
 #pragma once
 
+#include <openssl/bn.h>
+#include <openssl/types.h>
 #include <string>
 #include <iostream>
+#include <cmath>
+#include <cstdlib>
+#include <utility>
 
-#include <openssl/bn.h>
-#include "td/utils/bits.h"
-#include "td/utils/misc.h"
+#include "utils/bits.h"
+#include "utils/misc.h"
+#include "utils/check.h"
+#include "utils/int_types.h"
 
 namespace arith {
 struct dec_string {

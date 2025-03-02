@@ -18,11 +18,19 @@
 */
 #pragma once
 
-#include "vm/cells/CellTraits.h"
-
-#include "td/utils/int_types.h"
-#include "td/utils/logging.h"
 #include <functional>
+#include <array>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "vm/cells/CellTraits.h"
+#include "utils/int_types.h"
+#include "utils/logging.h"
+
+namespace td {
+template <class T> class Ref;
+}  // namespace td
 
 namespace vm {
 
@@ -63,10 +71,6 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   void set_use_mark_for_is_loaded(bool use_mark = true);
   NodeId create_child(NodeId node_id, unsigned ref_id);
 
-  void set_cell_load_callback(std::function<void(const td::Ref<vm::DataCell>&)> f) {
-    cell_load_callback_ = std::move(f);
-  }
-
  private:
   struct Node {
     bool is_loaded{false};
@@ -76,7 +80,6 @@ class CellUsageTree : public std::enable_shared_from_this<CellUsageTree> {
   };
   bool use_mark_{false};
   std::vector<Node> nodes_{2};
-  std::function<void(const td::Ref<vm::DataCell>&)> cell_load_callback_;
 
   void on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell);
   NodeId create_node(NodeId parent);

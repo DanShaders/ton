@@ -19,11 +19,13 @@
 #pragma once
 #include <string>
 #include <cassert>
+#include <cstddef>
 
 namespace prng {
 
 // use this generator unless need a separate one
 class RandomGen;
+
 RandomGen &rand_gen();
 
 class RandomGen {

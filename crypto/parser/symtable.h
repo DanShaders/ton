@@ -17,9 +17,19 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+
+#include <vector>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <utility>
+
 #include "srcread.h"
 #include "lexer.h"
-#include <vector>
+
+namespace src {
+class Lexer;
+}  // namespace src
 
 namespace sym {
 

@@ -23,6 +23,7 @@
 #include "openssl/bignum.h"
 #include "openssl/residue.h"
 #include "ellcurve/Fp25519.h"
+#include "common/refcnt.hpp"
 
 namespace ellcurve {
 using namespace arith;

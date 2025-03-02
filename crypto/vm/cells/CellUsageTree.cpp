@@ -18,6 +18,12 @@
 */
 #include "vm/cells/CellUsageTree.h"
 
+#include "utils/check.h"
+
+namespace td {
+template <class T> class Ref;
+}  // namespace td
+
 namespace vm {
 //
 // CellUsageTree::NodePtr
@@ -116,9 +122,6 @@ void CellUsageTree::on_load(NodeId node_id, const td::Ref<vm::DataCell>& cell) {
     return;
   }
   nodes_[node_id].is_loaded = true;
-  if (cell_load_callback_) {
-    cell_load_callback_(cell);
-  }
 }
 
 CellUsageTree::NodeId CellUsageTree::create_child(NodeId node_id, unsigned ref_id) {

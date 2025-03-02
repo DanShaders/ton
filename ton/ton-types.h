@@ -19,12 +19,12 @@
 #pragma once
 
 #include "crypto/common/bitstring.h"
-#include "td/utils/buffer.h"
-#include "td/utils/bits.h"
-#include "td/utils/Slice.h"
-#include "td/utils/UInt.h"
-#include "td/utils/misc.h"
-#include "td/utils/optional.h"
+#include "utils/buffer.h"
+#include "utils/bits.h"
+#include "utils/Slice.h"
+#include "utils/UInt.h"
+#include "utils/misc.h"
+#include "utils/optional.h"
 
 #include <cinttypes>
 
@@ -39,7 +39,7 @@ using Bits256 = td::BitArray<256>;  // was: td::UInt256
 using BlockHash = Bits256;
 using RootHash = Bits256;
 using FileHash = Bits256;
-using NodeIdShort = Bits256;    // compatible with adnl::AdnlNodeIdShort
+using NodeIdShort = Bits256;    // compatible with PublicKeyHash
 using StdSmcAddress = Bits256;  // masterchain / base workchain smart-contract addresses
 using UnixTime = td::uint32;
 using LogicalTime = td::uint64;
@@ -308,23 +308,6 @@ struct BlockIdExt {
   std::string to_str() const {
     return id.to_str() + ':' + root_hash.to_hex() + ':' + file_hash.to_hex();
   }
-  static td::Result<BlockIdExt> from_str(td::CSlice s) {
-    BlockIdExt v;
-    char rh[65];
-    char fh[65];
-    auto r = sscanf(s.begin(), "(%d,%" SCNx64 ",%u):%64s:%64s", &v.id.workchain, &v.id.shard, &v.id.seqno, rh, fh);
-    if (r < 5) {
-      return td::Status::Error("failed to parse block id");
-    }
-    if (strlen(rh) != 64 || strlen(fh) != 64) {
-      return td::Status::Error("failed to parse block id: bad roothash/filehash");
-    }
-    TRY_RESULT(re, td::hex_decode(td::Slice(rh, 64)));
-    v.root_hash.as_slice().copy_from(td::Slice(re));
-    TRY_RESULT(fe, td::hex_decode(td::Slice(fh, 64)));
-    v.file_hash.as_slice().copy_from(td::Slice(fe));
-    return v;
-  }
 };
 
 struct ZeroStateIdExt {
@@ -521,7 +504,7 @@ struct BlockCandidatePriority {
 struct ValidatorDescr {
   /* ton::validator::ValidatorFullId */ Ed25519_PublicKey key;
   ValidatorWeight weight;
-  /* adnl::AdnlNodeIdShort */ Bits256 addr;
+  /* PublicKeyHash */ Bits256 addr;
   ValidatorDescr(const Ed25519_PublicKey& key_, ValidatorWeight weight_) : key(key_), weight(weight_) {
     addr.set_zero();
   }

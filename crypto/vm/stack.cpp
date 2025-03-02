@@ -17,12 +17,23 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "vm/stack.hpp"
+
+
+#include <cstddef>
+#include <iterator>
+#include <sstream>
+
 #include "vm/continuation.h"
 #include "vm/box.hpp"
 #include "vm/atom.h"
 #include "vm/vmstate.h"
 #include "vm/boc.h"
-#include "td/utils/misc.h"
+#include "utils/misc.h"
+#include "common/bigint.hpp"
+#include "utils/Slice.h"
+#include "utils/Status.h"
+#include "utils/buffer.h"
+#include "utils/logging.h"
 
 namespace td {
 template class td::Cnt<std::string>;

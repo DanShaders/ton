@@ -17,6 +17,10 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include <tl/tlblib.hpp>
+#include <algorithm>
+#include <sstream>
+
+#include "utils/Slice.h"
 
 namespace tlb {
 

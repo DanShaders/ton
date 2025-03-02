@@ -17,14 +17,24 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
-#include "td/db/KeyValue.h"
+#include <functional>
+#include <memory>
+#include <string>
+
+#include "db/KeyValue.h"
 #include "vm/db/DynamicBagOfCellsDb.h"
 #include "vm/cells.h"
-
-#include "td/utils/Slice.h"
-#include "td/utils/Status.h"
+#include "utils/Slice.h"
+#include "utils/Status.h"
+#include "common/refcnt.hpp"
+#include "utils/Slice-decl.h"
+#include "utils/check.h"
+#include "utils/int_types.h"
+#include "vm/cells/DataCell.h"
 
 namespace vm {
+class ExtCellCreator;
+
 using KeyValue = td::KeyValue;
 using KeyValueReader = td::KeyValueReader;
 

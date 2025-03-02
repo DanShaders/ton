@@ -18,22 +18,28 @@
 */
 #include "crypto/Ed25519.h"
 
+#include <openssl/bio.h>
+#include <openssl/obj_mac.h>
+#include <openssl/sha.h>
+#include <openssl/types.h>
+#include <string>
+#include <utility>
+
+#include "utils/Slice.h"
+#include "utils/check.h"
+
 #if TD_HAVE_OPENSSL
 
 #include <openssl/opensslv.h>
 
 #if OPENSSL_VERSION_NUMBER >= 0x10101000L && OPENSSL_VERSION_NUMBER != 0x20000000L || defined(OPENSSL_IS_BORINGSSL)
 
-#include "td/utils/base64.h"
-#include "td/utils/BigNum.h"
-#include "td/utils/format.h"
-#include "td/utils/logging.h"
-#include "td/utils/misc.h"
-#include "td/utils/ScopeGuard.h"
-
 #include <openssl/evp.h>
 #include <openssl/pem.h>
-#include <openssl/x509.h>
+
+#include "utils/BigNum.h"
+#include "utils/misc.h"
+#include "utils/ScopeGuard.h"
 
 #else
 

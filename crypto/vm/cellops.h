@@ -17,11 +17,19 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+#include <string>
+
 #include "vm/cellslice.h"
+#include "common/refcnt.hpp"
+#include "common/refint.h"
+#include "utils/int_types.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellSlice.h"
 
 namespace vm {
 
 class OpcodeTable;
+class CellBuilder;
 
 void register_cell_ops(OpcodeTable& cp0);
 

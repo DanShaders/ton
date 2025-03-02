@@ -16,13 +16,22 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
+
 #include <functional>
+#include <iostream>
+#include <sstream>
+#include <string>
+
 #include "vm/debugops.h"
 #include "vm/log.h"
 #include "vm/opctable.h"
 #include "vm/stack.hpp"
 #include "vm/excno.hpp"
 #include "vm/vm.h"
+#include "common/refcnt.hpp"
+#include "utils/Slice-decl.h"
+#include "utils/logging.h"
+#include "vm/cells/CellSlice.h"
 
 namespace vm {
 

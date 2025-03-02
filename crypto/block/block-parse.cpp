@@ -16,12 +16,21 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
-#include "td/utils/bits.h"
+
+#include <assert.h>
+#include <algorithm>
+#include <cstring>
+#include <iostream>
+#include <limits>
+#include <string>
+
 #include "block/block-parse.h"
 #include "block/block-auto.h"
 #include "ton/ton-shard.h"
-#include "common/util.h"
-#include "td/utils/crypto.h"
+#include "block.h"
+#include "common/bitstring.h"
+#include "utils/int_types.h"
+#include "utils/port/platform.h"
 
 namespace block {
 using namespace std::literals::string_literals;
@@ -1328,7 +1337,6 @@ bool TrComputeInternal1::validate_skip(int* ops, vm::CellSlice& cs, bool weak) c
                                                                 // vm_final_state_hash:uint256
 }
 
-const TrComputeInternal1 t_TrComputeInternal1;
 const RefTo<TrComputeInternal1> t_Ref_TrComputeInternal1;
 const ComputeSkipReason t_ComputeSkipReason;
 

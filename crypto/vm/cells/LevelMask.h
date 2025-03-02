@@ -18,9 +18,10 @@
 */
 #pragma once
 
-#include "td/utils/bits.h"
-#include "td/utils/int_types.h"
-#include "td/utils/StringBuilder.h"
+#include "utils/bits.h"
+#include "utils/int_types.h"
+#include "utils/StringBuilder.h"
+#include "utils/check.h"
 
 namespace td {
 class StringBuilder;

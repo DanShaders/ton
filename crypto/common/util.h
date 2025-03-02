@@ -18,11 +18,14 @@
 */
 #pragma once
 #include <string>
-#include "td/utils/Slice.h"
-#include "td/utils/Status.h"
-#include "td/utils/buffer.h"
+#include <cstddef>
 
+#include "utils/Slice.h"
+#include "utils/Status.h"
+#include "utils/buffer.h"
 #include "bitstring.h"
+#include "utils/Slice-decl.h"
+#include "utils/int_types.h"
 
 namespace td {
 

@@ -16,7 +16,12 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
+
 #include <functional>
+#include <sstream>
+#include <string>
+#include <utility>
+
 #include "vm/arithops.h"
 #include "vm/log.h"
 #include "vm/opctable.h"
@@ -25,6 +30,11 @@
 #include "vm/vm.h"
 #include "common/bigint.hpp"
 #include "common/refint.h"
+#include "common/refcnt.hpp"
+#include "utils/Slice-decl.h"
+#include "utils/check.h"
+#include "utils/logging.h"
+#include "vm/cells/CellSlice.h"
 
 namespace vm {
 

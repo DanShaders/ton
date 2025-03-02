@@ -18,8 +18,8 @@
 */
 #pragma once
 
-#include "td/utils/Slice.h"
-#include "td/utils/HashSet.h"
+#include "utils/Slice.h"
+#include "utils/HashSet.h"
 #include <set>
 
 namespace vm {

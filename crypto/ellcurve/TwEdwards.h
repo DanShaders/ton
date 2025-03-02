@@ -18,9 +18,12 @@
 */
 #pragma once
 #include <vector>
+#include <ostream>
+
 #include "common/refcnt.hpp"
 #include "openssl/residue.h"
 #include "ellcurve/Fp25519.h"
+#include "openssl/bignum.h"
 
 namespace ellcurve {
 using namespace arith;

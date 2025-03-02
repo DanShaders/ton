@@ -17,18 +17,27 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
+
+#include <ostream>
+#include <utility>
+
 #include "common/refcnt.hpp"
 #include "vm/cells.h"
 #include "vm/cellslice.h"
 #include "vm/dict.h"
 #include "vm/boc.h"
 #include "block/block.h"
-#include <ostream>
 #include "tl/tlblib.hpp"
-#include "td/utils/bits.h"
-#include "td/utils/StringBuilder.h"
+#include "utils/bits.h"
+#include "utils/StringBuilder.h"
 #include "ton/ton-types.h"
 #include "block-auto.h"
+#include "common/bigint.hpp"
+#include "common/refint.h"
+#include "utils/optional.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellBuilder.h"
+#include "vm/cells/CellSlice.h"
 
 namespace block {
 
@@ -396,6 +405,7 @@ struct CommonMsgInfo final : TLB_Complex {
     return v == 1 ? int_msg_info : v;
   }
   struct Record_int_msg_info;
+
   bool unpack(vm::CellSlice& cs, Record_int_msg_info& data) const;
   bool get_created_lt(vm::CellSlice& cs, unsigned long long& created_lt) const;
   bool is_internal(const vm::CellSlice& cs) const {
@@ -995,6 +1005,7 @@ extern const BlkMasterInfo t_BlkMasterInfo;
 
 struct ShardIdent final : TLB_Complex {
   struct Record;
+
   int get_size(const vm::CellSlice& cs) const override {
     return 2 + 6 + 32 + 64;
   }

@@ -17,11 +17,19 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #include "vm/db/CellStorage.h"
+
+#include <utility>
+
 #include "vm/db/DynamicBagOfCellsDb.h"
 #include "vm/boc.h"
-#include "td/utils/base64.h"
-#include "td/utils/tl_parsers.h"
-#include "td/utils/tl_helpers.h"
+#include "utils/tl_parsers.h"
+#include "utils/tl_helpers.h"
+#include "utils/Slice.h"
+#include "utils/Span.h"
+#include "utils/ThreadSafeCounter.h"
+#include "utils/buffer.h"
+#include "vm/cells/Cell.h"
+#include "vm/cells/CellTraits.h"
 
 namespace vm {
 namespace {
