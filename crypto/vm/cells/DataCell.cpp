@@ -39,7 +39,6 @@ struct ArenaAllocator {
     return std::unique_ptr<T>(obj);
   }
 
-  static size_t epoch;
 private:
   td::MutableSlice alloc_batch() {
     LOG(ERROR) << "Alloc new batch";
@@ -81,10 +80,8 @@ private:
 
 void FlushArenaAllocatorEpoch() {
     return;
-    ++ArenaAllocator<DataCell>::epoch;
 }
 
-template<> size_t ArenaAllocator<DataCell>::epoch = 1;
 std::unique_ptr<DataCell> DataCell::create_empty_data_cell(Info info) {
   //if constexpr(false) {
   //  ArenaAllocator<DataCell> allocator;
