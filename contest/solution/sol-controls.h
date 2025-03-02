@@ -61,7 +61,7 @@
 
 #ifdef CVQ_CHECK_TX_PARALLEL
 // CUT mutex required if transactions are executed in parallel - different accounts may share same cells / CUTs
-#define CELL_USAGE_TREE_MUTEX
+// #define CELL_USAGE_TREE_MUTEX
 // Surprisingly enough, in fact, Merkle Tree parallel pipelines do NOT require CUT Mutex
 #endif
 
