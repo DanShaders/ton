@@ -1,6 +1,6 @@
 name: Tonlib Android
 
-on: [push,workflow_dispatch,workflow_call]
+on: []
 
 jobs:
   build:

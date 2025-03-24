@@ -2,9 +2,6 @@ name: Docker Ubuntu 22.04 image
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - 'master'
 
 env:
   REGISTRY: ghcr.io

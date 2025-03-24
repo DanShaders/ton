@@ -1,6 +1,6 @@
 name: MacOS-13 TON build (portable, x86-64)
 
-on: [push,workflow_dispatch,workflow_call]
+on: []
 
 jobs:
   build:

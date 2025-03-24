@@ -1,6 +1,6 @@
 name: MacOS-15 TON build (shared, arm64)
 
-on: [push,workflow_dispatch,workflow_call]
+on: []
 
 jobs:
   build:
