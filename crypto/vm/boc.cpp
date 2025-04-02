@@ -1254,7 +1254,7 @@ bool VmStorageStat::add_storage(const CellSlice& cs) {
   return true;
 }
 
-static td::uint64 estimate_prunned_size() {
+static td::uint64 estimate_pruned_size() {
   return 41;
 }
 
@@ -1267,16 +1267,16 @@ void ProofStorageStat::add_cell(const Ref<DataCell>& cell) {
   if (status == c_loaded) {
     return;
   }
-  if (status == c_prunned) {
-    proof_size_ -= estimate_prunned_size();
+  if (status == c_pruned) {
+    proof_size_ -= estimate_pruned_size();
   }
   status = c_loaded;
   proof_size_ += estimate_serialized_size(cell);
   for (unsigned i = 0; i < cell->size_refs(); ++i) {
     auto& child_status = cells_[cell->get_ref(i)->get_hash()];
     if (child_status == c_none) {
-      child_status = c_prunned;
-      proof_size_ += estimate_prunned_size();
+      child_status = c_pruned;
+      proof_size_ += estimate_pruned_size();
     }
   }
 }

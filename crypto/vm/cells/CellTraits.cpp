@@ -33,8 +33,8 @@ td::StringBuilder& operator<<(td::StringBuilder& sb, CellTraits::SpecialType spe
     case CellTraits::SpecialType::MerkleUpdate:
       sb << "MerkleUpdate";
       break;
-    case CellTraits::SpecialType::PrunnedBranch:
-      sb << "PrunnedBranch";
+    case CellTraits::SpecialType::PrunedBranch:
+      sb << "PrunedBranch";
       break;
     case CellTraits::SpecialType::Library:
       sb << "Library";

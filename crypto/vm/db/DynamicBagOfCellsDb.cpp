@@ -322,7 +322,7 @@ class DynamicBagOfCellsDbImpl : public DynamicBagOfCellsDb, private ExtCellCreat
     }
 
     td::Result<Ref<Cell>> ext_cell(Cell::LevelMask level_mask, td::Slice hash, td::Slice depth) override {
-      TRY_RESULT(ext_cell, DynamicBocExtCell::create(PrunnedCellInfo{level_mask, hash, depth},
+      TRY_RESULT(ext_cell, DynamicBocExtCell::create(PrunedCellInfo{level_mask, hash, depth},
                                                      DynamicBocExtCellExtra{cell_db_reader_}));
       created_cells_.push_back(ext_cell);
       return std::move(ext_cell);
@@ -367,7 +367,7 @@ class DynamicBagOfCellsDbImpl : public DynamicBagOfCellsDb, private ExtCellCreat
 
     td::Result<Ref<Cell>> ext_cell(Cell::LevelMask level_mask, td::Slice hash, td::Slice depth) override {
       CHECK(!db_);
-      TRY_RESULT(ext_cell, DynamicBocExtCell::create(PrunnedCellInfo{level_mask, hash, depth},
+      TRY_RESULT(ext_cell, DynamicBocExtCell::create(PrunedCellInfo{level_mask, hash, depth},
                                                      DynamicBocExtCellExtra{shared_from_this()}));
       return std::move(ext_cell);
     }
@@ -650,7 +650,7 @@ class DynamicBagOfCellsDbImpl : public DynamicBagOfCellsDb, private ExtCellCreat
   }
 
   td::Result<Ref<Cell>> create_empty_ext_cell(Cell::LevelMask level_mask, td::Slice hash, td::Slice depth) {
-    TRY_RESULT(res, DynamicBocExtCell::create(PrunnedCellInfo{level_mask, hash, depth},
+    TRY_RESULT(res, DynamicBocExtCell::create(PrunedCellInfo{level_mask, hash, depth},
                                               DynamicBocExtCellExtra{cell_db_reader_}));
     return std::move(res);
   }

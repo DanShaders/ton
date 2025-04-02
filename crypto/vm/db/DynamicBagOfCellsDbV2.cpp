@@ -680,9 +680,9 @@ struct CellInfoStorage {
     bool our_ext_cell = false;
     auto ext_cell = dynamic_cast<const DynamicBocExtCell *>(cell.get());
     if (ext_cell) {
-      auto prunned_cell = ext_cell->get_prunned_cell();
-      if (prunned_cell.not_null()) {
-        our_ext_cell = prunned_cell->get_extra().reader.get() == from_reader;
+      auto pruned_cell = ext_cell->get_pruned_cell();
+      if (pruned_cell.not_null()) {
+        our_ext_cell = pruned_cell->get_extra().reader.get() == from_reader;
       }
       our_ext_cell = true;
     } else if (!cell->is_loaded()) {
@@ -1062,7 +1062,7 @@ class DynamicBagOfCellsDbImplV2 : public DynamicBagOfCellsDb {
     td::Result<Ref<Cell>> ext_cell(Cell::LevelMask level_mask, td::Slice hash, td::Slice depth) override {
       // thread safe function
       stats_.ext_cells.inc();
-      TRY_RESULT(ext_cell, DynamicBocExtCell::create(PrunnedCellInfo{level_mask, hash, depth},
+      TRY_RESULT(ext_cell, DynamicBocExtCell::create(PrunedCellInfo{level_mask, hash, depth},
                                                      DynamicBocExtCellExtra{shared_from_this()}));
 
       return ext_cell;

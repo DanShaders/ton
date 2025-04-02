@@ -28,20 +28,20 @@ namespace ton {
 
 namespace validator {
 
-static td::Status check_no_prunned(const Ref<vm::Cell>& cell) {
+static td::Status check_no_pruned(const Ref<vm::Cell>& cell) {
   if (cell.is_null()) {
     return td::Status::OK();
   }
   TRY_RESULT(loaded_cell, cell->load_cell());
   if (loaded_cell.data_cell->get_level() > 0) {
-    return td::Status::Error("prunned branch");
+    return td::Status::Error("pruned branch");
   }
   return td::Status::OK();
 }
 
-static td::Status check_no_prunned(const vm::CellSlice& cs) {
+static td::Status check_no_pruned(const vm::CellSlice& cs) {
   for (unsigned i = 0; i < cs.size_refs(); ++i) {
-    TRY_STATUS(check_no_prunned(cs.prefetch_ref(i)));
+    TRY_STATUS(check_no_pruned(cs.prefetch_ref(i)));
   }
   return td::Status::OK();
 }
@@ -68,7 +68,7 @@ static td::Result<std::vector<td::int32>> process_queue(
   };
   std::vector<block::OutputQueueMerger::Neighbor> neighbors;
   for (auto& b : blocks) {
-    TRY_STATUS_PREFIX(check_no_prunned(*b.second.proc_info), "invalid proc_info proof: ")
+    TRY_STATUS_PREFIX(check_no_pruned(*b.second.proc_info), "invalid proc_info proof: ")
     dfs_cs(*b.second.proc_info);
     neighbors.emplace_back(b.first, b.second.out_queue->prefetch_ref());
   }
@@ -93,7 +93,7 @@ static td::Result<std::vector<td::int32>> process_queue(
     ++msg_count_total;
 
     dfs_cs(*kv->msg);
-    TRY_STATUS_PREFIX(check_no_prunned(*kv->msg), "invalid message proof: ")
+    TRY_STATUS_PREFIX(check_no_pruned(*kv->msg), "invalid message proof: ")
     if (estimated_proof_size >= limits.max_bytes || msg_count_total >= (long long)limits.max_msgs) {
       limit_reached = true;
     }

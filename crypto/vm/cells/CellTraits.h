@@ -29,7 +29,7 @@ class CellTraits : public td::CntObject {
  public:
   enum class SpecialType : td::uint8 {
     Ordinary = 0,
-    PrunnedBranch = 1,
+    PrunedBranch = 1,
     Library = 2,
     MerkleProof = 3,
     MerkleUpdate = 4

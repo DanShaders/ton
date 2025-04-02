@@ -74,7 +74,7 @@ static td::Status do_validate_proof(td::Ref<vm::Cell> node, size_t depth) {
   }
   vm::CellSlice cs(vm::NoVm(), std::move(node));
   if (cs.is_special()) {
-    if (cs.special_type() != vm::Cell::SpecialType::PrunnedBranch) {
+    if (cs.special_type() != vm::Cell::SpecialType::PrunedBranch) {
       return td::Status::Error("Unexpected special cell");
     }
     return td::Status::OK();

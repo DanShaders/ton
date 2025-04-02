@@ -526,7 +526,7 @@ class CellExplorer {
 class RandomBagOfCells {
  public:
   template <class T>
-  RandomBagOfCells(size_t size, T &rnd, bool with_prunned_branches, std::vector<Ref<Cell>> cells) {
+  RandomBagOfCells(size_t size, T &rnd, bool with_pruned_branches, std::vector<Ref<Cell>> cells) {
     std::map<CellHash, int> depth;
 
     for (auto &cell : cells) {
@@ -534,7 +534,7 @@ class RandomBagOfCells {
     }
 
     for (size_t i = 0; i < size; i++) {
-      add_random_cell(rnd, with_prunned_branches);
+      add_random_cell(rnd, with_pruned_branches);
     }
   }
 
@@ -561,7 +561,7 @@ class RandomBagOfCells {
   }
 
   template <class T>
-  void add_random_cell(T &rnd, bool with_prunned_branches = true) {
+  void add_random_cell(T &rnd, bool with_pruned_branches = true) {
     int cnt = 0;
     while (true) {
       CellBuilder cb;
@@ -581,7 +581,7 @@ class RandomBagOfCells {
       }
       Ref<Cell> cell = cb.finalize();
       auto cell_level = cell->get_level();
-      if (with_prunned_branches) {
+      if (with_pruned_branches) {
         if (rnd.fast(0, 5) == 0 && cell_level + 1 < Cell::max_level) {
           cell = CellBuilder::create_pruned_branch(std::move(cell), cell_level + 1);
         }
@@ -629,28 +629,28 @@ class RandomBagOfCells {
   };
 };
 
-Ref<Cell> gen_random_cell(int size, td::Random::Xorshift128plus &rnd, bool with_prunned_branches = true,
+Ref<Cell> gen_random_cell(int size, td::Random::Xorshift128plus &rnd, bool with_pruned_branches = true,
                           std::vector<Ref<Cell>> cells = {}) {
   if (!cells.empty()) {
     td::random_shuffle(as_mutable_span(cells), rnd);
     cells.resize(cells.size() % rnd());
   }
-  return RandomBagOfCells(size, rnd, with_prunned_branches, std::move(cells)).get_root();
+  return RandomBagOfCells(size, rnd, with_pruned_branches, std::move(cells)).get_root();
 }
 std::vector<Ref<Cell>> gen_random_cells(int roots, int size, td::Random::Xorshift128plus &rnd,
-                                        bool with_prunned_branches = true, std::vector<Ref<Cell>> cells = {}) {
+                                        bool with_pruned_branches = true, std::vector<Ref<Cell>> cells = {}) {
   if (!cells.empty()) {
     td::random_shuffle(as_mutable_span(cells), rnd);
     cells.resize(cells.size() % rnd());
   }
-  return RandomBagOfCells(size, rnd, with_prunned_branches, std::move(cells)).get_random_roots(roots, rnd);
+  return RandomBagOfCells(size, rnd, with_pruned_branches, std::move(cells)).get_random_roots(roots, rnd);
 }
 
 TEST(Cell, MerkleProof) {
   td::Random::Xorshift128plus rnd{123};
   for (int t = 0; t < 1000; t++) {
-    bool with_prunned_branches = true;
-    auto cell = gen_random_cell(rnd.fast(1, 1000), rnd, with_prunned_branches);
+    bool with_pruned_branches = true;
+    auto cell = gen_random_cell(rnd.fast(1, 1000), rnd, with_pruned_branches);
     auto exploration = CellExplorer::random_explore(cell, rnd);
 
     auto usage_tree = std::make_shared<CellUsageTree>();
@@ -658,10 +658,10 @@ TEST(Cell, MerkleProof) {
     auto exploration2 = CellExplorer::explore(usage_cell, exploration.ops);
     ASSERT_EQ(exploration.log, exploration2.log);
 
-    auto is_prunned = [&](const Ref<Cell> &cell_to_check) {
+    auto is_pruned = [&](const Ref<Cell> &cell_to_check) {
       return exploration.visited.count(cell_to_check->get_hash()) == 0;
     };
-    auto proof = MerkleProof::generate(cell, is_prunned);
+    auto proof = MerkleProof::generate(cell, is_pruned);
     // CellBuilder::virtualize(proof, 1);
     //ASSERT_EQ(1u, proof->get_level());
     auto virtualized_proof = MerkleProof::virtualize(proof, 1);
@@ -679,8 +679,8 @@ TEST(Cell, MerkleProof) {
 TEST(Cell, MerkleProofCombine) {
   td::Random::Xorshift128plus rnd{123};
   for (int t = 0; t < 1000; t++) {
-    bool with_prunned_branches = true;
-    auto cell = gen_random_cell(rnd.fast(1, 1000), rnd, with_prunned_branches);
+    bool with_pruned_branches = true;
+    auto cell = gen_random_cell(rnd.fast(1, 1000), rnd, with_pruned_branches);
     auto exploration1 = CellExplorer::random_explore(cell, rnd);
     auto exploration2 = CellExplorer::random_explore(cell, rnd);
 
@@ -763,14 +763,14 @@ TEST(Cell, MerkleProofCombine) {
 
 int X = 20;
 Ref<Cell> gen_random_cell(int size, Ref<Cell> from, td::Random::Xorshift128plus &rnd,
-                          bool with_prunned_branches = true) {
+                          bool with_pruned_branches = true) {
   auto exploration = CellExplorer::random_explore(from, rnd);
-  return gen_random_cell(size, rnd, with_prunned_branches, std::move(exploration.visited_cells));
+  return gen_random_cell(size, rnd, with_pruned_branches, std::move(exploration.visited_cells));
 }
-auto gen_merkle_update(Ref<Cell> cell, td::Random::Xorshift128plus &rnd, bool with_prunned_branches) {
+auto gen_merkle_update(Ref<Cell> cell, td::Random::Xorshift128plus &rnd, bool with_pruned_branches) {
   auto usage_tree = std::make_shared<CellUsageTree>();
   auto usage_cell = UsageCell::create(cell, usage_tree->root_ptr());
-  auto new_cell = gen_random_cell(rnd.fast(1, X), usage_cell, rnd, with_prunned_branches);
+  auto new_cell = gen_random_cell(rnd.fast(1, X), usage_cell, rnd, with_pruned_branches);
   auto update = MerkleUpdate::generate(cell, new_cell, usage_tree.get());
   return std::make_tuple(new_cell, update, usage_tree);
 };
@@ -787,12 +787,12 @@ void check_merkle_update(Ref<Cell> A, Ref<Cell> B, Ref<Cell> AB) {
 TEST(Cell, MerkleUpdate) {
   td::Random::Xorshift128plus rnd{123};
   for (int t = 0; t < 1000; t++) {
-    bool with_prunned_branches = true;
-    auto A = gen_random_cell(rnd.fast(1, 1000), rnd, with_prunned_branches);
+    bool with_pruned_branches = true;
+    auto A = gen_random_cell(rnd.fast(1, 1000), rnd, with_pruned_branches);
 
     Ref<Cell> B;
     Ref<Cell> AB;
-    std::tie(B, AB, std::ignore) = gen_merkle_update(A, rnd, with_prunned_branches);
+    std::tie(B, AB, std::ignore) = gen_merkle_update(A, rnd, with_pruned_branches);
     check_merkle_update(A, B, AB);
   }
 };
@@ -800,17 +800,17 @@ TEST(Cell, MerkleUpdate) {
 TEST(Cell, MerkleUpdateCombine) {
   td::Random::Xorshift128plus rnd{123};
   for (int t = 0; t < 1000; t++) {
-    bool with_prunned_branches = true;
-    auto A = gen_random_cell(rnd.fast(1, X), rnd, with_prunned_branches);
+    bool with_pruned_branches = true;
+    auto A = gen_random_cell(rnd.fast(1, X), rnd, with_pruned_branches);
 
     Ref<Cell> B;
     Ref<Cell> AB;
-    std::tie(B, AB, std::ignore) = gen_merkle_update(A, rnd, with_prunned_branches);
+    std::tie(B, AB, std::ignore) = gen_merkle_update(A, rnd, with_pruned_branches);
     check_merkle_update(A, B, AB);
 
     Ref<Cell> C;
     Ref<Cell> BC;
-    std::tie(C, BC, std::ignore) = gen_merkle_update(B, rnd, with_prunned_branches);
+    std::tie(C, BC, std::ignore) = gen_merkle_update(B, rnd, with_pruned_branches);
     check_merkle_update(B, C, BC);
 
     check_merkle_update(A, C, MerkleUpdate::combine(AB, BC));
@@ -1714,8 +1714,8 @@ class CompactArray {
       get(root_, size_, key, &hashes);
     }
 
-    auto is_prunned = [&](const Ref<Cell> &cell) { return hashes.count(cell->get_hash()) == 0; };
-    return MerkleProof::generate_raw(root_, is_prunned);
+    auto is_pruned = [&](const Ref<Cell> &cell) { return hashes.count(cell->get_hash()) == 0; };
+    return MerkleProof::generate_raw(root_, is_pruned);
   }
 
  private:
@@ -2113,14 +2113,14 @@ TEST(Cell, BocHands) {
 TEST(Cell, MerkleProofHands) {
   // data has a reference, because we do not prune lists
   auto data = CellBuilder{}.store_bytes("pruned data").store_ref(CellBuilder{}.finalize()).finalize();
-  auto prunned_data = CellBuilder::create_pruned_branch(data, data->get_level() + 1);
-  ASSERT_EQ(1u, prunned_data->get_level());
-  ASSERT_EQ(prunned_data->get_hash(0), data->get_hash(0));
+  auto pruned_data = CellBuilder::create_pruned_branch(data, data->get_level() + 1);
+  ASSERT_EQ(1u, pruned_data->get_level());
+  ASSERT_EQ(pruned_data->get_hash(0), data->get_hash(0));
   ASSERT_EQ(data->get_hash(0), data->get_hash(1));
-  ASSERT_TRUE(prunned_data->get_hash(1) != prunned_data->get_hash(0));
+  ASSERT_TRUE(pruned_data->get_hash(1) != pruned_data->get_hash(0));
 
   auto node = CellBuilder{}.store_bytes("protected data").store_ref(data).finalize();
-  auto proof = CellBuilder{}.store_bits(node->get_data(), node->get_bits()).store_ref(prunned_data).finalize();
+  auto proof = CellBuilder{}.store_bits(node->get_data(), node->get_bits()).store_ref(pruned_data).finalize();
   ASSERT_EQ(0u, node->get_level());
   ASSERT_EQ(1u, proof->get_level());
   ASSERT_EQ(proof->get_hash(0), node->get_hash(0));
@@ -2997,22 +2997,22 @@ TEST(TonDb, LargeBocSerializer) {
   CHECK(a == b);
 }
 
-TEST(TonDb, DoNotMakeListsPrunned) {
+TEST(TonDb, DoNotMakeListsPruned) {
   auto cell = vm::CellBuilder().store_bytes("abc").finalize();
-  auto is_prunned = [&](const td::Ref<vm::Cell> &cell) { return true; };
-  auto proof = vm::MerkleProof::generate(cell, is_prunned);
+  auto is_pruned = [&](const td::Ref<vm::Cell> &cell) { return true; };
+  auto proof = vm::MerkleProof::generate(cell, is_pruned);
   auto virtualized_proof = vm::MerkleProof::virtualize(proof, 1);
   ASSERT_TRUE(virtualized_proof->get_virtualization() == 0);
 }
 
 TEST(TonDb, CellStat) {
   td::Random::Xorshift128plus rnd(123);
-  bool with_prunned_branches = true;
+  bool with_pruned_branches = true;
   for (int i = 0; i < 1000; i++) {
-    auto A = vm::gen_random_cell(100, rnd, with_prunned_branches);
+    auto A = vm::gen_random_cell(100, rnd, with_pruned_branches);
     td::Ref<vm::Cell> B, AB, B_proof;
     std::shared_ptr<vm::CellUsageTree> usage_tree;
-    std::tie(B, AB, usage_tree) = gen_merkle_update(A, rnd, with_prunned_branches);
+    std::tie(B, AB, usage_tree) = gen_merkle_update(A, rnd, with_pruned_branches);
     B_proof = vm::CellSlice(vm::NoVm(), AB).prefetch_ref(1);
 
     vm::CellStorageStat stat;
@@ -3049,7 +3049,7 @@ TEST(TonDb, CellStat) {
     usage_tree.reset();
     td::Ref<vm::Cell> C, BC, C_proof;
     std::shared_ptr<vm::CellUsageTree> usage_tree_B;
-    std::tie(C, BC, usage_tree_B) = gen_merkle_update(B, rnd, with_prunned_branches);
+    std::tie(C, BC, usage_tree_B) = gen_merkle_update(B, rnd, with_pruned_branches);
     C_proof = vm::CellSlice(vm::NoVm(), BC).prefetch_ref(1);
 
     auto BC_proof_stat = new_proof_stat.get_proof_stat() + new_proof_stat.tentative_add_proof(C, usage_tree_B.get());

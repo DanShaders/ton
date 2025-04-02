@@ -115,10 +115,10 @@ struct VmVirtError {
     return static_cast<int>(Excno::virt_err);
   }
   const char* get_msg() const {
-    return "prunned branch";
+    return "pruned branch";
   }
   operator VmError() const {
-    return VmError{Excno::virt_err, "prunned branch", virtualization};
+    return VmError{Excno::virt_err, "pruned branch", virtualization};
   }
   td::Status as_status() const {
     return td::Status::Error(td::Slice{get_msg()});

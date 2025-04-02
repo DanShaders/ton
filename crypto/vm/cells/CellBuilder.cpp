@@ -116,7 +116,7 @@ Ref<DataCell> CellBuilder::do_create_pruned_branch(Ref<Cell> cell, td::uint32 ne
     throw CellWriteError();
   }
   CellBuilder cb;
-  cb.store_long(static_cast<td::uint8>(Cell::SpecialType::PrunnedBranch), 8);
+  cb.store_long(static_cast<td::uint8>(Cell::SpecialType::PrunedBranch), 8);
   cb.store_long(level_mask.apply_or(Cell::LevelMask::one_level(new_level)).get_mask(), 8);
   for (td::uint32 i = 0; i <= level; i++) {
     if (level_mask.is_significant(i)) {

@@ -28,16 +28,16 @@ namespace vm {
 namespace detail {
 class MerkleProofImpl {
  public:
-  explicit MerkleProofImpl(MerkleProof::IsPrunnedFunction is_prunned) : is_prunned_(std::move(is_prunned)) {
+  explicit MerkleProofImpl(MerkleProof::IsPrunedFunction is_pruned) : is_pruned_(std::move(is_pruned)) {
   }
   explicit MerkleProofImpl(CellUsageTree *usage_tree) : usage_tree_(usage_tree) {
   }
 
   Ref<Cell> create_from(Ref<Cell> cell) {
-    if (!is_prunned_) {
+    if (!is_pruned_) {
       CHECK(usage_tree_);
       dfs_usage_tree(cell, usage_tree_->root_id());
-      is_prunned_ = [this](const Ref<Cell> &cell) { return visited_cells_.count(cell->get_hash()) == 0; };
+      is_pruned_ = [this](const Ref<Cell> &cell) { return visited_cells_.count(cell->get_hash()) == 0; };
     }
     try {
       return dfs(cell, cell->get_level());
@@ -53,7 +53,7 @@ class MerkleProofImpl {
   td::HashMap<Key, Ref<Cell>> cells_;
   td::HashSet<Cell::Hash> visited_cells_;
   CellUsageTree *usage_tree_{nullptr};
-  MerkleProof::IsPrunnedFunction is_prunned_;
+  MerkleProof::IsPrunedFunction is_pruned_;
 
   void dfs_usage_tree(Ref<Cell> cell, CellUsageTree::NodeId node_id) {
     if (!usage_tree_->is_loaded(node_id)) {
@@ -77,7 +77,7 @@ class MerkleProofImpl {
       }
     }
 
-    if (is_prunned_(cell)) {
+    if (is_pruned_(cell)) {
       auto res = CellBuilder::create_pruned_branch(cell, merkle_depth + 1);
       CHECK(res.not_null());
       cells_.emplace(key, res);
@@ -98,8 +98,8 @@ class MerkleProofImpl {
 };
 }  // namespace detail
 
-Ref<Cell> MerkleProof::generate_raw(Ref<Cell> cell, IsPrunnedFunction is_prunned) {
-  return detail::MerkleProofImpl(is_prunned).create_from(cell);
+Ref<Cell> MerkleProof::generate_raw(Ref<Cell> cell, IsPrunedFunction is_pruned) {
+  return detail::MerkleProofImpl(is_pruned).create_from(cell);
 }
 
 Ref<Cell> MerkleProof::generate_raw(Ref<Cell> cell, CellUsageTree *usage_tree) {
@@ -110,12 +110,12 @@ Ref<Cell> MerkleProof::virtualize_raw(Ref<Cell> cell, Cell::VirtualizationParame
   return cell->virtualize(virt);
 }
 
-Ref<Cell> MerkleProof::generate(Ref<Cell> cell, IsPrunnedFunction is_prunned) {
+Ref<Cell> MerkleProof::generate(Ref<Cell> cell, IsPrunedFunction is_pruned) {
   int cell_level = cell->get_level();
   if (cell_level != 0) {
     return {};
   }
-  auto raw = generate_raw(std::move(cell), is_prunned);
+  auto raw = generate_raw(std::move(cell), is_pruned);
   return CellBuilder::create_merkle_proof(std::move(raw));
 }
 
@@ -193,10 +193,10 @@ class MerkleProofCombineFast {
     CellSlice csa(NoVm(), a);
     CellSlice csb(NoVm(), b);
 
-    if (csa.is_special() && csa.special_type() == vm::Cell::SpecialType::PrunnedBranch) {
+    if (csa.is_special() && csa.special_type() == vm::Cell::SpecialType::PrunedBranch) {
       return b;
     }
-    if (csb.is_special() && csb.special_type() == vm::Cell::SpecialType::PrunnedBranch) {
+    if (csb.is_special() && csb.special_type() == vm::Cell::SpecialType::PrunedBranch) {
       return a;
     }
 
@@ -244,11 +244,11 @@ class MerkleProofCombine {
 
   struct Info {
     Ref<Cell> cell_;
-    Ref<Cell> prunned_cells_[Cell::max_level];  // Cache prunned cells with different levels to reuse them
+    Ref<Cell> pruned_cells_[Cell::max_level];  // Cache pruned cells with different levels to reuse them
 
-    Ref<Cell> get_prunned_cell(int depth) {
+    Ref<Cell> get_pruned_cell(int depth) {
       if (depth < Cell::max_level) {
-        return prunned_cells_[depth];
+        return pruned_cells_[depth];
       }
       return {};
     }
@@ -256,7 +256,7 @@ class MerkleProofCombine {
       if (cell_.not_null()) {
         return cell_;
       }
-      for (auto &cell : prunned_cells_) {
+      for (auto &cell : pruned_cells_) {
         if (cell.not_null()) {
           return cell;
         }
@@ -277,9 +277,9 @@ class MerkleProofCombine {
 
     auto &info = cells_[cell->get_hash(merkle_depth)];
     CellSlice cs(NoVm(), cell);
-    // check if prunned cell is bounded
-    if (cs.special_type() == Cell::SpecialType::PrunnedBranch && static_cast<int>(cell->get_level()) > merkle_depth) {
-      info.prunned_cells_[cell->get_level() - 1] = std::move(cell);
+    // check if pruned cell is bounded
+    if (cs.special_type() == Cell::SpecialType::PrunedBranch && static_cast<int>(cell->get_level()) > merkle_depth) {
+      info.pruned_cells_[cell->get_level() - 1] = std::move(cell);
       return;
     }
     info.cell_ = std::move(cell);
@@ -307,7 +307,7 @@ class MerkleProofCombine {
     auto &info = cells_[cell->get_hash(merkle_depth)];
 
     if (info.cell_.is_null()) {
-      Ref<Cell> res = info.get_prunned_cell(a_merkle_depth);
+      Ref<Cell> res = info.get_pruned_cell(a_merkle_depth);
       if (res.is_null()) {
         res = CellBuilder::create_pruned_branch(info.get_any_cell(), a_merkle_depth + 1, merkle_depth);
       }

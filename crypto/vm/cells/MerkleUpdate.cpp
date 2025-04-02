@@ -43,7 +43,7 @@ class MerkleUpdateApply {
   void dfs_both(Ref<Cell> original, Ref<Cell> update_from, int merkle_depth) {
     CellSlice cs_update_from(NoVm(), update_from);
     known_cells_.emplace(original->get_hash(merkle_depth), original);
-    if (cs_update_from.special_type() == Cell::SpecialType::PrunnedBranch) {
+    if (cs_update_from.special_type() == Cell::SpecialType::PrunedBranch) {
       return;
     }
     int child_merkle_depth = cs_update_from.child_merkle_depth(merkle_depth);
@@ -56,7 +56,7 @@ class MerkleUpdateApply {
 
   Ref<Cell> dfs(Ref<Cell> cell, int merkle_depth) {
     CellSlice cs(NoVm(), cell);
-    if (cs.special_type() == Cell::SpecialType::PrunnedBranch) {
+    if (cs.special_type() == Cell::SpecialType::PrunedBranch) {
       if ((int)cell->get_level() == merkle_depth + 1) {
         auto it = known_cells_.find(cell->get_hash(merkle_depth));
         if (it != known_cells_.end()) {
@@ -110,7 +110,7 @@ class MerkleUpdateValidator {
     }
     CellSlice cs(NoVm(), cell);
     known_cells_.insert(cell->get_hash(merkle_depth));
-    if (cs.special_type() == Cell::SpecialType::PrunnedBranch) {
+    if (cs.special_type() == Cell::SpecialType::PrunedBranch) {
       return;
     }
     int child_merkle_depth = cs.child_merkle_depth(merkle_depth);
@@ -124,11 +124,11 @@ class MerkleUpdateValidator {
       return td::Status::OK();
     }
     CellSlice cs(NoVm(), cell);
-    if (cs.special_type() == Cell::SpecialType::PrunnedBranch) {
+    if (cs.special_type() == Cell::SpecialType::PrunedBranch) {
       if ((int)cell->get_level() == merkle_depth + 1) {
         if (known_cells_.count(cell->get_hash(merkle_depth)) == 0) {
           return td::Status::Error(PSLICE()
-                                   << "Unknown prunned cell (validate): " << cell->get_hash(merkle_depth).to_hex());
+                                   << "Unknown pruned cell (validate): " << cell->get_hash(merkle_depth).to_hex());
         }
       }
       return td::Status::OK();
@@ -259,12 +259,12 @@ class MerkleCombine {
     // Y = Virtualize(B) = Virtualize(C), B and C are  subrees of Y
     // Z = Virtualize(D), D is subtree of Z
     //
-    // Prunned cells bounded by merkle proof P are essentially cells which are impossible to load during traversal of Virtualize(P)
+    // Pruned cells bounded by merkle proof P are essentially cells which are impossible to load during traversal of Virtualize(P)
     //
     // We want to create new_A and new_D
     // Virtualize(new_A) = X
     // Virtualize(new_D) = Z
-    // All prunned branches bounded by new_D must be in new_A
+    // All pruned branches bounded by new_D must be in new_A
     // i.e. if we have all cells reachable in Virtualize(new_A) we may construct Z from them (and from new_D)
     //
     // Main idea is following
@@ -278,7 +278,7 @@ class MerkleCombine {
     //
     // How to create Max(A)?
     // We just store all cells reachable from A, B, C and D in big cache.
-    // It we reach bounded prunned cell during traversion we may continue traversial with a cell from the cache.
+    // It we reach bounded pruned cell during traversion we may continue traversial with a cell from the cache.
     //
     //
     // 1. load_cells(root) - caches all cell reachable in Virtualize(root);
@@ -318,12 +318,12 @@ class MerkleCombine {
 
   struct Info {
     Ref<Cell> cell_;
-    Ref<Cell> prunned_cells_[Cell::max_level];  // Cache prunned cells with different levels to reuse them
+    Ref<Cell> pruned_cells_[Cell::max_level];  // Cache pruned cells with different levels to reuse them
     CellUsageTree::NodeId A_node_id{0};
 
-    Ref<Cell> get_prunned_cell(int depth) {
+    Ref<Cell> get_pruned_cell(int depth) {
       if (depth < Cell::max_level) {
-        return prunned_cells_[depth];
+        return pruned_cells_[depth];
       }
       return {};
     }
@@ -331,7 +331,7 @@ class MerkleCombine {
       if (cell_.not_null()) {
         return cell_;
       }
-      for (auto &cell : prunned_cells_) {
+      for (auto &cell : pruned_cells_) {
         if (cell.not_null()) {
           return cell;
         }
@@ -353,9 +353,9 @@ class MerkleCombine {
     auto &info = cells_[cell->get_hash(merkle_depth)];
     CellSlice cs(NoVm(), cell);
 
-    // check if prunned cell is bounded
-    if (cs.special_type() == Cell::SpecialType::PrunnedBranch && static_cast<int>(cell->get_level()) > merkle_depth) {
-      info.prunned_cells_[cell->get_level() - 1] = std::move(cell);
+    // check if pruned cell is bounded
+    if (cs.special_type() == Cell::SpecialType::PrunedBranch && static_cast<int>(cell->get_level()) > merkle_depth) {
+      info.pruned_cells_[cell->get_level() - 1] = std::move(cell);
       return;
     }
 
@@ -410,7 +410,7 @@ class MerkleCombine {
     auto &info = cells_[cell->get_hash(merkle_depth)];
     if (info.A_node_id != 0) {
       A_usage_tree_->mark_path(info.A_node_id);
-      Ref<Cell> res = info.get_prunned_cell(d_merkle_depth);
+      Ref<Cell> res = info.get_pruned_cell(d_merkle_depth);
       if (res.is_null()) {
         res = CellBuilder::create_pruned_branch(info.get_any_cell(), d_merkle_depth + 1, merkle_depth);
       }
@@ -460,7 +460,7 @@ class MerkleCombine {
 
     CHECK(info.A_node_id != 0);
     if (!A_usage_tree_->has_mark(info.A_node_id)) {
-      Ref<Cell> res = info.get_prunned_cell(a_merkle_depth);
+      Ref<Cell> res = info.get_pruned_cell(a_merkle_depth);
       if (res.is_null()) {
         res = CellBuilder::create_pruned_branch(info.get_any_cell(), a_merkle_depth + 1, merkle_depth);
       }

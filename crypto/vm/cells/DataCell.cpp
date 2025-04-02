@@ -55,7 +55,7 @@ class CellChecker {
       case Cell::SpecialType::Ordinary:
         TRY_STATUS(check_ordinary_cell());
         break;
-      case Cell::SpecialType::PrunnedBranch:
+      case Cell::SpecialType::PrunedBranch:
         TRY_STATUS(check_pruned_branch());
         break;
       case Cell::SpecialType::Library:
@@ -251,7 +251,7 @@ class CellChecker {
   }
 
   void compute_hash(int level, int last_computed_hash) {
-    if (level != max_level && type_ == Cell::SpecialType::PrunnedBranch) {
+    if (level != max_level && type_ == Cell::SpecialType::PrunedBranch) {
       int hashes_before = level_mask_.apply(level).get_hash_i();
       auto offset = 2 + hashes_before * hash_bytes;
       std::memcpy(&hash_[level], data_.begin() + offset, hash_bytes);
@@ -274,7 +274,7 @@ class CellChecker {
     auto d2 = (bit_length_ >> 3 << 1) + ((bit_length_ & 7) != 0);
     add_byte_to_hash(static_cast<td::uint8>(d2));
 
-    if (last_computed_hash != -1 && type_ != Cell::SpecialType::PrunnedBranch) {
+    if (last_computed_hash != -1 && type_ != Cell::SpecialType::PrunedBranch) {
       add_slice_to_hash(hash_[last_computed_hash].as_slice());
     } else {
       add_slice_to_hash(data_.substr(0, bit_length_ / 8));

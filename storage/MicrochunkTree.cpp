@@ -24,7 +24,7 @@ namespace ton {
 
 static td::Ref<vm::Cell> prun(const td::Ref<vm::Cell> &node) {
   vm::CellBuilder cb;
-  cb.store_long(static_cast<td::uint8>(vm::Cell::SpecialType::PrunnedBranch), 8);
+  cb.store_long(static_cast<td::uint8>(vm::Cell::SpecialType::PrunedBranch), 8);
   cb.store_long(1, 8);
   cb.store_bytes(node->get_hash(0).as_slice());
   cb.store_long(node->get_depth(0), 16);

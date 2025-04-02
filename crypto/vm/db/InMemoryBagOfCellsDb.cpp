@@ -70,15 +70,15 @@ struct UniqueAccess {
     locked_ = false;
   }
 };
-class DefaultPrunnedCellCreator : public ExtCellCreator {
+class DefaultPrunedCellCreator : public ExtCellCreator {
  public:
   td::Result<Ref<Cell>> ext_cell(Cell::LevelMask level_mask, td::Slice hash, td::Slice depth) override {
-    TRY_RESULT(cell, PrunnedCell<td::Unit>::create(PrunnedCellInfo{level_mask, hash, depth}, td::Unit{}));
+    TRY_RESULT(cell, PrunedCell<td::Unit>::create(PrunedCellInfo{level_mask, hash, depth}, td::Unit{}));
     return cell;
   }
 };
 
-class ArenaPrunnedCellCreator : public ExtCellCreator {
+class ArenaPrunedCellCreator : public ExtCellCreator {
   struct ArenaAllocator {
     ArenaAllocator() {
       // only one instance ever
@@ -158,8 +158,8 @@ class ArenaPrunnedCellCreator : public ExtCellCreator {
   };
 
   td::Result<Ref<Cell>> ext_cell(Cell::LevelMask level_mask, td::Slice hash, td::Slice depth) override {
-    TRY_RESULT(cell, PrunnedCell<Counter>::create([&](size_t bytes) { return arena_.alloc(bytes); }, false,
-                                                  PrunnedCellInfo{level_mask, hash, depth}, Counter()));
+    TRY_RESULT(cell, PrunedCell<Counter>::create([&](size_t bytes) { return arena_.alloc(bytes); }, false,
+                                                  PrunedCellInfo{level_mask, hash, depth}, Counter()));
     return cell;
   }
   static td::int64 count() {
@@ -170,8 +170,8 @@ class ArenaPrunnedCellCreator : public ExtCellCreator {
     arena_.clear();
   }
 };
-td::ThreadSafeCounter ArenaPrunnedCellCreator::cells_count_;
-ArenaPrunnedCellCreator::ArenaAllocator ArenaPrunnedCellCreator::arena_;
+td::ThreadSafeCounter ArenaPrunedCellCreator::cells_count_;
+ArenaPrunedCellCreator::ArenaAllocator ArenaPrunedCellCreator::arena_;
 
 struct CellInfo {
   mutable td::int32 db_refcnt{0};
@@ -539,9 +539,9 @@ class CellStorage {
                              << " use_dense_hash_map=" << use_dense_hash_map;
     auto full_timer = td::Timer();
     auto lock = local_access_.lock();
-    CHECK(ArenaPrunnedCellCreator::count() == 0);
-    ArenaPrunnedCellCreator arena_pc_creator;
-    DefaultPrunnedCellCreator default_pc_creator;
+    CHECK(ArenaPrunedCellCreator::count() == 0);
+    ArenaPrunedCellCreator arena_pc_creator;
+    DefaultPrunedCellCreator default_pc_creator;
 
     auto timer = td::Timer();
     td::int64 cell_count{0};
@@ -560,7 +560,7 @@ class CellStorage {
       desc_count = new_desc_count;
     }
     LOG_IF(WARNING, verbose) << P << "cells loaded in " << timer.elapsed() << "s, cells_count= " << cell_count
-                             << " prunned_cells_count=" << ArenaPrunnedCellCreator::count();
+                             << " pruned_cells_count=" << ArenaPrunedCellCreator::count();
 
     timer = td::Timer();
     for_each_bucket(options.extra_threads, [&](size_t bucket_id, auto &bucket) { build_hashtable(bucket); });
@@ -606,7 +606,7 @@ class CellStorage {
     timer = td::Timer();
     build_roots();
     LOG_IF(WARNING, verbose) << P << "roots hashtable built in " << timer.elapsed() << "s";
-    ArenaPrunnedCellCreator::clear_arena();
+    ArenaPrunedCellCreator::clear_arena();
     LOG_IF(WARNING, verbose) << P << "arena cleared in " << timer.elapsed();
 
     lock.reset();
@@ -682,9 +682,9 @@ class CellStorage {
     auto &cell = const_cast<DataCell &>(*info->cell);
     CHECK(cs.size_refs() == cell.size_refs());
     for (unsigned i = 0; i < cell.size_refs(); i++) {
-      auto prunned_cell_hash = cs.fetch_ref()->get_hash();
-      auto &prunned_cell_bucket = get_bucket(prunned_cell_hash);
-      auto full_cell_ptr = prunned_cell_bucket.infos_.find(prunned_cell_hash);
+      auto pruned_cell_hash = cs.fetch_ref()->get_hash();
+      auto &pruned_cell_bucket = get_bucket(pruned_cell_hash);
+      auto full_cell_ptr = pruned_cell_bucket.infos_.find(pruned_cell_hash);
       CHECK(full_cell_ptr);
       auto full_cell = full_cell_ptr->cell;
       auto to_destroy = cell.reset_ref_unsafe(i, std::move(full_cell), false);
@@ -704,16 +704,16 @@ class CellStorage {
       // This is generally very dangerous, but should be safe here
       auto &cell = const_cast<DataCell &>(*it.cell);
       for (unsigned i = 0; i < cell.size_refs(); i++) {
-        auto prunned_cell = cell.get_ref_raw_ptr(i);
-        auto prunned_cell_hash = prunned_cell->get_hash();
-        auto &prunned_cell_bucket = get_bucket(prunned_cell_hash);
-        auto full_cell_ptr = prunned_cell_bucket.infos_.find(prunned_cell_hash);
+        auto pruned_cell = cell.get_ref_raw_ptr(i);
+        auto pruned_cell_hash = pruned_cell->get_hash();
+        auto &pruned_cell_bucket = get_bucket(pruned_cell_hash);
+        auto full_cell_ptr = pruned_cell_bucket.infos_.find(pruned_cell_hash);
         CHECK(full_cell_ptr);
         auto full_cell = full_cell_ptr->cell;
         auto to_destroy = cell.reset_ref_unsafe(i, std::move(full_cell));
         if (!to_destroy->is_loaded()) {
-          Ref<PrunnedCell<ArenaPrunnedCellCreator::Counter>> x(std::move(to_destroy));
-          x->~PrunnedCell<ArenaPrunnedCellCreator::Counter>();
+          Ref<PrunedCell<ArenaPrunedCellCreator::Counter>> x(std::move(to_destroy));
+          x->~PrunedCell<ArenaPrunedCellCreator::Counter>();
           x.release();
         } else {
           bucket.boc_count_++;

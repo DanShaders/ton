@@ -26,7 +26,7 @@
 b>
 print-all
 
-// Prunned branch of level 1
+// Pruned branch of level 1
 <b
   1 8 u,
   1 8 u,
@@ -35,7 +35,7 @@ print-all
 b>spec
 print-all
 
-// Prunned branch of level 3
+// Pruned branch of level 3
 <b
   1 8 u,
   7 8 u,
@@ -48,7 +48,7 @@ print-all
 b>spec
 print-all
 
-// Prunned branch of level 3, mask 0b101
+// Pruned branch of level 3, mask 0b101
 <b
   1 8 u,
   5 8 u,

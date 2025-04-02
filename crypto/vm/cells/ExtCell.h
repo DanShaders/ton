@@ -18,7 +18,7 @@
 */
 #pragma once
 #include "vm/cells/Cell.h"
-#include "vm/cells/PrunnedCell.h"
+#include "vm/cells/PrunedCell.h"
 #include "common/AtomicRef.h"
 
 #include <mutex>
@@ -34,18 +34,18 @@ class ExtCell : public Cell {
   struct PrivateTag {};
 
  public:
-  static td::Result<Ref<ExtCell<ExtraT, Loader>>> create(const PrunnedCellInfo& prunned_cell_info, ExtraT&& extra) {
-    TRY_RESULT(prunned_cell, PrunnedCell<ExtraT>::create(prunned_cell_info, std::move(extra)));
-    return Ref<ExtCell<ExtraT, Loader>>(true, std::move(prunned_cell), PrivateTag{});
+  static td::Result<Ref<ExtCell<ExtraT, Loader>>> create(const PrunedCellInfo& pruned_cell_info, ExtraT&& extra) {
+    TRY_RESULT(pruned_cell, PrunedCell<ExtraT>::create(pruned_cell_info, std::move(extra)));
+    return Ref<ExtCell<ExtraT, Loader>>(true, std::move(pruned_cell), PrivateTag{});
   }
 
-  ExtCell(Ref<PrunnedCell<ExtraT>> prunned_cell, PrivateTag) : prunned_cell_(std::move(prunned_cell)) {
+  ExtCell(Ref<PrunedCell<ExtraT>> pruned_cell, PrivateTag) : pruned_cell_(std::move(pruned_cell)) {
     get_thread_safe_counter().add(1);
-    get_thread_safe_counter_unloaded().add(prunned_cell_.load_unsafe().not_null());
+    get_thread_safe_counter_unloaded().add(pruned_cell_.load_unsafe().not_null());
   }
   ~ExtCell() {
     get_thread_safe_counter().add(-1);
-    get_thread_safe_counter_unloaded().add(-static_cast<int>(prunned_cell_.load_unsafe().not_null()));
+    get_thread_safe_counter_unloaded().add(-static_cast<int>(pruned_cell_.load_unsafe().not_null()));
   }
 
   LevelMask get_level_mask() const override {
@@ -65,13 +65,13 @@ class ExtCell : public Cell {
   bool is_loaded() const override {
     return CellView(this)->is_loaded();
   }
-  Ref<PrunnedCell<ExtraT>> get_prunned_cell() const {
-    return prunned_cell_.load();
+  Ref<PrunedCell<ExtraT>> get_pruned_cell() const {
+    return pruned_cell_.load();
   }
 
  private:
   mutable td::AtomicRef<DataCell> data_cell_;
-  mutable td::AtomicRef<PrunnedCell<ExtraT>> prunned_cell_;
+  mutable td::AtomicRef<PrunedCell<ExtraT>> pruned_cell_;
 
   static td::NamedThreadSafeCounter::CounterRef get_thread_safe_counter() {
     static auto res = td::NamedThreadSafeCounter::get_default().get_counter("ExtCell");
@@ -90,9 +90,9 @@ class ExtCell : public Cell {
         return;
       }
 
-      prunned_cell_ = cell->prunned_cell_.load();
-      if (!prunned_cell_.is_null()) {
-        cell_ = &*prunned_cell_;
+      pruned_cell_ = cell->pruned_cell_.load();
+      if (!pruned_cell_.is_null()) {
+        cell_ = &*pruned_cell_;
         return;
       }
       cell_ = cell->data_cell_.get_unsafe();
@@ -103,7 +103,7 @@ class ExtCell : public Cell {
       return cell_;
     }
 
-    td::Ref<PrunnedCell<ExtraT>> prunned_cell_;
+    td::Ref<PrunedCell<ExtraT>> pruned_cell_;
     const Cell* cell_;
   };
 
@@ -116,17 +116,17 @@ class ExtCell : public Cell {
   }
 
   td::Status set_data_cell(Ref<DataCell>&& new_data_cell) const override {
-    auto prunned_cell = prunned_cell_.load();
-    if (prunned_cell.is_null()) {
+    auto pruned_cell = pruned_cell_.load();
+    if (pruned_cell.is_null()) {
       auto old_data_cell = data_cell_.get_unsafe();
       DCHECK(old_data_cell);
       TRY_STATUS(old_data_cell->check_equals_unloaded(new_data_cell));
       return td::Status::OK();
     }
 
-    TRY_STATUS(prunned_cell->check_equals_unloaded(new_data_cell));
+    TRY_STATUS(pruned_cell->check_equals_unloaded(new_data_cell));
     if (data_cell_.store_if_empty(new_data_cell)) {
-      prunned_cell_.store({});
+      pruned_cell_.store({});
       get_thread_safe_counter_unloaded().add(-1);
     }
     return td::Status::OK();
@@ -138,19 +138,19 @@ class ExtCell : public Cell {
       return Ref<DataCell>(data_cell);
     }
 
-    auto prunned_cell = prunned_cell_.load();
+    auto pruned_cell = pruned_cell_.load();
 
-    if (prunned_cell.is_null()) {
+    if (pruned_cell.is_null()) {
       data_cell = data_cell_.get_unsafe();
       DCHECK(data_cell);
       return Ref<DataCell>(data_cell);
     }
 
-    TRY_RESULT(new_data_cell, Loader::load_data_cell(*this, prunned_cell->get_extra()));
-    TRY_STATUS(prunned_cell->check_equals_unloaded(new_data_cell));
+    TRY_RESULT(new_data_cell, Loader::load_data_cell(*this, pruned_cell->get_extra()));
+    TRY_STATUS(pruned_cell->check_equals_unloaded(new_data_cell));
 
     if (data_cell_.store_if_empty(new_data_cell)) {
-      prunned_cell_.store({});
+      pruned_cell_.store({});
       get_thread_safe_counter_unloaded().add(-1);
     }
 

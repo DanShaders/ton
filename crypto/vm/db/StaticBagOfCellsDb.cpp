@@ -160,7 +160,7 @@ using StaticBocRootCell = RootCell<std::shared_ptr<StaticBagOfCellsDb>>;
 
 td::Result<Ref<Cell>> StaticBagOfCellsDb::create_ext_cell(Cell::LevelMask level_mask, td::Slice hash, td::Slice depth,
                                                           int idx) {
-  TRY_RESULT(res, StaticBocExtCell::create(PrunnedCellInfo{level_mask, hash, depth},
+  TRY_RESULT(res, StaticBocExtCell::create(PrunedCellInfo{level_mask, hash, depth},
                                            StaticBocExtCellExtra{idx, shared_from_this()}));
   return std::move(res);
 }

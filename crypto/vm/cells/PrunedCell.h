@@ -21,14 +21,14 @@
 #include "vm/cells/DataCell.h"
 
 namespace vm {
-struct PrunnedCellInfo {
+struct PrunedCellInfo {
   Cell::LevelMask level_mask;
   td::Slice hash;
   td::Slice depth;
 };
 
 template <class ExtraT>
-class PrunnedCell final : public Cell {
+class PrunedCell final : public Cell {
  public:
   ExtraT& get_extra() {
     return extra_;
@@ -37,33 +37,33 @@ class PrunnedCell final : public Cell {
     return extra_;
   }
 
-  void operator delete(PrunnedCell* ptr, std::destroying_delete_t) {
+  void operator delete(PrunedCell* ptr, std::destroying_delete_t) {
     bool allocated_in_arena = ptr->info_.allocated_in_arena_;
-    ptr->~PrunnedCell();
+    ptr->~PrunedCell();
     if (!allocated_in_arena) {
       ::operator delete(ptr);
     }
   }
 
-  static td::Result<Ref<PrunnedCell<ExtraT>>> create(const PrunnedCellInfo& prunned_cell_info, ExtraT&& extra) {
+  static td::Result<Ref<PrunedCell<ExtraT>>> create(const PrunedCellInfo& pruned_cell_info, ExtraT&& extra) {
     auto allocator = [](size_t bytes) { return ::operator new(bytes); };
-    return create(allocator, true, prunned_cell_info, std::move(extra));
+    return create(allocator, true, pruned_cell_info, std::move(extra));
   }
 
   template <typename AllocatorFunc>
-  static td::Result<Ref<PrunnedCell<ExtraT>>> create(AllocatorFunc&& allocator, bool should_free,
-                                                     const PrunnedCellInfo& prunned_cell_info, ExtraT&& extra) {
-    auto level_mask = prunned_cell_info.level_mask;
+  static td::Result<Ref<PrunedCell<ExtraT>>> create(AllocatorFunc&& allocator, bool should_free,
+                                                     const PrunedCellInfo& pruned_cell_info, ExtraT&& extra) {
+    auto level_mask = pruned_cell_info.level_mask;
     if (level_mask.get_level() > max_level) {
       return td::Status::Error("Level is too big");
     }
     Info info(level_mask);
 
-    auto storage = allocator(sizeof(PrunnedCell) + info.get_storage_size());
-    auto* result = new (storage) PrunnedCell{info, std::move(extra)};
+    auto storage = allocator(sizeof(PrunedCell) + info.get_storage_size());
+    auto* result = new (storage) PrunedCell{info, std::move(extra)};
     result->info_.allocated_in_arena_ = !should_free;
-    TRY_STATUS(result->init(prunned_cell_info));
-    return Ref<PrunnedCell<ExtraT>>(result, typename Ref<PrunnedCell<ExtraT>>::acquire_t{});
+    TRY_STATUS(result->init(pruned_cell_info));
+    return Ref<PrunedCell<ExtraT>>(result, typename Ref<PrunedCell<ExtraT>>::acquire_t{});
   }
 
   LevelMask get_level_mask() const override {
@@ -106,16 +106,16 @@ class PrunnedCell final : public Cell {
   Info info_;
   ExtraT extra_;
 
-  td::Status init(const PrunnedCellInfo& prunned_cell_info) {
-    auto& new_hash = prunned_cell_info.hash;
+  td::Status init(const PrunedCellInfo& pruned_cell_info) {
+    auto& new_hash = pruned_cell_info.hash;
     auto* hash = info_.get_hashes(trailer_);
-    size_t n = prunned_cell_info.level_mask.get_hashes_count();
+    size_t n = pruned_cell_info.level_mask.get_hashes_count();
     CHECK(new_hash.size() == n * hash_bytes);
     for (td::uint32 i = 0; i < n; i++) {
       hash[i].as_slice().copy_from(new_hash.substr(i * Cell::hash_bytes, Cell::hash_bytes));
     }
 
-    auto& new_depth = prunned_cell_info.depth;
+    auto& new_depth = pruned_cell_info.depth;
     CHECK(new_depth.size() == n * depth_bytes);
     auto* depth = info_.get_depth(trailer_);
     for (td::uint32 i = 0; i < n; i++) {
@@ -127,7 +127,7 @@ class PrunnedCell final : public Cell {
     return td::Status::OK();
   }
 
-  explicit PrunnedCell(Info info, ExtraT&& extra) : info_(info), extra_(std::move(extra)) {
+  explicit PrunedCell(Info info, ExtraT&& extra) : info_(info), extra_(std::move(extra)) {
   }
   td::uint32 get_virtualization() const override {
     return 0;
@@ -153,7 +153,7 @@ class PrunnedCell final : public Cell {
   }
 
   td::Result<LoadedCell> load_cell() const override {
-    return td::Status::Error("Can't load prunned branch");
+    return td::Status::Error("Can't load pruned branch");
   }
 
   char trailer_[];

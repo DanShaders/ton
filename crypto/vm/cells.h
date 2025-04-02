@@ -27,11 +27,11 @@
 // H_i(cell) = H(cell_i)
 // cell.hash = sha256(
 //   d1, d2,
-//   (level == 0 || special_type == PrunnedBranch) ? data : cell_(level - 1).hash,
+//   (level == 0 || special_type == PrunedBranch) ? data : cell_(level - 1).hash,
 //   for child in refs:
 //     child.depth, child.hash
 // )
-// lower hashes of Prunned branch are calculated from its data
+// lower hashes of Pruned branch are calculated from its data
 // cell_i.ref[j] = (special_type == MerkleProof || special_type == MerkleUpdate) ? cell.ref[j]_(i+1) : cell.ref[j]_i
 //
 // Ordinary cell:
@@ -43,15 +43,15 @@
 // cell_i.ref[j] = cell.ref[j]
 //
 //
-// Prunned branch
-// cell.level_mask = prunned_cell.level_mask + (1 << (cell.level + 1))
+// Pruned branch
+// cell.level_mask = pruned_cell.level_mask + (1 << (cell.level + 1))
 // cell.level = <default> == cell.level + 1
-// cell_i = if i < cell.level then prunned_cell_i
-// prunned_cell.data = EXCEPTION
-// prunned_cell_i.hash = <from cell.data>
-// prunned_cell.level_mask = cell.level_mask ^ (1 << cell.level)
-// prunned_cell.level = <default>
-// prunned_cell_i.depth = <from cell.data>
+// cell_i = if i < cell.level then pruned_cell_i
+// pruned_cell.data = EXCEPTION
+// pruned_cell_i.hash = <from cell.data>
+// pruned_cell.level_mask = cell.level_mask ^ (1 << cell.level)
+// pruned_cell.level = <default>
+// pruned_cell_i.depth = <from cell.data>
 //
 // Merkle proof
 // cell.level_mask = proof_cell.level_mask >> 1

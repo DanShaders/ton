@@ -171,7 +171,7 @@ class ProofStorageStat {
   td::uint64 estimate_proof_size() const;
  private:
   enum CellStatus {
-    c_none = 0, c_prunned = 1, c_loaded = 2
+    c_none = 0, c_pruned = 1, c_loaded = 2
   };
   td::HashMap<vm::Cell::Hash, CellStatus> cells_;
   td::uint64 proof_size_ = 0;

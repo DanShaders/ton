@@ -48,7 +48,7 @@ Cell::LoadedCell load_cell_nothrow(const Ref<Cell>& ref) {
   auto res = ref->load_cell();
   if (res.is_ok()) {
     auto ld = res.move_as_ok();
-    //CHECK(ld.virt.get_virtualization() == 0 || ld.data_cell->special_type() != Cell::SpecialType::PrunnedBranch);
+    //CHECK(ld.virt.get_virtualization() == 0 || ld.data_cell->special_type() != Cell::SpecialType::PrunedBranch);
     return ld;
   }
   return {};
@@ -58,7 +58,7 @@ Cell::LoadedCell load_cell_nothrow(const Ref<Cell>& ref, int mode) {
   auto res = ref->load_cell();
   if (res.is_ok()) {
     auto ld = res.move_as_ok();
-    //CHECK(ld.virt.get_virtualization() == 0 || ld.data_cell->special_type() != Cell::SpecialType::PrunnedBranch);
+    //CHECK(ld.virt.get_virtualization() == 0 || ld.data_cell->special_type() != Cell::SpecialType::PrunedBranch);
     if ((mode >> (ld.data_cell->is_special() ? 1 : 0)) & 1) {
       return ld;
     }
@@ -1074,7 +1074,7 @@ VirtualCell::LoadedCell load_cell_slice_impl(Ref<Cell> cell, bool* can_be_specia
       throw VmError{Excno::cell_und, "failed to load cell"};
     }
     auto loaded_cell = r_loaded_cell.move_as_ok();
-    if (loaded_cell.data_cell->special_type() == DataCell::SpecialType::PrunnedBranch) {
+    if (loaded_cell.data_cell->special_type() == DataCell::SpecialType::PrunedBranch) {
       auto virtualization = loaded_cell.virt.get_virtualization();
       if (virtualization != 0) {
         throw VmVirtError{virtualization};
@@ -1102,9 +1102,9 @@ VirtualCell::LoadedCell load_cell_slice_impl(Ref<Cell> cell, bool* can_be_specia
           throw VmError{Excno::cell_und, "failed to load library cell"};
         }
         throw VmError{Excno::cell_und, "failed to load library cell (no vm_state_interface available)"};
-      } else if (loaded_cell.data_cell->special_type() == DataCell::SpecialType::PrunnedBranch) {
+      } else if (loaded_cell.data_cell->special_type() == DataCell::SpecialType::PrunedBranch) {
         CHECK(loaded_cell.virt.get_virtualization() == 0);
-        throw VmError{Excno::cell_und, "trying to load prunned cell"};
+        throw VmError{Excno::cell_und, "trying to load pruned cell"};
       }
       throw VmError{Excno::cell_und, "unexpected special cell"};
     }
