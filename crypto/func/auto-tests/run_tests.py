@@ -70,7 +70,7 @@ for ti, tf in enumerate(tests):
         print("Error: no test cases", file=sys.stderr)
         exit(2)
 
-    # preprocess arithmetics in input
+    # preprocess arithmetic in input
     for i in range(len(cases)):
         inputs = cases[i][1].split(" ")
         processed_inputs = ""

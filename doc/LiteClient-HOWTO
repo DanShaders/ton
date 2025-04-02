@@ -33,7 +33,7 @@ kf_8uRo6OBbQ97jCx2EIuKm8Wmt6Vb15-KsQHFLbKSMiYIny (base64url)
 
 in the "user-friendly" form (to be displayed by user-friendly clients). Notice that both forms (base64 and base64url) are valid and must be accepted.
 
-Incidentally, other binary data related to the TON Blockchain have similar "armored" base64 representations, differing by their first bytes. For example, the ubiquitious 256-bit Ed25519 public keys are represented by first creating a 36-byte sequence as follows:
+Incidentally, other binary data related to the TON Blockchain have similar "armored" base64 representations, differing by their first bytes. For example, the ubiquitous 256-bit Ed25519 public keys are represented by first creating a 36-byte sequence as follows:
 - one tag byte 0x3E, meaning that this is a public key
 - one tag byte 0xE6, meaning that this is a Ed25519 public key
 - 32 bytes containing the standard binary representation of the Ed25519 public key
@@ -182,7 +182,7 @@ file-base +"-query.boc" tuck B>file
 ."(Saved wallet creating query to file " type .")" cr
 --------------------------------------------
 
-(The actual source file in your distribution may be slighly different.) Essentially, it is a complete Fift script for creating a new instance of this smart contract controlled by a newly-generated keypair. The script accepts command-line arguments, so you don't need to edit the source file each time you want to create a new wallet.
+(The actual source file in your distribution may be slightly different.) Essentially, it is a complete Fift script for creating a new instance of this smart contract controlled by a newly-generated keypair. The script accepts command-line arguments, so you don't need to edit the source file each time you want to create a new wallet.
 
 Now, provided that you have compiled Fift binary (usually located as "crypto/fift" with respect to the build directory), you can run
 

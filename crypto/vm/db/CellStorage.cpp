@@ -120,13 +120,13 @@ class RefcntCellParser {
       Ref<Cell> refs[Cell::max_refs];
       for (int i = 0; i < info.refs_cnt; i++) {
         if (data.size() < 1) {
-          return td::Status::Error("Not enought data");
+          return td::Status::Error("Not enough data");
         }
         Cell::LevelMask level_mask(data[0]);
         auto n = level_mask.get_hashes_count();
         auto end_offset = 1 + n * (Cell::hash_bytes + Cell::depth_bytes);
         if (data.size() < end_offset) {
-          return td::Status::Error("Not enought data");
+          return td::Status::Error("Not enough data");
         }
 
         TRY_RESULT(ext_cell, ext_cell_creator.ext_cell(level_mask, data.substr(1, n * Cell::hash_bytes),

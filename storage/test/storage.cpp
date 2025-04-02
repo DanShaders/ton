@@ -779,7 +779,7 @@ TEST(MerkleTree, Manual) {
   td::Random::Xorshift128plus rnd(123);
   // create big random file
   size_t chunk_size = 768;
-  // for simplicity numer of chunks in a file is a power of two
+  // for simplicity number of chunks in a file is a power of two
   size_t chunks_count = (1 << 16) + 1;
   size_t file_size = chunk_size * chunks_count;
   td::Timer timer;

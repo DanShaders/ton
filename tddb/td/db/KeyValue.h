@@ -104,7 +104,7 @@ class KeyValue : public KeyValueReader {
   virtual Status begin_transaction() = 0;
   virtual Status commit_transaction() = 0;
   virtual Status abort_transaction() = 0;
-  // Desctructor will abort transaction
+  // Destructor will abort transaction
 
   virtual std::unique_ptr<KeyValueReader> snapshot() = 0;
 
@@ -154,7 +154,7 @@ class PrefixedKeyValue : public KeyValue {
   Status abort_transaction() override {
     return kv_->abort_transaction();
   }
-  // Desctructor will abort transaction
+  // Destructor will abort transaction
 
   std::unique_ptr<KeyValueReader> snapshot() override {
     return kv_->snapshot();

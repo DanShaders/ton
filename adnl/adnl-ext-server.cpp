@@ -111,7 +111,7 @@ td::Status AdnlInboundConnection::process_custom_packet(td::BufferSlice &data, b
     if (F.is_ok()) {
       auto f = F.move_as_ok();
       if (nonce_.size() == 0 || !remote_id_.is_zero()) {
-        return td::Status::Error(ErrorCode::protoviolation, "duplicate authentificate");
+        return td::Status::Error(ErrorCode::protoviolation, "duplicate authenticate");
       }
 
       auto pub_key = PublicKey{f->key_};

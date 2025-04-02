@@ -63,7 +63,7 @@ fun getMyStorageDuePayment(): int
     asm "DUEPAYMENT";
 
 /// Returns the amount of nanotoncoins charged for storage.
-/// (during storage phase preceeding to current computation phase)
+/// (during storage phase preceding to current computation phase)
 @pure
 fun getMyStoragePaidPayment(): int
     asm "STORAGEFEES";

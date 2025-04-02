@@ -269,7 +269,7 @@ void run_encode_benchmark() {
     }
     double elapsed = td::Time::now() - now;
     double throughput = ((double)elements * (double)iterations * 8.0) / 1024 / 1024 / elapsed;
-    fprintf(stderr, "symbol count = %d, encoded %d MB in %.3lfsecs, throughtput: %.1lfMbit/s\n", (int)symbol_count,
+    fprintf(stderr, "symbol count = %d, encoded %d MB in %.3lfsecs, throughput: %.1lfMbit/s\n", (int)symbol_count,
             (int)(elements * iterations / 1024 / 1024), elapsed, throughput);
   }
   td::do_not_optimize_away(junk);

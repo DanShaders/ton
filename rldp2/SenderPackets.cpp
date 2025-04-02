@@ -49,7 +49,7 @@ SenderPackets::Update SenderPackets::on_ack(Ack ack) {
   ack.max_seqno = td::min(ack.max_seqno, last_seqno_);
   ack.received_count = td::min(ack.received_count, ack.max_seqno);
 
-  // TODO: seqno of rldp and seqno of a packet must be completly separate seqnos
+  // TODO: seqno of rldp and seqno of a packet must be completely separate seqnos
   Update update;
   if (received_count_ < ack.received_count) {
     update.new_received = ack.received_count - received_count_;

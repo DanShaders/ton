@@ -167,7 +167,7 @@ class Torrent {
   Info info_;
   td::optional<std::string> root_dir_;
 
-  // While header is not completly available all pieces are stored in memory
+  // While header is not completely available all pieces are stored in memory
   td::BufferSlice header_str_;
   td::optional<TorrentHeader> header_;
   size_t not_ready_pending_piece_count_{0};

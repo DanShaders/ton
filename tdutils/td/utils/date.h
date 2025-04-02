@@ -4770,7 +4770,7 @@ scan_keyword(std::basic_istream<CharT, Traits>& is, FwdIter kb, FwdIter ke)
         }
     }
     // While there might be a match, test keywords against the next CharT
-    for (size_t indx = 0; is && n_might_match > 0; ++indx)
+    for (size_t index = 0; is && n_might_match > 0; ++index)
     {
         // Peek at the next CharT but don't consume it
         auto ic = is.peek();
@@ -4781,7 +4781,7 @@ scan_keyword(std::basic_istream<CharT, Traits>& is, FwdIter kb, FwdIter ke)
         }
         auto c = static_cast<char>(toupper(ic));
         bool consume = false;
-        // For each keyword which might match, see if the indx character is c
+        // For each keyword which might match, see if the index character is c
         // If a match if found, consume c
         // If a match is found, and that is the last character in the keyword,
         //    then that keyword matches.
@@ -4792,10 +4792,10 @@ scan_keyword(std::basic_istream<CharT, Traits>& is, FwdIter kb, FwdIter ke)
         {
             if (*st == might_match)
             {
-                if (c == static_cast<char>(toupper((*ky)[indx])))
+                if (c == static_cast<char>(toupper((*ky)[index])))
                 {
                     consume = true;
-                    if (ky->size() == indx+1)
+                    if (ky->size() == index+1)
                     {
                         *st = does_match;
                         --n_might_match;
@@ -4821,7 +4821,7 @@ scan_keyword(std::basic_istream<CharT, Traits>& is, FwdIter kb, FwdIter ke)
                 st = status;
                 for (auto ky = kb; ky != ke; ++ky, ++st)
                 {
-                    if (*st == does_match && ky->size() != indx+1)
+                    if (*st == does_match && ky->size() != index+1)
                     {
                         *st = doesnt_match;
                         --n_does_match;

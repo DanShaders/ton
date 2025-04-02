@@ -231,7 +231,7 @@ void AdnlPeerPairImpl::receive_packet(AdnlPacket packet, td::uint64 serialized_s
   packet.run_basic_checks().ensure();
 
   if (!encryptor_) {
-    VLOG(ADNL_NOTICE) << this << "dropping IN message: unitialized id";
+    VLOG(ADNL_NOTICE) << this << "dropping IN message: uninitialized id";
     return;
   }
 

@@ -791,7 +791,7 @@ void ValidateQuery::after_get_shard_state(int idx, td::Result<Ref<ShardState>> r
 }
 
 /**
- * Processes the retreived masterchain state.
+ * Processes the retrieved masterchain state.
  *
  * @param mc_state The reference to the masterchain state.
  *
@@ -2297,7 +2297,7 @@ bool ValidateQuery::fix_one_processed_upto(block::MsgProcessedUpto& proc, ton::S
 }
 
 /**
- * Adjusts the processed up to collection using the using the auxilliary masterchain states.
+ * Adjusts the processed up to collection using the using the auxiliary masterchain states.
  * Almost the same as in Collator.
  *
  * @param upto The MsgProcessedUptoCollection to be adjusted.
@@ -5132,14 +5132,14 @@ std::unique_ptr<block::Account> ValidateQuery::make_account_from(td::ConstBitPtr
 }
 
 /**
- * Retreives an Account object from the data in the shard state.
+ * Retrieves an Account object from the data in the shard state.
  * Accounts are cached in the ValidatorQuery's map.
  * Similar to Collator::make_account()
  *
  * @param addr The 256-bit address of the account.
  *
  * @returns Pointer to the account if found or created successfully.
- *          Returns nullptr if an error occured.
+ *          Returns nullptr if an error occurred.
  */
 std::unique_ptr<block::Account> ValidateQuery::unpack_account(td::ConstBitPtr addr) {
   auto dict_entry = ps_.account_dict_->lookup_extra(addr, 256);
@@ -5356,7 +5356,7 @@ bool ValidateQuery::check_one_transaction(block::Account& account, ton::LogicalT
         if (i == 0 && !account_expected_defer_all_messages_.count(ss_addr)) {
           return reject_query(PSTRING() << "outbound message #1 on account " << workchain() << ":" << ss_addr.to_hex()
                                         << " must not be deferred (the first message cannot be deferred unless some "
-                                           "prevoius messages are deferred)");
+                                           "previous messages are deferred)");
         }
         account_expected_defer_all_messages_.insert(ss_addr);
       }

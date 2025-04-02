@@ -1817,7 +1817,7 @@ Ref<Cell> DictionaryFixed::dict_combine_with(Ref<Cell> dict1, Ref<Cell> dict2, t
     label1.remainder.clear();
     dict1 = cb.finalize();
     // cb.reset(); // included into finalize();
-    // now dict1 has been "pruned" -- first skip1+c+1 bits removed from its root egde label
+    // now dict1 has been "pruned" -- first skip1+c+1 bits removed from its root edge label
     label2.extract_label_to(key_buffer - skip2);
     append_dict_label(cb, key_buffer + c + 1, l2 - c - 1, n - c - 1);
     if (!cell_builder_add_slice_bool(cb, *label2.remainder)) {

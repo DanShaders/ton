@@ -10,7 +10,7 @@ def getenv(name, default=None):
         return os.environ[name]
     if default is not None:
         return default
-    print("Environemnt variable", name, "is not set", file=sys.stderr)
+    print("Environment variable", name, "is not set", file=sys.stderr)
     exit(1)
 
 VAR_CNT = 10

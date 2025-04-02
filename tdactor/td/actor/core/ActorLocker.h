@@ -97,8 +97,8 @@ class ActorLocker {
 
     // This is not an optimization.
     // Sometimes it helps sometimes it makes things worse
-    // It there are a lot of threads concurrently sending signals to an actor it helps
-    // Buf it threre is only one thread, CAS without conficts is much cheaper than full
+    // If there are a lot of threads concurrently sending signals to an actor it helps
+    // But if there is only one thread, CAS without conflicts is much cheaper than full
     // barrier.
     if (false && flags_.raw() == new_flags_.raw()) {
       std::atomic_thread_fence(std::memory_order_seq_cst);

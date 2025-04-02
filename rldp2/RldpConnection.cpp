@@ -302,7 +302,7 @@ void RldpConnection::receive_raw_obj(ton::ton_api::rldp2_messagePart &part) {
   if (it == inbound_transfers_.end()) {
     if (!has_limit) {
       // set timeout even for small inbound queries
-      // TODO: other party stil may ddos us with small transfers
+      // TODO: other party still may ddos us with small transfers
       set_receive_limits(transfer_id, td::Timestamp::in(10), max_size);
     }
     it = inbound_transfers_.emplace(transfer_id, InboundTransfer{total_size}).first;

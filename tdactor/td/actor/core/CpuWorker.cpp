@@ -21,7 +21,7 @@
 #include "td/actor/core/ActorExecutor.h"
 #include "td/actor/core/SchedulerContext.h"
 
-#include "td/actor/core/Scheduler.h"  // FIXME: afer LocalQueue is in a separate file
+#include "td/actor/core/Scheduler.h"  // FIXME: after LocalQueue is in a separate file
 
 namespace td {
 namespace actor {

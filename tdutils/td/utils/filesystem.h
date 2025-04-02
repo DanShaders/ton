@@ -40,7 +40,7 @@ Status write_file(CSlice to, Slice data, WriteFileOptions options = {}) TD_WARN_
 
 string clean_filename(CSlice name);
 
-// write file and ensure that it either fully overriden with new data, or left intact.
+// write file and ensure that it either fully overridden with new data, or left intact.
 // Uses path_tmp to temporary storat data, than calls rename
 Status atomic_write_file(CSlice path, Slice data, CSlice path_tmp = {});
 

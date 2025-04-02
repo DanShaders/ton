@@ -159,7 +159,7 @@ std::string ActorStats::prepare_stats() {
     do_describe([&sb]() -> td::StringBuilder & { return sb << "\t\t"; }, stat_10s, stat_10m, stat_forever);
   };
 
-  sb << "Cummulative stats:\n";
+  sb << "Cumulative stats:\n";
   do_describe([&sb]() -> td::StringBuilder & { return sb << "\t"; }, sum_stat_10s, sum_stat_10m, sum_stat_forever);
   sb << "\n";
 

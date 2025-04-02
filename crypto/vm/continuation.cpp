@@ -572,7 +572,7 @@ td::Ref<Continuation> WhileCont::jump_w(VmState* st, int& exitcode) & {
       return std::move(after);
     }
     if (!body->has_c0()) {
-      chkcond = false;  // re-use current object since we hold the unique pointer to it
+      chkcond = false;  // reuse current object since we hold the unique pointer to it
       st->set_c0(Ref<WhileCont>{this});
       return body;
     } else {
@@ -583,7 +583,7 @@ td::Ref<Continuation> WhileCont::jump_w(VmState* st, int& exitcode) & {
   } else {
     VM_LOG(st) << "while loop body end\n";
     if (!cond->has_c0()) {
-      chkcond = true;  // re-use current object
+      chkcond = true;  // reuse current object
       st->set_c0(Ref<WhileCont>{this});
       return cond;
     } else {

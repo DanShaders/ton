@@ -59,7 +59,7 @@
     ;; Load member
     load_member(member);
 
-    ;; Try to withdraw immediatelly
+    ;; Try to withdraw immediately
     var (withdrawed, all) = member_stake_withdraw(stake);
 
     ;; Resolve address

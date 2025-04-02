@@ -903,8 +903,8 @@ class StorageDaemonCli : public td::actor::Actor {
       td::TerminalIO::out() << "get-pieces-info <bag> [--files] [--offset l] [--max-pieces m] [--json]\tPrint "
                                "information about ready pieces\n";
       td::TerminalIO::out() << "\t--files\tShow piece ranges for each file\n";
-      td::TerminalIO::out() << "\t--offset l\tShow pieces starting from l (deafault: 0)\n";
-      td::TerminalIO::out() << "\t--max-pieces m\tShow no more than m pieces (deafault: unlimited)\n";
+      td::TerminalIO::out() << "\t--offset l\tShow pieces starting from l (default: 0)\n";
+      td::TerminalIO::out() << "\t--max-pieces m\tShow no more than m pieces (default: unlimited)\n";
       td::TerminalIO::out() << "\t--json\tOutput in json\n";
       td::TerminalIO::out() << "download-pause <bag>\tPause download of <bag>\n";
       td::TerminalIO::out() << "download-resume <bag>\tResume download of <bag>\n";
@@ -937,7 +937,7 @@ class StorageDaemonCli : public td::actor::Actor {
       td::TerminalIO::out() << "quit\tExit\n";
       td::TerminalIO::out() << "setverbosity <level>\tSet vetbosity to <level> in [0..10]\n";
       td::TerminalIO::out() << "help\tPrint this help\n";
-      td::TerminalIO::out() << "help provider\tcommands for deploying and controling storage provider\n";
+      td::TerminalIO::out() << "help provider\tcommands for deploying and controlling storage provider\n";
     } else if (category == "provider") {
       td::TerminalIO::out() << "\nStorage provider control:\n";
       td::TerminalIO::out() << "import-pk <file>\tImport private key from <file>\n";

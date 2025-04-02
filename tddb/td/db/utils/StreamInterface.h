@@ -26,7 +26,7 @@
 namespace td {
 // Generic stream interface
 // Will to hide implementations details.
-// CyclicBuffer, ChainBuffer, Bounded ChainBuffer, some clever writers. They all should be interchangable
+// CyclicBuffer, ChainBuffer, Bounded ChainBuffer, some clever writers. They all should be interchangeable
 // Most implementations will assume that reading and writing may happen concurrently
 
 class StreamReaderInterface {

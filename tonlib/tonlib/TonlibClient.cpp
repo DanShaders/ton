@@ -1389,7 +1389,7 @@ class GetRawAccountState : public td::actor::Actor {
         cs2.advance(1);
         due_payment = block::tlb::t_Grams.as_integer_skip(cs2);
         if (due_payment.is_null() || !cs2.empty_ext()) {
-          return td::Status::Error("Failed to upack due_payment");
+          return td::Status::Error("Failed to unpack due_payment");
         }
       } else {
         due_payment = td::RefInt256{true, 0};
@@ -3435,7 +3435,7 @@ td::Status TonlibClient::do_request(tonlib_api::raw_getTransactions& request,
     TRY_RESULT(input_key, from_tonlib(*request.private_key_));
     //NB: optional<Status> has lot of problems. We use emplace to migitate them
     td::optional<td::Status> o_status;
-    //NB: rely on (and assert) that GetPrivateKey is a synchonous request
+    //NB: rely on (and assert) that GetPrivateKey is a synchronous request
     make_request(int_api::GetPrivateKey{std::move(input_key)}, [&](auto&& r_key) {
       if (r_key.is_error()) {
         o_status.emplace(r_key.move_as_error());
@@ -3477,7 +3477,7 @@ td::Status TonlibClient::do_request(tonlib_api::raw_getTransactionsV2& request,
     TRY_RESULT(input_key, from_tonlib(*request.private_key_));
     //NB: optional<Status> has lot of problems. We use emplace to migitate them
     td::optional<td::Status> o_status;
-    //NB: rely on (and assert) that GetPrivateKey is a synchonous request
+    //NB: rely on (and assert) that GetPrivateKey is a synchronous request
     make_request(int_api::GetPrivateKey{std::move(input_key)}, [&](auto&& r_key) {
       if (r_key.is_error()) {
         o_status.emplace(r_key.move_as_error());
@@ -3645,7 +3645,7 @@ class GenericCreateSendGrams : public TonlibQueryActor {
   std::vector<Action> actions_;
 
   // We combine compelty different actions in one actor
-  // Should be splitted eventually
+  // Should be split eventually
   std::vector<ton::ManualDns::Action> dns_actions_;
 
   bool pchan_action_{false};
@@ -5521,7 +5521,7 @@ auto to_tonlib_api(const ton::lite_api::tonNode_blockIdExt& blk) -> tonlib_api_p
 
 auto to_tonlib_api(const ton::lite_api::tonNode_zeroStateIdExt& zeroStateId)
     -> tonlib_api_ptr<tonlib_api::ton_blockIdExt> {
-  return tonlib_api::make_object<tonlib_api::ton_blockIdExt>( //TODO check wether shard indeed 0???
+  return tonlib_api::make_object<tonlib_api::ton_blockIdExt>( //TODO check whether shard indeed 0???
       zeroStateId.workchain_, 0, 0, zeroStateId.root_hash_.as_slice().str(), zeroStateId.file_hash_.as_slice().str());
 }
 
@@ -6061,7 +6061,7 @@ td::Status TonlibClient::do_request(const tonlib_api::blocks_getTransactionsExt&
 
                         auto raw_transactions = ToRawTransactions(td::optional<td::Ed25519::PrivateKey>()).to_raw_transactions(info.move_as_ok());
                         if (raw_transactions.is_error()) {
-                          return raw_transactions.move_as_error_prefix("Error occured while creating tonlib_api::raw_transaction: ");
+                          return raw_transactions.move_as_error_prefix("Error occurred while creating tonlib_api::raw_transaction: ");
                         }
 
                         tonlib_api::blocks_transactionsExt r;
@@ -6145,7 +6145,7 @@ td::Status TonlibClient::do_request(const tonlib_api::blocks_getBlockHeader& req
                          } catch (vm::VmVirtError& err) {
                            return err.as_status(PSLICE() << "error processing header for " << blk_id.to_str() << " :");
                          } catch (...) {
-                           return td::Status::Error("Unhandled exception catched while processing header");
+                           return td::Status::Error("Unhandled exception caught while processing header");
                          }
                        }
                      }));

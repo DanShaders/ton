@@ -1,6 +1,6 @@
 ## 2025.03 Update
 1. New extracurrency behavior introduced, check [GlobalVersions.md](./doc/GlobalVersions.md#version-10)
-2. Optmization of validation process, in particular CellStorageStat.
+2. Optimization of validation process, in particular CellStorageStat.
 3. Flag for speeding up broadcasts in various overlays.
 4. Fixes for static builds for emulator and tonlibjson
 5. Improving getstats output: adds
@@ -80,7 +80,7 @@ Besides the work of the core team, this update is based on the efforts of @krigg
 4. Overlay improvements: fix dropping peers in small custom overlays, fix wrong certificate on missed keyblocks
 5. Extended statistics and logs for celldb usage, session stats, persistent state serialization
 6. Tonlib and explorer fixes
-7. Flags for precize control of Celldb: `--celldb-cache-size`, `--celldb-direct-io` and `--celldb-preload-all`
+7. Flags for precise control of Celldb: `--celldb-cache-size`, `--celldb-direct-io` and `--celldb-preload-all`
 8. Add valiator-console command to stop persistent state serialization
 9. Use `@` path separator for defining include path in fift and create-state utilities on Windows only.
 
@@ -111,7 +111,7 @@ Besides the work of the core team, this update is based on the efforts of @akifo
    * Additional separate overlay among validators as second option for synchronisation
 2. Improvements in LS:
    * c7 and library context is fully filled up for server-side rungetmethod
-   * Cache for runmethods and successfull external messages
+   * Cache for runmethods and successful external messages
    * Logging of LS requests statistic
 3. Precise control of open files:
    * almost instantaneous validator start
@@ -221,12 +221,12 @@ Node update:
 Besides the work of the core team, this update is based on the efforts of @vtamara (help with abseil-cpp upgrade), @krigga(in-place modification of global variables) and third-party security auditors.
 
 ## 2022.10 Update
-* Added extended block creation and general perfomance stats gathering
+* Added extended block creation and general performance stats gathering
 * Forbidden report data on blocks not committed to the master chain for LS
 * Improved debug in TVM
 * FunC 0.3.0: multi-line asms, bitwise operations for constants, duplication of identical definition for constants and asms now allowed
 * New tonlib methods: sendMessageReturnHash, getTransactionsV2, getMasterchainBlockSignatures, getShardBlockProof, getLibraries.
-* Fixed bugs related to invalid TVM output (c4, c5, libaries) and non-validated network data; avoided too deep recursion in libraries loading
+* Fixed bugs related to invalid TVM output (c4, c5, libraries) and non-validated network data; avoided too deep recursion in libraries loading
 * Fixed multiple undefined behavior issues
 * Added build of FunC and Fift to WASM
 
@@ -245,7 +245,7 @@ Besides the work of the core team, this update is based on the efforts of @tvoro
 #### Update delay
 Update coincided with persistent state serialization event which lead to block production speed deterioration (issue substantially mitigated in update itself). This phenomena was aggravated by the fact that after update some validators lost ability to participate in block creation. The last was caused by threshold based hardcoded protocol version bump, where threshold was set in such manner (based on block height with value higher than 9m), that it eluded detection in private net tests. The update was temporarily paused and resumed after persistent state serialization ended and issues with block creation were resolved.
 
-Besides the work of the core team, this update is based on the efforts of @awesome-doge (help with abseil-cpp upgrade), @rec00rsiff (noted issues for exotic endianess and implemented network stats) and third-party security auditors.
+Besides the work of the core team, this update is based on the efforts of @awesome-doge (help with abseil-cpp upgrade), @rec00rsiff (noted issues for exotic endianness and implemented network stats) and third-party security auditors.
 
 ## 2022.05 Update
 * Initial synchronization improved: adjusted timeouts for state download and the way of choosing which state to download. Nodes with low network speed and/or bad connectivity will synchronize faster and consistently.

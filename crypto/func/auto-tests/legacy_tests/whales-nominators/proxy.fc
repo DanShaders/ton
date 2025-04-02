@@ -26,7 +26,7 @@
   }
 
   ;; Bounce while keeping storage fee on unknown
-  ;; Useful fro deploy
+  ;; Useful for deploy
   if (null?(src)) {
       raw_reserve(1000000000, 2);
       var msg = begin_cell()

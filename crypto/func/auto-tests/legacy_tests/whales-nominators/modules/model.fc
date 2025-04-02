@@ -124,7 +124,7 @@ int apply_profit(int value, int value_profit, int profit) {
         value = ctx_member_pending_deposit + ctx_member_balance + ctx_member_withdraw;
     }
 
-    ;; Trying to withdraw immediatelly
+    ;; Trying to withdraw immediately
     var remaining = value;
     var withdrawed = 0;
     

@@ -836,7 +836,7 @@ int main(int argc, char* argv[]) {
   }
 
   // wait till client is synchronized with blockchain.
-  // not necessary, but synchronized will be trigged anyway later
+  // not necessary, but synchronized will be triggered anyway later
   sync(client);
 
   // give wallet with some test grams to run test

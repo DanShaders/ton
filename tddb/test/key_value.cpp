@@ -156,7 +156,7 @@ TEST(KeyValue, async_simple) {
 class KeyValueBenchmark : public td::Benchmark {
  public:
   std::string get_description() const override {
-    return "kv transation benchmark";
+    return "kv transaction benchmark";
   }
 
   void start_up() override {

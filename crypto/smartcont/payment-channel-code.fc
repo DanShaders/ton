@@ -1,4 +1,4 @@
-;; WARINIG: NOT READY FOR A PRODUCTION!
+;; WARNING: NOT READY FOR A PRODUCTION!
 
 int err:wrong_a_signature() asm "31 PUSHINT";
 int err:wrong_b_signature() asm "32 PUSHINT";
@@ -207,7 +207,7 @@ cell with_init(slice state, int msg_value, slice msg, int msg_signed_A?, int msg
     (msg~load_grams(), msg~load_grams(), msg~load_grams(), msg~load_grams(), msg~load_uint(64));
   throw_unless(err:wrong_channel_id(), got_channel_id == channel_id);
 
-  ;; TODO: we should reserve some part of the value for comission
+  ;; TODO: we should reserve some part of the value for commission
   throw_if(err:msg_value_too_small(), msg_value < inc_A + inc_B);
   throw_unless(err:replay_protection(), (msg_signed_A? < signed_A?) | (msg_signed_B? < signed_B?));
   

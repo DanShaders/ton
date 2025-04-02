@@ -25,7 +25,7 @@ fun main(s: int) {
 Below, I just give examples of @fif_codegen tag:
 * a pattern can be single-line (after the tag), or multi-line, surrounded with """
 * there may be multiple @fif_codegen, they all will be checked
-* identation (spaces) is not checked intentionally
+* indentation (spaces) is not checked intentionally
 * "..." means any number of any lines
 * lines not divided with "..." are expected to be consecutive in fif output
 * //comments can be omitted, but if present, they are also expected to be equal

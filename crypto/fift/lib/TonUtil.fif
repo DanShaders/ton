@@ -338,14 +338,14 @@ def? config-valid? {
                 maybe-anycast // get anycast depth, bits, slice
                 9 u@+  // get addr_len
                 32 i@+ // get workchain
-                swap 2 -roll // move workchain to neede position
+                swap 2 -roll // move workchain to needed position
                 swap parse-address-with-anycast
                 `addr-var swap
             } cond
 
        }
        {
-            drop // drop header (dup for statment upper)
+            drop // drop header (dup for statement upper)
             // if addr_extern$01
             // addr_extern$01 len:(## 9)
             // external_address:(bits len)

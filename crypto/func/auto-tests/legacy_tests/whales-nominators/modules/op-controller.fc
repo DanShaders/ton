@@ -182,7 +182,7 @@
 
         ;; Handle stake recovered event
         ;; NOTE: Any stake recovery outside this condition might be just a noise and 
-        ;;       effect of various race condirtions that doesn't carry any substantianal vakue
+        ;;       effect of various race condirtions that doesn't carry any substantianal value
         on_stake_recovered(value - fees::stake_fees());
 
         ;; Reset lock state
@@ -221,7 +221,7 @@
 
 () op_controller_accept_stakes(int value, slice in_msg) impure {
 
-    ;; Check if enought value
+    ;; Check if enough value
     throw_unless(error::invalid_message(), value >= params::pending_op());
 
     ;; Check if not locked
@@ -249,7 +249,7 @@
 
 () op_controller_accept_withdraws(int value, slice in_msg) impure {
 
-    ;; Check if enought value
+    ;; Check if enough value
     throw_unless(error::invalid_message(), value >= params::pending_op());
 
     ;; Check if not locked
@@ -277,7 +277,7 @@
 
 () op_controller_force_kick(int value, slice in_msg) impure {
 
-    ;; Check if enought value
+    ;; Check if enough value
     throw_unless(error::invalid_message(), value >= params::pending_op());
 
     ;; Check if not locked
@@ -388,7 +388,7 @@
     ctx_query_id = query_id;
 
     ;; Bounced
-    ;; It seems that handling doesn't make sence sicne there are no throws (?) 
+    ;; It seems that handling doesn't make sence since there are no throws (?) 
     ;; in elector contract
     if (flags & 1) {
         return ();

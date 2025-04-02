@@ -436,7 +436,7 @@ const MsgProcessedUpto* MsgProcessedUptoCollection::is_simple_update_of(const Ms
                                                                         bool& ok) const {
   ok = false;
   if (!contains(other)) {
-    LOG(DEBUG) << "does not cointain the previous value";
+    LOG(DEBUG) << "does not contain the previous value";
     return nullptr;
   }
   if (other.contains(*this)) {

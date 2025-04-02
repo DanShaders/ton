@@ -315,7 +315,7 @@ void StorageProvider::on_new_storage_contract_cont(ContractAddress address, Stor
     return;
   }
   LOG(INFO) << "New storage contract " << address.to_string() << ", torrent hash: " << data.torrent_hash.to_hex();
-  LOG(DEBUG) << "Stoage contract data: microchunk_hash=" << data.microchunk_hash << ", balance=" << data.balance
+  LOG(DEBUG) << "Storage contract data: microchunk_hash=" << data.microchunk_hash << ", balance=" << data.balance
              << ", file_size=" << data.file_size << ", next_proof=" << data.next_proof
              << ", rate=" << data.rate_per_mb_day << ", max_span=" << data.max_span;
   StorageContract& contract = it.first->second;

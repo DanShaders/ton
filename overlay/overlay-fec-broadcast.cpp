@@ -103,7 +103,7 @@ void BroadcastFec::broadcast_checked(td::Result<td::Unit> R) {
 td::Status BroadcastFec::distribute_part(td::uint32 seqno) {
   auto i = parts_.find(seqno);
   if (i == parts_.end()) {
-    VLOG(OVERLAY_WARNING) << "not distibuting empty part " << seqno;
+    VLOG(OVERLAY_WARNING) << "not distributing empty part " << seqno;
     // should not get here
     return td::Status::OK();
   }

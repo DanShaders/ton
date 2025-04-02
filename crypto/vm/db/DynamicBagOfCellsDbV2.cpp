@@ -671,7 +671,7 @@ struct CellInfoStorage {
     return info;
   }
 
-  // Creates CellInfo from cell. If cell is loaded, it will be used to rewrite or udpate current cell
+  // Creates CellInfo from cell. If cell is loaded, it will be used to rewrite or update current cell
   CellInfo &create_cell_info(Ref<Cell> cell, CellDbReaderExt *from_reader, CacheStats &stats) {
     if (cell->is_loaded()) {
       return create_cell_info_from_data_cell(cell->load_cell().move_as_ok().data_cell);

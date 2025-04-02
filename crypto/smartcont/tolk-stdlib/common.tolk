@@ -6,7 +6,7 @@ tolk 0.10
 /**
   Tuple manipulation primitives.
   Elements of a tuple can be of arbitrary type.
-  Note that atomic type `tuple` can't be cast to composite tuple type (e.g. `[int, cell]`) and vise versa.
+  Note that atomic type `tuple` can't be cast to composite tuple type (e.g. `[int, cell]`) and vice versa.
  */
 
 /// Creates a tuple with zero elements.
@@ -610,7 +610,7 @@ fun isEndOfSliceBits(self: slice): bool
 fun isEndOfSliceRefs(self: slice): bool
     asm "SREMPTY";
 
-/// Checks whether data parts of two slices coinside.
+/// Checks whether data parts of two slices coincide.
 @pure
 fun isSliceBitsEqual(self: slice, b: slice): bool
     asm "SDEQ";

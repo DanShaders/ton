@@ -74,7 +74,7 @@ static td::Result<std::string> compile_internal(char *config_json) {
 
 /// Callback used to retrieve file contents from a "not file system". See tolk-js for implementation.
 /// The callback must fill either destContents or destError.
-/// The implementor must use malloc() for them and use free() after tolk_compile returns.
+/// The implementer must use malloc() for them and use free() after tolk_compile returns.
 typedef void (*WasmFsReadCallback)(int kind, char const* data, char** destContents, char** destError);
 
 static CompilerSettings::FsReadCallback wrap_wasm_read_callback(WasmFsReadCallback _readCallback) {

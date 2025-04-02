@@ -1152,7 +1152,7 @@ namespace transaction {
  * Checks if it is required to increase gas_limit (from GasLimitsPrices config) for the transaction
  *
  * In January 2024 a highload wallet of @wallet Telegram bot in mainnet was stuck because current gas limit (1M) is
- * not enough to clean up old queires, thus locking funds inside.
+ * not enough to clean up old queries, thus locking funds inside.
  * See comment in crypto/smartcont/highload-wallet-v2-code.fc for details on why this happened.
  * Account address: EQD_v9j1rlsuHHw2FIhcsCFFSD367ldfDdCKcsNmNpIRzUlu
  * It was proposed to validators to increase gas limit for this account to 70M for a limited amount
@@ -1226,7 +1226,7 @@ td::uint64 Transaction::gas_bought_for(const ComputePhaseConfig& cfg, td::RefInt
     gas_limit_overridden = true;
     // Same as ComputePhaseConfig::gas_bought for, but with other gas_limit and max_gas_threshold
     auto gas_limit = new_limit.value();
-    LOG(INFO) << "overridding gas limit for account " << account.workchain << ":" << account.addr.to_hex() << " to "
+    LOG(INFO) << "overriding gas limit for account " << account.workchain << ":" << account.addr.to_hex() << " to "
               << gas_limit;
     auto max_gas_threshold =
         compute_max_gas_threshold(cfg.gas_price256, gas_limit, cfg.flat_gas_limit, cfg.flat_gas_price);

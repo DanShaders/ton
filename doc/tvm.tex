@@ -1224,7 +1224,7 @@ In most cases, {\em simple\/} encodings of complete instructions are used. Simpl
 If a (generic) instruction uses a simple encoding with an $l$-bit opcode, then the instruction will utilize $2^{-l}$ portion of the opcode space. This observation might be useful for considerations described in~\ptref{sp:opcode.sp.distr} and~\ptref{sp:stk.opcode.distr}.
 
 \nxsubpoint\emb{Optimizing code density further: Huffman codes}
-One might construct optimally dense binary code for the set of all complete instructions, provided their probabilities or frequences in real code are known. This is the well-known Huffman code (for the given probability distribution). However, such code would be highly unsystematic and hard to decode.
+One might construct optimally dense binary code for the set of all complete instructions, provided their probabilities or frequencies in real code are known. This is the well-known Huffman code (for the given probability distribution). However, such code would be highly unsystematic and hard to decode.
 
 \nxsubpoint\label{sp:pract.enc}\emb{Practical instruction encodings}
 In practice, instruction encodings used in TVM and other virtual machines offer a compromise between code density and ease of encoding and decoding. Such a compromise may be achieved by selecting simple encodings (cf.~\ptref{sp:simple.enc}) for all instructions (maybe with separate simple encodings for some often used variants, such as {\tt XCHG s0,s$(i)$} among all {\tt XCHG s$(i)$,s$(j)$}), and allocating opcode space for such simple encodings using the heuristics outlined in \ptref{sp:opcode.sp.distr} and~\ptref{sp:stk.opcode.distr}; this is the approach currently used in TVM.
@@ -1992,7 +1992,7 @@ Opcodes starting with {\tt F4} and {\tt F5} are reserved for dictionary operatio
 \nxsubpoint\emb{Dictionary serialization and deserialization}
 \begin{itemize}
 \item {\tt CE} --- {\tt STDICTS} ($s$ $b$ -- $b'$), stores a {\em Slice\/}-represented dictionary~$s$ into {\em Builder\/}~$b$. It is actually a synonym for {\tt STSLICE}.
-\item {\tt F400} --- {\tt STDICT} or {\tt STOPTREF} ($D$ $b$ -- $b'$), stores dictionary $D$ into {\em Builder\/} $b$, returing the resulting {\em Builder\/} $b'$. In other words, if $D$ is a cell, performs {\tt STONE} and {\tt STREF}; if $D$ is {\em Null}, performs {\tt NIP} and {\tt STZERO}; otherwise throws a type checking exception.
+\item {\tt F400} --- {\tt STDICT} or {\tt STOPTREF} ($D$ $b$ -- $b'$), stores dictionary $D$ into {\em Builder\/} $b$, returning the resulting {\em Builder\/} $b'$. In other words, if $D$ is a cell, performs {\tt STONE} and {\tt STREF}; if $D$ is {\em Null}, performs {\tt NIP} and {\tt STZERO}; otherwise throws a type checking exception.
 \item {\tt F401} --- {\tt SKIPDICT} or {\tt SKIPOPTREF} ($s$ -- $s'$), equivalent to {\tt LDDICT}; {\tt NIP}.
 \item {\tt F402} --- {\tt LDDICTS} ($s$ -- $s'$ $s''$), loads (parses) a ({\em Slice\/}-represented) dictionary $s'$ from {\em Slice\/}~$s$, and returns the remainder of~$s$ as $s''$. This is a ``split function'' for all $\HashmapE(n,X)$ dictionary types.
 \item {\tt F403} --- {\tt PLDDICTS} ($s$ -- $s'$), preloads a ({\em Slice\/}-represented) dictionary $s'$ from {\em Slice\/}~$s$. Approximately equivalent to {\tt LDDICTS}; {\tt DROP}.

@@ -1220,7 +1220,7 @@ TEST(Smartcont, DnsManual) {
   dns.update(CheckedDns::Action{"", intToCat(0), ""});
   CHECK(dns.resolve("a.b.c", intToCat(2)).empty());
 
-  LOG(ERROR) << "Test multipe update";
+  LOG(ERROR) << "Test multiple update";
   {
     CheckedDns::Action e[4] = {
         CheckedDns::Action{"", intToCat(0), ""}, CheckedDns::Action{"a.b.c", intToCat(1), "hello"},

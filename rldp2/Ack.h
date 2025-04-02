@@ -24,7 +24,7 @@
 namespace ton {
 namespace rldp2 {
 // Helper for receiver
-// Also this information is sent to the sender as an acknowlegement.
+// Also this information is sent to the sender as an acknowledgement.
 struct Ack {
   td::uint32 max_seqno{0};
   td::uint32 received_mask{0};

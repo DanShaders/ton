@@ -146,11 +146,11 @@ TEST(Actor, split_promise) {
     static_assert(std::is_same<SplitPromise<decltype(pair)>::ArgT, std::pair<int, double>>::value, "A");
     static_assert(
         std::is_same<SplitPromise<decltype(pair)>::SplittedT, std::pair<Promise<int>, Promise<double>>>::value, "A");
-    auto splitted = split_promise(pair);
-    static_assert(std::is_same<decltype(splitted), std::pair<Promise<int>, Promise<double>>>::value, "A");
+    auto split = split_promise(pair);
+    static_assert(std::is_same<decltype(split), std::pair<Promise<int>, Promise<double>>>::value, "A");
 
-    splitted.first.set_value(1);
-    splitted.second.set_value(2.0);
+    split.first.set_value(1);
+    split.second.set_value(2.0);
     CHECK(x.unwrap() == std::make_pair(1, 2.0));
   }  // namespace td
   {
@@ -160,12 +160,12 @@ TEST(Actor, split_promise) {
     static_assert(std::is_same<SplitPromise<decltype(triple)>::SplittedT,
                                std::tuple<Promise<int>, Promise<double>, Promise<std::string>>>::value,
                   "A");
-    auto splitted = split_promise(triple);
+    auto split = split_promise(triple);
     static_assert(
-        std::is_same<decltype(splitted), std::tuple<Promise<int>, Promise<double>, Promise<std::string>>>::value, "A");
-    std::get<0>(splitted).set_value(1);
-    std::get<1>(splitted).set_value(2.0);
-    std::get<2>(splitted).set_value("hello");
+        std::is_same<decltype(split), std::tuple<Promise<int>, Promise<double>, Promise<std::string>>>::value, "A");
+    std::get<0>(split).set_value(1);
+    std::get<1>(split).set_value(2.0);
+    std::get<2>(split).set_value("hello");
     CHECK(x.unwrap() == std::make_tuple(1, 2.0, "hello"));
   }
   {
@@ -174,10 +174,10 @@ TEST(Actor, split_promise) {
       res.ensure_error();
       code = res.error().code();
     };
-    auto splitted = split_promise(td::Promise<std::pair<int, double>>(pair));
-    splitted.second.set_error(td::Status::Error(123, "123"));
+    auto split = split_promise(td::Promise<std::pair<int, double>>(pair));
+    split.second.set_error(td::Status::Error(123, "123"));
     CHECK(code == 0);
-    splitted.first.set_value(1);
+    split.first.set_value(1);
     CHECK(code == 123);
   }
 }

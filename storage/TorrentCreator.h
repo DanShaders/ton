@@ -31,7 +31,7 @@ class Torrent::Creator {
     td::uint32 piece_size{128 * 768};
 
     // override default dir_name
-    // should't be used in a usual workflow
+    // shouldn't be used in a usual workflow
     td::optional<std::string> dir_name;
 
     std::string description;

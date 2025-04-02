@@ -42,7 +42,7 @@ void FileToStreamActor::loop() {
     }
   }
   if (dest.empty()) {
-    //NB: Owner of CyclicBufer::Reader should notify this actor after each chunk is readed
+    //NB: Owner of CyclicBufer::Reader should notify this actor after each chunk is read
     return;
   }
 

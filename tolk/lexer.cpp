@@ -90,7 +90,7 @@ public:
       std::string to_append;
       if (*c == '[') {
         c++;
-        while (*c != ']') { // assume that input is corrent, no out-of-string checks
+        while (*c != ']') { // assume that input is current, no out-of-string checks
           if (*(c + 1) == '-') {
             char l = *c, r = *(c + 2);
             for (char symbol = l; symbol <= r; ++symbol) {
@@ -124,7 +124,7 @@ public:
   }
 
   // Looks up a chunk lexer given a string (in practice, s points to cur position in the middle of the file).
-  // It returns the deepest case: pointing to ", it will return ChunkMultilineString if """, or ChunkString otherwize.
+  // It returns the deepest case: pointing to ", it will return ChunkMultilineString if """, or ChunkString otherwise.
   ChunkLexerBase* get_deepest(const char* s) const {
     const LexingTrie* best = this;
 

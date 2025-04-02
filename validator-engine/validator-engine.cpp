@@ -873,7 +873,7 @@ class ValidatorElectionBidCreator : public td::actor::Actor {
     auto res = R.move_as_ok();
     auto dataR = res.source_lookup.read_file("OUTPUT");
     if (dataR.is_error()) {
-      abort_query(td::Status::Error("strage error: no result boc"));
+      abort_query(td::Status::Error("strange error: no result boc"));
       return;
     }
 
@@ -998,7 +998,7 @@ class ValidatorProposalVoteCreator : public td::actor::Actor {
     auto res = R.move_as_ok();
     auto dataR = res.source_lookup.read_file("vote-msg-body.boc");
     if (dataR.is_error()) {
-      abort_query(td::Status::Error("strage error: no result boc"));
+      abort_query(td::Status::Error("strange error: no result boc"));
       return;
     }
 
@@ -1123,7 +1123,7 @@ class ValidatorPunishVoteCreator : public td::actor::Actor {
     auto res = R.move_as_ok();
     auto dataR = res.source_lookup.read_file("vote-query.boc");
     if (dataR.is_error()) {
-      abort_query(td::Status::Error("strage error: no result boc"));
+      abort_query(td::Status::Error("strange error: no result boc"));
       return;
     }
 
@@ -4495,7 +4495,7 @@ int main(int argc, char *argv[]) {
         return td::Status::OK();
       });
   p.add_option('\0', "enable-precompiled-smc",
-               "enable exectuion of precompiled contracts (experimental, disabled by default)",
+               "enable execution of precompiled contracts (experimental, disabled by default)",
                []() { block::precompiled::set_precompiled_execution_enabled(true); });
   p.add_option('\0', "disable-rocksdb-stats", "disable gathering rocksdb statistics (enabled by default)", [&]() {
     acts.push_back([&x]() { td::actor::send_closure(x, &ValidatorEngine::set_disable_rocksdb_stats, true); });

@@ -8,7 +8,7 @@ import shutil
 add_pragmas = [] #["allow-post-modification", "compute-asm-ltr"];
 
 tests = [
-    # note, that deployed version of elector,config and multisig differ since it is compilled with func-0.1.0.
+    # note, that deployed version of elector,config and multisig differ since it is compiled with func-0.1.0.
     # Newer compillators optimize arithmetic and logic expression that can be calculated at the compile time
     ["elector/elector-code.fc", 115226404411715505328583639896096915745686314074575650766750648324043316883483],
     ["config/config-code.fc", 10913070768607625342121305745084703121685937915388357634624451844356456145601],
@@ -20,9 +20,9 @@ tests = [
     ["dns-collection/nft-collection.fc", 107999822699841936063083742021519765435859194241091312445235370766165379261859],
 
 
-    # note, that deployed version of tele-nft-item differs since it is compilled with func-0.3.0.
+    # note, that deployed version of tele-nft-item differs since it is compiled with func-0.3.0.
     # After introducing of try/catch construction, c2 register is not always the default one.
-    # Thus it is necessary to save it upon jumps, differences of deployed and below compilled is that
+    # Thus it is necessary to save it upon jumps, differences of deployed and below compiled is that
     # "c2 SAVE" is added to the beginning of recv_internal. It does not change behavior.
     ["tele-nft-item/nft-item.fc", 69777543125381987786450436977742010705076866061362104025338034583422166453344],
 

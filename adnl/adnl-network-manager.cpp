@@ -110,7 +110,7 @@ void AdnlNetworkManagerImpl::add_proxy_addr(td::IPAddress addr, td::uint16 local
 
 void AdnlNetworkManagerImpl::receive_udp_message(td::UdpMessage message, size_t idx) {
   if (!callback_) {
-    LOG(ERROR) << this << ": dropping IN message [?->?]: peer table unitialized";
+    LOG(ERROR) << this << ": dropping IN message [?->?]: peer table uninitialized";
     return;
   }
   if (message.error.is_error()) {
@@ -139,7 +139,7 @@ void AdnlNetworkManagerImpl::receive_udp_message(td::UdpMessage message, size_t 
       CHECK(proxy_iface.is_proxy());
       auto R = in_desc_[it->second].proxy->decrypt(std::move(message.data));
       if (R.is_error()) {
-        VLOG(ADNL_WARNING) << this << ": failed to decrypt proxy mesage: " << R.move_as_error();
+        VLOG(ADNL_WARNING) << this << ": failed to decrypt proxy message: " << R.move_as_error();
         return;
       }
       auto packet = R.move_as_ok();

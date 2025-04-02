@@ -87,7 +87,7 @@ Result<MatrixGF256> Solver::run(const Rfc::Parameters &p, Span<SymbolRef> symbol
   };
   // Solve linear system
   // A * C = D
-  // C - intermeidate symbols
+  // C - intermediate symbols
   // D - encoded symbols and restriction symbols.
   //
   // A:

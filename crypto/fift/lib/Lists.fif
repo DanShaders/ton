@@ -82,7 +82,7 @@ recursive foldr-ne {
   swap cdr false
   } cond } cond } until
 } : list-tail-from
-// a l -- t  // tail of l after first occurence of a using eq?
+// a l -- t  // tail of l after first occurrence of a using eq?
 { swap 1 ' eq? does list-tail-from } : list-member-eq
 { swap 1 ' eqv? does list-tail-from } : list-member-eqv
 { swap 1 ' equal? does list-tail-from } : list-member-equal

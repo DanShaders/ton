@@ -1,6 +1,6 @@
 ## 2025.03 Update
 1. New extracurrency behavior introduced, check [GlobalVersions.md](./doc/GlobalVersions.md#version-10)
-2. Optmization of validation process, in particular CellStorageStat.
+2. Optimization of validation process, in particular CellStorageStat.
 3. Flag for speeding up broadcasts in various overlays.
 4. Fixes for static builds for emulator and tonlibjson
 5. Improving getstats output: add

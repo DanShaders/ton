@@ -42,7 +42,7 @@ namespace ton {
 // Filename rules:
 // 1) Name can't be empty
 // 2) Names in a torrent should be unique
-// 3) Name can't start or end with '/' or contain two consequitive '/'
+// 3) Name can't start or end with '/' or contain two consecutive '/'
 // 4) Components of name can't be equal to "." or ".."
 // 5) If there's a name aaa/bbb/ccc, no other name can start with aaa/bbb/ccc/
 

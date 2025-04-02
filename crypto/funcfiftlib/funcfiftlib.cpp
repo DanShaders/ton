@@ -82,8 +82,8 @@ td::Result<std::string> compile_internal(char *config_json) {
 /// @param o_contents A pointer to the contents of the file, if found. Allocated via malloc().
 /// @param o_error A pointer to an error message, if there is one. Allocated via malloc().
 ///
-/// The callback implementor must use malloc() to allocate storage for
-/// contents or error. The callback implementor must use free() to free
+/// The callback implementer must use malloc() to allocate storage for
+/// contents or error. The callback implementer must use free() to free
 /// said storage after func_compile returns.
 ///
 /// If the callback is not supported, *o_contents and *o_error must be set to NULL.

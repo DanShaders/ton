@@ -16,7 +16,7 @@ variable lisp-dict
 // a d --  Defines a with definition d in dictionary lisp-dict
 { pair lisp-dict @ cons lisp-dict ! } : lisp-dict-int-define
 { box lisp-dict-int-define } : lisp-dict-define
-// a d -- Defines new a with defininition d
+// a d -- Defines new a with definition d
 { over lisp-dict @ lookup-in { 2drop atom>$ +" already defined" abort }
   { drop lisp-dict-int-define } cond
 } : lisp-dict-int-define-new

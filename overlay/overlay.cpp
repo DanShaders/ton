@@ -324,7 +324,7 @@ void OverlayImpl::alarm() {
         }
       }
     } else {
-      VLOG(OVERLAY_WARNING) << "member certificate ist invalid, valid_until="
+      VLOG(OVERLAY_WARNING) << "member certificate isn't invalid, valid_until="
                             << peer_list_.local_cert_is_valid_until_.at_unix();
     }
     if (next_dht_query_ && next_dht_query_.is_in_past() && overlay_type_ == OverlayType::Public) {

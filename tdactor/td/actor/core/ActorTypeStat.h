@@ -127,7 +127,7 @@ struct ActorTypeStatImpl {
   }
 
   void execute_start(td::uint64 ts) {
-    // TODO: this is mostly protection for recursive actor calls, which curretly should be almost impossible
+    // TODO: this is mostly protection for recursive actor calls, which currently should be almost impossible
     // But too full handle it, one would use one executing_cnt per thread, so only upper level execution is counted
     if (inc(executing_) == 1) {
       store(execute_start_, ts);

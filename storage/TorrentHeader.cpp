@@ -83,7 +83,7 @@ static td::Status validate_name(td::Slice name, bool is_dir_name = false) {
     }
     td::Slice s = name.substr(l, r - l);
     if (s == "") {
-      return td::Status::Error("Name can't contain consequitive '/'");
+      return td::Status::Error("Name can't contain consecutive '/'");
     }
     if (s == ".") {
       return td::Status::Error("Name can't contain component \".\"");

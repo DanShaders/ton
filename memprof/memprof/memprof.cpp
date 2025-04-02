@@ -223,7 +223,7 @@ void register_xalloc(malloc_info *info, std::int32_t diff) {
 
 extern "C" {
 
-static void *malloc_with_frame(std::size_t size, const Backtrace &frame, std::size_t aligment = 0) {
+static void *malloc_with_frame(std::size_t size, const Backtrace &frame, std::size_t alignment = 0) {
   static_assert(reserved % alignof(std::max_align_t) == 0, "fail");
   static_assert(reserved >= sizeof(malloc_info), "fail");
 #if TD_DARWIN
@@ -233,17 +233,17 @@ static void *malloc_with_frame(std::size_t size, const Backtrace &frame, std::si
   extern decltype(malloc) __libc_malloc;
   static auto malloc_old = __libc_malloc;
 #endif
-  if (aligment < alignof(std::max_align_t)) {
-    aligment = 0;
+  if (alignment < alignof(std::max_align_t)) {
+    alignment = 0;
   }
-  assert(aligment % alignof(std::max_align_t) == 0);
-  std::size_t extra = aligment == 0 ? 0 : aligment - alignof(std::max_align_t);
+  assert(alignment % alignof(std::max_align_t) == 0);
+  std::size_t extra = alignment == 0 ? 0 : alignment - alignof(std::max_align_t);
   auto *ptr = malloc_old(size + reserved + extra);
   std::int32_t offset = 0;
-  if (aligment != 0) {
-    // (ptr + reserved + offset) % aligment == 0
+  if (alignment != 0) {
+    // (ptr + reserved + offset) % alignment == 0
     offset =
-        static_cast<std::int32_t>((aligment - (reinterpret_cast<std::size_t>(ptr) + reserved) % aligment) % aligment);
+        static_cast<std::int32_t>((alignment - (reinterpret_cast<std::size_t>(ptr) + reserved) % alignment) % alignment);
     assert(offset % alignof(std::max_align_t) == 0);
     assert(static_cast<std::size_t>(offset) <= extra);
     ptr = static_cast<void *>(static_cast<char *>(ptr) + offset);
@@ -261,8 +261,8 @@ static void *malloc_with_frame(std::size_t size, const Backtrace &frame, std::si
 
   void *data = buf + reserved;
 
-  if (aligment != 0) {
-    assert(reinterpret_cast<std::size_t>(data) % aligment == 0);
+  if (alignment != 0) {
+    assert(reinterpret_cast<std::size_t>(data) % alignment == 0);
   }
 
   return data;
@@ -317,12 +317,12 @@ void *realloc(void *ptr, std::size_t size) {
   free(ptr);
   return new_ptr;
 }
-int posix_memalign(void **res, std::size_t aligment, std::size_t size) {
-  *res = malloc_with_frame(size, get_backtrace(), aligment);
+int posix_memalign(void **res, std::size_t alignment, std::size_t size) {
+  *res = malloc_with_frame(size, get_backtrace(), alignment);
   return 0;
 }
-void *memalign(std::size_t aligment, std::size_t size) {
-  return malloc_with_frame(size, get_backtrace(), aligment);
+void *memalign(std::size_t alignment, std::size_t size) {
+  return malloc_with_frame(size, get_backtrace(), alignment);
 }
 std::size_t malloc_usable_size(void *ptr) {
   if (ptr == nullptr) {

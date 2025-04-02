@@ -351,7 +351,7 @@ int main() {
       LOG(FATAL) << "failed to receive answers: remaining=" << remaining;
     }
   }
-  LOG(ERROR) << "successfully tested delivering of quries/answers. Time=" << (td::Clocks::system() - f);
+  LOG(ERROR) << "successfully tested delivering of queries/answers. Time=" << (td::Clocks::system() - f);
 
   LOG(ERROR) << "testing packets, that should be ignored";
 

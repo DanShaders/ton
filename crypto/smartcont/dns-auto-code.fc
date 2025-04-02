@@ -42,7 +42,7 @@ cell udict_get_ref_(cell dict, int key_len, int index) asm(index dict key_len) "
   return (
     cs~load_ref(),        ;; control data
     cs~load_dict(),       ;; pfx tree: domains data and exp
-    cs~load_dict(),       ;; gc auxillary with expiration and 128-bit hash slice
+    cs~load_dict(),       ;; gc auxiliary with expiration and 128-bit hash slice
     [ cs~load_uint(30),   ;; length of this period of time in seconds
       cs~load_grams(),    ;; standard payment for registering a new subdomain
       cs~load_grams(),    ;; price paid for each cell (PPC)

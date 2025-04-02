@@ -93,7 +93,7 @@ class TlObject {
   TlObject &operator=(TlObject &&) = default;
 
   /**
-   * Virtual desctructor.
+   * Virtual destructor.
    */
   virtual ~TlObject() = default;
 };

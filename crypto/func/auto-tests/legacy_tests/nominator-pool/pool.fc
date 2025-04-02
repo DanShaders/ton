@@ -536,7 +536,7 @@ cell distribute_share(int reward, cell nominators) inline_ref {
                 }
             }
 
-            if (op == 6) { ;; update current valudator set hash (anyone can invoke)
+            if (op == 6) { ;; update current validator set hash (anyone can invoke)
                 throw_unless(113, validator_set_changes_count < 3);
                 (int utime_since, int utime_until, cell vset) = get_current_validator_set();
                 int current_hash = cell_hash(vset);
@@ -650,7 +650,7 @@ cell distribute_share(int reward, cell nominators) inline_ref {
                 validator_set_change_time = utime_since;
                 stake_held_for = get_validator_config(); ;; save `stake_held_for` in case the config changes in the process
 
-                send_msg(elector_address(), value, begin_cell().store_uint(op, 32).store_uint(query_id, 64).store_slice(msg).end_cell(), BOUNCEABLE(), SEND_MODE_PAY_FEE_SEPARATELY()); ;; pay fee separately, rever on errors
+                send_msg(elector_address(), value, begin_cell().store_uint(op, 32).store_uint(query_id, 64).store_slice(msg).end_cell(), BOUNCEABLE(), SEND_MODE_PAY_FEE_SEPARATELY()); ;; pay fee separately, revert on errors
             }
         }
     }

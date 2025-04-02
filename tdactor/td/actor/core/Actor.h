@@ -90,7 +90,7 @@ class Actor {
     return ActorExecuteContext::get()->get_link_token();
   }
 
-  //set context that will be inherited by all childrens
+  //set context that will be inherited by all children
   //void set_context(std::shared_ptr<ActorContext> context);
 
   //void do_stop();  // process Kill signal immediately

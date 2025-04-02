@@ -154,7 +154,7 @@ class ProxyLiteserver : public td::actor::Actor {
     ton_api::liteclient_config_global gc;
     TRY_STATUS_PREFIX(ton_api::from_json(gc, global_config_json.get_object()), "Failed to parse global config: ");
     TRY_RESULT_PREFIX(servers, liteclient::LiteServerConfig::parse_global_config(gc),
-                      "Falied to parse liteservers in global config: ");
+                      "Failed to parse liteservers in global config: ");
     if (servers.empty()) {
       return td::Status::Error("No liteservers in global config");
     }

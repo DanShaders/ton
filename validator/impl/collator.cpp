@@ -636,7 +636,7 @@ void Collator::after_get_shard_state(int idx, td::Result<Ref<ShardState>> res) {
  * Callback function called after retrieving block data for a previous block.
  *
  * @param idx The index of the previous block (0 or 1).
- * @param res The retreved block data.
+ * @param res The retrieved block data.
  */
 void Collator::after_get_block_data(int idx, td::Result<Ref<BlockData>> res) {
   LOG(DEBUG) << "in Collator::after_get_block_data(" << idx << ")";
@@ -1889,7 +1889,7 @@ bool Collator::fix_one_processed_upto(block::MsgProcessedUpto& proc, const ton::
 }
 
 /**
- * Adjusts the processed up to collection using the using the auxilliary masterchain states.
+ * Adjusts the processed up to collection using the using the auxiliary masterchain states.
  *
  * @param upto The MsgProcessedUptoCollection to be adjusted.
  *
@@ -2464,7 +2464,7 @@ block::Account* Collator::lookup_account(td::ConstBitPtr addr) const {
 }
 
 /**
- * Retreives an Account object from the data in the shard state.
+ * Retrieves an Account object from the data in the shard state.
  * Accounts are cached in the Collator's map.
  *
  * @param addr The 256-bit address of the account.
@@ -2685,7 +2685,7 @@ bool Collator::create_special_transaction(block::CurrencyCollection amount, Ref<
 }
 
 /**
- * Creates special transactions for retreiving fees and minted currencies.
+ * Creates special transactions for retrieving fees and minted currencies.
  * Used in masterchain collator.
  *
  * @returns True if both special transactions were
@@ -3069,7 +3069,7 @@ bool Collator::is_our_address(const ton::StdSmcAddress& addr) const {
  *          0 - message was enqueued.
  *          1 - message was processed.
  *          3 - message was processed, all future messages must be enqueued.
- *          -1 - error occured.
+ *          -1 - error occurred.
  */
 int Collator::process_one_new_message(block::NewOutMsg msg, bool enqueue_only, Ref<vm::Cell>* is_special) {
   bool from_dispatch_queue = msg.msg_env_from_dispatch_queue.not_null();
@@ -3976,7 +3976,7 @@ bool Collator::process_deferred_message(Ref<vm::CellSlice> enq_msg, StdSmcAddres
     LOG(ERROR) << "internal message in DispatchQueue has invalid source or destination address";
     return false;
   }
-  // 4. chech current and next hop shards
+  // 4. check current and next hop shards
   if (env.cur_addr != 0 || env.next_addr != 0) {
     LOG(ERROR) << "internal message in DispatchQueue is expected to have zero cur_addr and next_addr";
     return false;

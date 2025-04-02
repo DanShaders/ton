@@ -21,7 +21,7 @@ begin-options
   "b" "--force-bounce" { true =: force-bounce } short-long-option
     "Forces bounce flag" option-help
   "x" "--extra" { $>xcc extra-cc+! } short-long-option-arg
-    "Indicates the amount of extra currencies to be transfered" option-help
+    "Indicates the amount of extra currencies to be transferred" option-help
   "B" "--body" { =: body-boc-file } short-long-option-arg
     "Sets the payload of the transfer message" option-help
   "C" "--comment" { =: comment } short-long-option-arg

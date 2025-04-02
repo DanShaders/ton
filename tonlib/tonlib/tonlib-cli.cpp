@@ -417,7 +417,7 @@ class TonlibCli : public td::actor::Actor {
       td::TerminalIO::out() << "exportkey [<key_id>] - export key\n";
       td::TerminalIO::out() << "exportkeypem [<key_id>] - export key\n";
       td::TerminalIO::out()
-          << "gethistory <key_id> - get history fo simple wallet with requested key (last 10 transactions)\n";
+          << "gethistory <key_id> - get history of simple wallet with requested key (last 10 transactions)\n";
       td::TerminalIO::out() << "showtransactions <key_id> <lt> <hash> [<count>] - show transaction on account <key_id> "
                                "with given <lt> and <hash> (in base64) and previous transactions (up to <count>).\n";
       td::TerminalIO::out() << "init <key_id> - init simple wallet with requested key\n";
@@ -940,7 +940,7 @@ class TonlibCli : public td::actor::Actor {
     TRY_RESULT(pchan_id, td::to_integer_safe<td::int32>(pchan_id_str));
     auto it = channels_.find(pchan_id);
     if (it == channels_.end()) {
-      return td::Status::Error("Unknown channle id");
+      return td::Status::Error("Unknown channel id");
     }
     return pchan_id;
   }
@@ -2388,7 +2388,7 @@ class TonlibCli : public td::actor::Actor {
                  td::Promise<td::Unit> cmd_promise) {
     if (estimate_fees) {
       send_query(make_object<tonlib_api::query_estimateFees>(r_info.ok()->id_, true), cmd_promise.wrap([](auto&& info) {
-        td::TerminalIO::out() << "Extimated fees: " << to_string(info);
+        td::TerminalIO::out() << "Estimated fees: " << to_string(info);
         return td::Unit();
       }));
     } else {
