@@ -3393,8 +3393,11 @@ bool Transaction::compute_state(const SerializeConfig& cfg) {
   }
 
   bool store_storage_dict_hash = cfg.store_storage_dict_hash && !account.is_masterchain();
-  if (storage_refs_changed ||
-      (store_storage_dict_hash && !account.storage_dict_hash && account.storage_used.cells > 25)) {
+  bool run_condition = storage_refs_changed ||
+                       (!account.is_masterchain() && !account.storage_dict_hash && account.storage_used.cells > 25);
+  bool should_be_condition = storage_refs_changed ||
+                             (store_storage_dict_hash && !account.storage_dict_hash && account.storage_used.cells > 25);
+  if (run_condition) {
     TD_PERF_COUNTER(transaction_storage_stat_b);
     td::Timer timer;
     if (!new_account_storage_stat && account.account_storage_stat) {
@@ -3411,19 +3414,23 @@ bool Transaction::compute_state(const SerializeConfig& cfg) {
     new_storage_used.cells = stats.get_total_cells() + 1;
     new_storage_used.bits = stats.get_total_bits() + new_storage_for_stat->size();
     // TODO: think about this limit (25)
-    if (store_storage_dict_hash && new_storage_used.cells > 25) {
+    if (!account.is_masterchain() && new_storage_used.cells > 25) {
       auto r_hash = stats.get_dict_hash();
       if (r_hash.is_error()) {
         LOG(ERROR) << "Cannot compute storage dict hash for account " << account.addr.to_hex() << ": "
                    << r_hash.move_as_error();
         return false;
       }
-      new_storage_dict_hash = r_hash.move_as_ok();
+      if (cfg.store_storage_dict_hash) {
+        new_storage_dict_hash = r_hash.move_as_ok();
+      }
     }
     if (timer.elapsed() > 0.1) {
       LOG(INFO) << "Compute used storage (2) took " << timer.elapsed() << "s";
     }
-  } else {
+  }
+
+  if (!should_be_condition) {
     new_storage_used = account.storage_used;
     new_storage_used.bits -= old_storage_for_stat->size();
     new_storage_used.bits += new_storage_for_stat->size();
