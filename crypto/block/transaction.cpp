@@ -3375,7 +3375,7 @@ bool Transaction::compute_state(const SerializeConfig& cfg) {
         return false;
       }
     }
-  } else if (cfg.store_storage_dict_hash) {
+  } else if (cfg.deduplication_state_hash == SerializeConfig::DeduplicationStateHash::Store) {
     LOG(ERROR) << "unsupported store_storage_dict_hash=true, extra_currency_v2=false";
     return false;
   }
@@ -3392,44 +3392,60 @@ bool Transaction::compute_state(const SerializeConfig& cfg) {
     }
   }
 
-  bool store_storage_dict_hash = cfg.store_storage_dict_hash && !account.is_masterchain();
-  if (storage_refs_changed ||
-      (store_storage_dict_hash && !account.storage_dict_hash && account.storage_used.cells > 25)) {
-    TD_PERF_COUNTER(transaction_storage_stat_b);
-    td::Timer timer;
+  constexpr int dict_cutoff_limit = 25;
+
+  bool account_wants_deduplication_state = !account.is_masterchain() && account.storage_used.cells > dict_cutoff_limit;
+  bool account_has_old_deduplication_state = static_cast<bool>(account.storage_dict_hash);
+  // We might need AccountStorageStat because:
+  //  (a) account state has changed (storage_refs_changes) or
+  //  (b) we need to write deduplication state hash but it was not previously computed.
+  bool need_account_storage_stat =
+      storage_refs_changed || (account_wants_deduplication_state && !account_has_old_deduplication_state &&
+                               cfg.deduplication_state_hash != SerializeConfig::DeduplicationStateHash::No);
+
+  // If we need AccountStorageStat, compute it.
+  if (need_account_storage_stat) {
     if (!new_account_storage_stat && account.account_storage_stat) {
       new_account_storage_stat = AccountStorageStat(&account.account_storage_stat.value());
     }
-    AccountStorageStat& stats = new_account_storage_stat.value_force();
     // Don't check Merkle depth and size here - they were checked in check_state_limits
-    td::Status S = stats.replace_roots(new_storage_for_stat->prefetch_all_refs());
+    td::Status S = new_account_storage_stat.value_force().replace_roots(new_storage_for_stat->prefetch_all_refs());
     if (S.is_error()) {
       LOG(ERROR) << "Cannot recompute storage stats for account " << account.addr.to_hex() << ": " << S.move_as_error();
       return false;
     }
-    // Root of AccountStorage is not counted in AccountStorageStat
-    new_storage_used.cells = stats.get_total_cells() + 1;
-    new_storage_used.bits = stats.get_total_bits() + new_storage_for_stat->size();
-    // TODO: think about this limit (25)
-    if (store_storage_dict_hash && new_storage_used.cells > 25) {
-      auto r_hash = stats.get_dict_hash();
-      if (r_hash.is_error()) {
-        LOG(ERROR) << "Cannot compute storage dict hash for account " << account.addr.to_hex() << ": "
-                   << r_hash.move_as_error();
-        return false;
-      }
-      new_storage_dict_hash = r_hash.move_as_ok();
-    }
-    if (timer.elapsed() > 0.1) {
-      LOG(INFO) << "Compute used storage (2) took " << timer.elapsed() << "s";
-    }
-  } else {
+  }
+
+  if (!storage_refs_changed) {
+    // If account state has not changed, we can always easily recompute new_storage_used.
     new_storage_used = account.storage_used;
     new_storage_used.bits -= old_storage_for_stat->size();
     new_storage_used.bits += new_storage_for_stat->size();
-    new_account_storage_stat = {};
-    if (store_storage_dict_hash) {
-      new_storage_dict_hash = account.storage_dict_hash;
+  } else {
+    // Root of AccountStorage is not counted in AccountStorageStat
+    new_storage_used = {
+        .cells = new_account_storage_stat.value().get_total_cells() + 1,
+        .bits = new_account_storage_stat.value().get_total_bits() + new_storage_for_stat->size(),
+    };
+  }
+
+  if (account_wants_deduplication_state &&
+      cfg.deduplication_state_hash != SerializeConfig::DeduplicationStateHash::No) {
+    if (!storage_refs_changed && account_has_old_deduplication_state) {
+      // Deduplication state did not change, so we can reuse its hash.
+      if (cfg.deduplication_state_hash == SerializeConfig::DeduplicationStateHash::Store) {
+        new_storage_dict_hash = account.storage_dict_hash;
+      }
+    } else {
+      auto deduplication_state_hash = new_account_storage_stat.value().get_dict_hash();
+      if (deduplication_state_hash.is_error()) {
+        LOG(ERROR) << "Cannot compute storage dict hash for account " << account.addr.to_hex() << ": "
+                   << deduplication_state_hash.move_as_error();
+        return false;
+      }
+      if (cfg.deduplication_state_hash == SerializeConfig::DeduplicationStateHash::Store) {
+        new_storage_dict_hash = deduplication_state_hash.move_as_ok();
+      }
     }
   }
 
@@ -4070,7 +4086,9 @@ td::Status FetchConfigParams::fetch_config_params(
   {
     serialize_cfg->extra_currency_v2 = config.get_global_version() >= 10;
     serialize_cfg->disable_anycast = config.get_global_version() >= 10;
-    serialize_cfg->store_storage_dict_hash = config.get_global_version() >= 11;
+    serialize_cfg->deduplication_state_hash = config.get_global_version() >= 11
+                                                  ? SerializeConfig::DeduplicationStateHash::Store
+                                                  : SerializeConfig::DeduplicationStateHash::No;
   }
   {
     // fetch block_grams_created

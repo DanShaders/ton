@@ -182,9 +182,15 @@ struct ActionPhaseConfig {
 };
 
 struct SerializeConfig {
+  enum class DeduplicationStateHash {
+    No,
+    OnlyCompute,
+    Store,
+  };
+
   bool extra_currency_v2{false};
   bool disable_anycast{false};
-  bool store_storage_dict_hash{false};
+  DeduplicationStateHash deduplication_state_hash{DeduplicationStateHash::No};
 };
 
 struct CreditPhase {
