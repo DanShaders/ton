@@ -67,6 +67,12 @@ class ContestGrader : public td::actor::Actor {
     }
     separator_length_ = test_idx_column_width_ + test_name_column_width_ + 60;
 
+    auto data = td::read_file("/home/danklishch/code/ton/result.boc").move_as_ok();
+    auto roots = vm::std_boc_deserialize_multi(data, std::numeric_limits<int>::max()).move_as_ok();
+    for (auto root : roots) {
+      repacked_roots[root->get_hash()] = root;
+    }
+
     printf("Executing %lu tests\n", test_files_.size());
     printf("%s\n", std::string(separator_length_, '=').c_str());
     printf("%*s  %-*s     Time      CPU  Status Comment\n", (int)test_idx_column_width_, "#",
@@ -128,7 +134,7 @@ class ContestGrader : public td::actor::Actor {
     }
 
     run_contest_solution(
-        block_id, std::move(block_data), std::move(collated_data),
+        block_id, std::move(block_data), std::move(collated_data), repacked_roots,
         [=, SelfId = actor_id(this), timer = td::Timer{}, start_cpu = get_cpu_usage()](td::Result<td::BufferSlice> R) {
           td::actor::send_closure(SelfId, &ContestGrader::got_solution_result, std::move(R), valid,
                                   original_merkle_update, timer.elapsed(),
@@ -218,6 +224,7 @@ class ContestGrader : public td::actor::Actor {
  private:
   std::string tests_dir_;
   std::vector<std::string> test_files_;
+  std::map<vm::CellHash, td::Ref<vm::Cell>> repacked_roots;
   size_t test_idx_ = 0;
   size_t cnt_ok_ = 0, cnt_fail_ = 0, cnt_fatal_ = 0;
 

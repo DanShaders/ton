@@ -91,6 +91,7 @@ class ContestValidateQuery : public td::actor::Actor {
 
  public:
   ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice collated_data,
+                       std::map<vm::CellHash, td::Ref<vm::Cell>> const& repacked_cells,
                        td::Promise<td::BufferSlice> promise);
 
  private:
@@ -98,6 +99,7 @@ class ContestValidateQuery : public td::actor::Actor {
   int pending{0};
   const ShardIdFull shard_;
   const BlockIdExt id_;
+  std::map<vm::CellHash, td::Ref<vm::Cell>> const& repacked_cells_;
   std::vector<BlockIdExt> prev_blocks;
   std::vector<Ref<ShardState>> prev_states;
   td::BufferSlice block_data, collated_data;

@@ -47,9 +47,12 @@ std::string ErrorCtx::as_string() const {
  * @param promise The Promise to return the serialized state update to
  */
 ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data,
-                                           td::BufferSlice collated_data, td::Promise<td::BufferSlice> promise)
+                                           td::BufferSlice collated_data,
+                                           std::map<vm::CellHash, td::Ref<vm::Cell>> const& repacked_cells,
+                                           td::Promise<td::BufferSlice> promise)
     : shard_(block_id.shard_full())
     , id_(block_id)
+    , repacked_cells_(repacked_cells)
     , block_data(std::move(block_data))
     , collated_data(std::move(collated_data))
     , main_promise(std::move(promise))
