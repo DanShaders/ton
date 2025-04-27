@@ -6,4 +6,5 @@
 #include "vm/cells/Cell.h"
 
 void run_contest_solution(ton::BlockIdExt block_id, td::BufferSlice block_data, td::BufferSlice colldated_data,
-                          std::map<vm::CellHash, td::Ref<vm::Cell>> const&, td::Promise<td::BufferSlice> promise);
+                          std::map<vm::CellHash, td::Ref<vm::Cell>> const&, td::BufferSlice&,
+                          td::Promise<td::BufferSlice> promise);

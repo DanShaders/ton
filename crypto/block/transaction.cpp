@@ -3392,11 +3392,13 @@ bool Transaction::compute_state(const SerializeConfig& cfg) {
     }
   }
 
+  constexpr int dict_cutoff_limit = 25;
+
   bool store_storage_dict_hash = cfg.store_storage_dict_hash && !account.is_masterchain();
-  bool run_condition = storage_refs_changed ||
-                       (!account.is_masterchain() && !account.storage_dict_hash && account.storage_used.cells > 25);
-  bool should_be_condition = storage_refs_changed ||
-                             (store_storage_dict_hash && !account.storage_dict_hash && account.storage_used.cells > 25);
+  bool run_condition = storage_refs_changed || (!account.is_masterchain() && !account.storage_dict_hash &&
+                                                account.storage_used.cells > dict_cutoff_limit);
+  bool should_be_condition = storage_refs_changed || (store_storage_dict_hash && !account.storage_dict_hash &&
+                                                      account.storage_used.cells > dict_cutoff_limit);
   if (run_condition) {
     TD_PERF_COUNTER(transaction_storage_stat_b);
     td::Timer timer;
@@ -3414,8 +3416,9 @@ bool Transaction::compute_state(const SerializeConfig& cfg) {
     new_storage_used.cells = stats.get_total_cells() + 1;
     new_storage_used.bits = stats.get_total_bits() + new_storage_for_stat->size();
     // TODO: think about this limit (25)
-    if (!account.is_masterchain() && new_storage_used.cells > 25) {
+    if (!account.is_masterchain() && new_storage_used.cells > dict_cutoff_limit) {
       auto r_hash = stats.get_dict_hash();
+      // std::cout << "we want dict hash" << std::endl;
       if (r_hash.is_error()) {
         LOG(ERROR) << "Cannot compute storage dict hash for account " << account.addr.to_hex() << ": "
                    << r_hash.move_as_error();

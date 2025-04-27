@@ -49,10 +49,11 @@ std::string ErrorCtx::as_string() const {
 ContestValidateQuery::ContestValidateQuery(BlockIdExt block_id, td::BufferSlice block_data,
                                            td::BufferSlice collated_data,
                                            std::map<vm::CellHash, td::Ref<vm::Cell>> const& repacked_cells,
-                                           td::Promise<td::BufferSlice> promise)
+                                           td::BufferSlice& updated_collated_data, td::Promise<td::BufferSlice> promise)
     : shard_(block_id.shard_full())
     , id_(block_id)
     , repacked_cells_(repacked_cells)
+    , updated_collated_data_(updated_collated_data)
     , block_data(std::move(block_data))
     , collated_data(std::move(collated_data))
     , main_promise(std::move(promise))
@@ -4999,6 +5000,7 @@ bool ContestValidateQuery::check_one_transaction(block::Account& account, ton::L
  * @returns True if the account transactions are valid, false otherwise.
  */
 bool ContestValidateQuery::check_account_transactions(const StdSmcAddress& acc_addr, Ref<vm::CellSlice> acc_blk_root) {
+  // std::cout << "-----------> check account transactions " << acc_addr.to_hex() << std::endl;
   block::gen::AccountBlock::Record acc_blk;
   CHECK(tlb::csr_unpack(std::move(acc_blk_root), acc_blk) && acc_blk.account_addr == acc_addr);
   auto account_p = unpack_account(acc_addr.cbits());
@@ -5245,6 +5247,97 @@ Ref<vm::Cell> ContestValidateQuery::get_virt_state_root(td::Bits256 block_root_h
   return vm::MerkleProof::virtualize_raw(upd_cs.prefetch_ref(1), {0, 1});
 }
 
+namespace {
+
+Ref<vm::Cell> repack_state(Ref<vm::Cell> cell, std::map<vm::CellHash, Ref<vm::Cell>> const& repacked_cells,
+                           bool& changed) {
+  CHECK(cell.not_null());
+  auto loaded_cell = cell->load_cell().move_as_ok();
+  if (loaded_cell.data_cell->special_type() == vm::Cell::SpecialType::PrunnedBranch &&
+      loaded_cell.virt.get_virtualization() != 0) {
+    if (auto it = repacked_cells.find(cell->get_hash()); it != repacked_cells.end()) {
+      changed = true;
+      return it->second;
+    }
+    return cell;
+  }
+
+  vm::CellSlice cs{std::move(loaded_cell)};
+  std::vector<Ref<vm::Cell>> references;
+  for (unsigned i = 0; i < cs.size_refs(); ++i) {
+    references.push_back(repack_state(cs.prefetch_ref(i), repacked_cells, changed));
+  }
+  return vm::DataCell::create({cs.data(), (cs.size() + 7) / 8}, cs.size(), references, cs.is_special()).move_as_ok();
+}
+
+Ref<vm::Cell> repack_account(Ref<vm::CellSlice> cs, int state, block::Account& account) {
+  CHECK(cs.not_null());
+  std::vector<Ref<vm::Cell>> references;
+
+  if (state == 1) {
+    std::vector<Ref<vm::Cell>> expected_refs;
+    for (auto& ref : {account.code, account.data, account.library}) {
+      if (!ref.is_null())
+        expected_refs.push_back(ref);
+    }
+
+    // std::cout << "got " << cs->size_refs() << " refs" << std::endl;
+    CHECK(expected_refs.size() == cs->size_refs());
+    for (unsigned i = 0; i < cs->size_refs(); ++i) {
+      CHECK(expected_refs[i]->get_hash() == cs->prefetch_ref(i)->get_hash());
+    }
+    references = expected_refs;
+  } else {
+    for (unsigned i = 0; i < cs->size_refs(); ++i) {
+      auto ref = make_ref<vm::CellSlice>(vm::NoVm{}, cs->prefetch_ref(i));
+      references.push_back(repack_account(ref, state + 1, account));
+    }
+  }
+
+  unsigned char buffer[128];
+  td::bitstring::bits_memcpy(buffer, cs->data_bits(), cs->size());
+
+  return vm::DataCell::create({buffer, 128}, cs->size(), references, cs->is_special()).move_as_ok();
+}
+
+Ref<vm::Cell> drop_virtualization(Ref<vm::Cell> cell) {
+  auto [data_cell, virtualization, _] = cell->load_cell().move_as_ok();
+  std::vector<Ref<vm::Cell>> references;
+  for (unsigned i = 0; i < data_cell->get_refs_cnt(); ++i) {
+    references.push_back(drop_virtualization(data_cell->get_ref(i)));
+  }
+
+  return vm::DataCell::create({data_cell->get_data(), (data_cell->get_bits() + 7) / 8}, data_cell->get_bits(),
+                              references, data_cell->is_special())
+      .move_as_ok();
+}
+
+Ref<vm::Cell> repack_root(Ref<vm::Cell> cell, Ref<vm::Cell> replacement, int merkle_depth, int& replaced) {
+  if (merkle_depth >= 0 && replacement->get_hash(merkle_depth) == cell->get_hash(merkle_depth)) {
+    ++replaced;
+    return replacement;
+  }
+
+  auto [data_cell, _1, _2] = cell->load_cell().move_as_ok();
+  std::vector<Ref<vm::Cell>> references;
+
+  int offset = 0;
+  if (data_cell->special_type() == vm::Cell::SpecialType::MerkleProof ||
+      data_cell->special_type() == vm::Cell::SpecialType::MerkleUpdate) {
+    offset = 1;
+  }
+
+  for (unsigned i = 0; i < data_cell->get_refs_cnt(); ++i) {
+    references.push_back(repack_root(data_cell->get_ref(i), replacement, merkle_depth + offset, replaced));
+  }
+
+  return vm::DataCell::create({data_cell->get_data(), (data_cell->get_bits() + 7) / 8}, data_cell->get_bits(),
+                              references, data_cell->is_special())
+      .move_as_ok();
+}
+
+}  // namespace
+
 /**
  * MAIN VALIDATOR FUNCTION (invokes other methods in a suitable order).
  *
@@ -5294,6 +5387,111 @@ bool ContestValidateQuery::try_validate() {
     if (!unpack_block_data()) {
       return reject_query("cannot unpack block data");
     }
+
+    {
+      struct StateToUpdate {
+        block::ShardState state;
+        size_t idx;
+      };
+      std::vector<StateToUpdate> states;
+
+      for (auto& previous_block : prev_blocks) {
+        auto inline_state_update = get_virt_state_root(previous_block.root_hash);
+        auto const state_hash = inline_state_update->get_hash();
+
+        auto state_root = virt_roots_.at(state_hash.bits());
+
+        size_t idx = std::numeric_limits<size_t>::max();
+
+        for (size_t i = 0; i < collated_roots_.size(); ++i) {
+          vm::CellSlice cs{vm::NoVm{}, collated_roots_[i]};
+          if (cs.special_type() != vm::Cell::SpecialType::MerkleProof) {
+            continue;
+          }
+
+          auto ref = cs.prefetch_ref(0);
+
+          if (ref->get_hash(0) == state_hash) {
+            idx = i;
+            break;
+          }
+        }
+
+        CHECK(idx != std::numeric_limits<size_t>::max());
+
+        block::ShardState state;
+        state
+            .unpack_state_ext(previous_block, std::move(state_root), global_id_, mc_seqno_, after_split_,
+                              after_split_ | after_merge_,
+                              [this](ton::BlockSeqno mc_seqno) {
+                                Ref<MasterchainStateQ> masterchain_state;
+                                return request_aux_mc_state(mc_seqno, masterchain_state);
+                              })
+            .ensure();
+
+        // std::cout << state.account_dict_->get_root_cell()->get_hash().to_hex() << std::endl;
+
+        states.push_back({std::move(state), idx});
+      }
+
+      account_blocks_dict_->check_for_each_extra(
+          [&](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) -> bool {
+            auto account = unpack_account(key);
+
+            // std::cout << "=== account " << key.to_hex(256) << std::endl;
+            bool changed = false;
+            if (!account->code.is_null()) {
+              // std::cout << account->code->get_hash().to_hex() << std::endl;
+              account->code = repack_state(account->code, repacked_cells_, changed);
+              // std::cout << account->code->get_hash().to_hex() << std::endl;
+            }
+            if (!account->library.is_null()) {
+              // std::cout << account->library->get_hash().to_hex() << std::endl;
+              account->library = repack_state(account->library, repacked_cells_, changed);
+              // std::cout << account->library->get_hash().to_hex() << std::endl;
+            }
+            if (!account->data.is_null()) {
+              // std::cout << account->data->get_hash().to_hex() << std::endl;
+              account->data = repack_state(account->data, repacked_cells_, changed);
+              // std::cout << account->data->get_hash().to_hex() << std::endl;
+            }
+
+            if (changed) {
+              int update_cnt = 0;
+              for (auto& [previous_state, idx] : states) {
+                auto [account_cell, _] = previous_state.account_dict_->lookup_extra(key, key_len);
+
+                if (account_cell.is_null()) {
+                  continue;
+                }
+
+                ++update_cnt;
+
+                auto new_account_cell = repack_account(account_cell, 0, *account);
+                bool res = previous_state.account_dict_->set(key, key_len, vm::CellSlice{vm::NoVm{}, new_account_cell},
+                                                             vm::AugmentedDictionary::SetMode::Replace);
+                // std::cout << "after set" << std::endl;
+                CHECK(res);
+              }
+
+              CHECK(update_cnt == 1);
+            }
+
+            return true;
+          });
+
+      for (auto& [previous_state, idx] : states) {
+        std::cout << previous_state.account_dict_->get_root_cell()->get_hash().to_hex() << std::endl;
+        auto replacement = drop_virtualization(previous_state.account_dict_->get_root_cell());
+        std::cout << replacement->get_hash(0).to_hex() << " " << replacement->get_hash(1).to_hex() << std::endl;
+        int replaced_cnt = 0;
+        collated_roots_[idx] = repack_root(collated_roots_[idx], replacement, -1, replaced_cnt);
+        CHECK(replaced_cnt == 1);
+      }
+
+      updated_collated_data_ = vm::std_boc_serialize_multi(collated_roots_).move_as_ok();
+    }
+
     if (!precheck_account_transactions()) {
       return reject_query("invalid collection of account transactions in ShardAccountBlocks");
     }
