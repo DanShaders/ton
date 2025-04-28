@@ -5270,9 +5270,11 @@ Ref<vm::Cell> repack_state(Ref<vm::Cell> cell, std::map<vm::CellHash, Ref<vm::Ce
   return vm::DataCell::create({cs.data(), (cs.size() + 7) / 8}, cs.size(), references, cs.is_special()).move_as_ok();
 }
 
-Ref<vm::Cell> repack_account(Ref<vm::CellSlice> cs, int state, block::Account& account) {
-  CHECK(cs.not_null());
+Ref<vm::Cell> repack_account(Ref<vm::Cell> cell, int state, block::Account& account) {
+  CHECK(cell.not_null());
   std::vector<Ref<vm::Cell>> references;
+
+  vm::CellSlice cs{vm::NoVm{}, cell};
 
   if (state == 1) {
     std::vector<Ref<vm::Cell>> expected_refs;
@@ -5282,22 +5284,21 @@ Ref<vm::Cell> repack_account(Ref<vm::CellSlice> cs, int state, block::Account& a
     }
 
     // std::cout << "got " << cs->size_refs() << " refs" << std::endl;
-    CHECK(expected_refs.size() == cs->size_refs());
-    for (unsigned i = 0; i < cs->size_refs(); ++i) {
-      CHECK(expected_refs[i]->get_hash() == cs->prefetch_ref(i)->get_hash());
+    CHECK(expected_refs.size() == cs.size_refs());
+    for (unsigned i = 0; i < cs.size_refs(); ++i) {
+      CHECK(expected_refs[i]->get_hash() == cs.prefetch_ref(i)->get_hash());
     }
     references = expected_refs;
   } else {
-    for (unsigned i = 0; i < cs->size_refs(); ++i) {
-      auto ref = make_ref<vm::CellSlice>(vm::NoVm{}, cs->prefetch_ref(i));
-      references.push_back(repack_account(ref, state + 1, account));
+    for (unsigned i = 0; i < cs.size_refs(); ++i) {
+      references.push_back(repack_account(cs.prefetch_ref(i), state + 1, account));
     }
   }
 
   unsigned char buffer[128];
-  td::bitstring::bits_memcpy(buffer, cs->data_bits(), cs->size());
+  td::bitstring::bits_memcpy(buffer, cs.data_bits(), cs.size());
 
-  return vm::DataCell::create({buffer, 128}, cs->size(), references, cs->is_special()).move_as_ok();
+  return vm::DataCell::create({buffer, 128}, cs.size(), references, cs.is_special()).move_as_ok();
 }
 
 Ref<vm::Cell> drop_virtualization(Ref<vm::Cell> cell) {
@@ -5388,9 +5389,11 @@ bool ContestValidateQuery::try_validate() {
       return reject_query("cannot unpack block data");
     }
 
+    std::cout << "updating states" << std::endl;
     {
       struct StateToUpdate {
         block::ShardState state;
+        Ref<vm::Cell> accounts;
         size_t idx;
       };
       std::vector<StateToUpdate> states;
@@ -5431,8 +5434,11 @@ bool ContestValidateQuery::try_validate() {
 
         // std::cout << state.account_dict_->get_root_cell()->get_hash().to_hex() << std::endl;
 
-        states.push_back({std::move(state), idx});
+        auto accounts = state.account_dict_->get_root_cell();
+        states.push_back({std::move(state), accounts, idx});
       }
+
+      std::cout << "good" << std::endl;
 
       account_blocks_dict_->check_for_each_extra(
           [&](Ref<vm::CellSlice> value, Ref<vm::CellSlice> extra, td::ConstBitPtr key, int key_len) -> bool {
@@ -5458,20 +5464,23 @@ bool ContestValidateQuery::try_validate() {
 
             if (changed) {
               int update_cnt = 0;
-              for (auto& [previous_state, idx] : states) {
+              for (auto& [previous_state, accounts, idx] : states) {
                 auto [account_cell, _] = previous_state.account_dict_->lookup_extra(key, key_len);
 
                 if (account_cell.is_null()) {
                   continue;
                 }
 
+                auto better_account_cell = account_cell->prefetch_ref(0);
+
                 ++update_cnt;
 
-                auto new_account_cell = repack_account(account_cell, 0, *account);
-                bool res = previous_state.account_dict_->set(key, key_len, vm::CellSlice{vm::NoVm{}, new_account_cell},
-                                                             vm::AugmentedDictionary::SetMode::Replace);
-                // std::cout << "after set" << std::endl;
-                CHECK(res);
+                auto new_account_cell = repack_account(better_account_cell, 1, *account);
+
+                int replaced = 0;
+                accounts = repack_root(accounts, new_account_cell, 0, replaced);
+                std::cout << "replaced " << replaced << " cells" << std::endl;
+                CHECK(replaced == 1);
               }
 
               CHECK(update_cnt == 1);
@@ -5480,9 +5489,9 @@ bool ContestValidateQuery::try_validate() {
             return true;
           });
 
-      for (auto& [previous_state, idx] : states) {
+      for (auto& [previous_state, accounts, idx] : states) {
         std::cout << previous_state.account_dict_->get_root_cell()->get_hash().to_hex() << std::endl;
-        auto replacement = drop_virtualization(previous_state.account_dict_->get_root_cell());
+        auto replacement = drop_virtualization(accounts);
         std::cout << replacement->get_hash(0).to_hex() << " " << replacement->get_hash(1).to_hex() << std::endl;
         int replaced_cnt = 0;
         collated_roots_[idx] = repack_root(collated_roots_[idx], replacement, -1, replaced_cnt);
@@ -5491,6 +5500,7 @@ bool ContestValidateQuery::try_validate() {
 
       updated_collated_data_ = vm::std_boc_serialize_multi(collated_roots_).move_as_ok();
     }
+    std::cout << "state updated" << std::endl;
 
     if (!precheck_account_transactions()) {
       return reject_query("invalid collection of account transactions in ShardAccountBlocks");
