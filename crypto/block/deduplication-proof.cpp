@@ -15,12 +15,67 @@
     along with TON Blockchain.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "deduplication-proof.h"
+#include "td/utils/benchmark.h"
 #include "vm/cells/CellSlice.h"
 #include "vm/excno.hpp"
+#include <queue>
 
 namespace block {
 
 using detail::Treap;
+
+namespace {
+
+struct Element {
+  static Element min() {
+    return {0, 0, 0, 0};
+  }
+
+  static Element max() {
+    static constexpr auto value = std::numeric_limits<td::uint64>::max();
+    return {value, value, value, value};
+  }
+
+  static Element from_vm_hash(vm::CellHash hash) {
+    Element result;
+    std::memcpy(&result, hash.as_slice().begin(), vm::CellTraits::hash_bytes);
+    return result;
+  }
+
+  Element priority() const {
+    return {td::bswap64(d), td::bswap64(c), td::bswap64(b), td::bswap64(a)};
+  }
+
+  std::strong_ordering operator<=>(Element const&) const = default;
+
+  td::uint64 a, b, c, d;
+};
+
+static_assert(sizeof(Element) == vm::CellTraits::hash_bytes);
+
+std::ostream& operator<<(std::ostream& out, Element const& element) {
+  return out << "{" << element.a << " " << element.b << " " << element.c << " " << element.d << "}";
+}
+
+}  // namespace
+
+namespace detail {
+
+struct Node {
+  Ref<vm::Cell> cell;
+
+  Element key;
+  Element priority;
+  td::uint64 reference_count{0};
+  int merkle_depth{0};
+
+  bool is_loaded{false};
+
+  Treap left{nullptr};
+  Treap right{nullptr};
+};
+
+}  // namespace detail
 
 namespace {
 
@@ -35,11 +90,10 @@ void load_node_if_needed(Treap const& node) {
   }
 
   int off = 0;
-  std::memcpy(node->hash.as_slice().data(), cs.data() + off, vm::CellTraits::hash_bytes);
+  std::memcpy(&node->key, cs.data() + off, vm::CellTraits::hash_bytes);
   off += vm::CellTraits::hash_bytes;
 
-  node->priority = node->hash;
-  std::reverse(node->priority.as_slice().begin(), node->priority.as_slice().end());
+  node->priority = node->key.priority();
 
   std::memcpy(&node->reference_count, cs.data() + off, sizeof(td::uint64));
   off += sizeof(td::uint64);
@@ -63,22 +117,22 @@ void load_node_if_needed(Treap const& node) {
   node->is_loaded = true;
 }
 
-detail::OverlayEntry find(Treap const& root, vm::CellHash hash) {
+detail::OverlayEntry find(Treap const& root, Element const& key) {
   load_node_if_needed(root);
 
-  if (hash == root->hash) {
+  if (key == root->key) {
     return {
         .ref_cnt = root->reference_count,
         .pending_ref_cnt = root->reference_count,
         .merkle_depth = root->merkle_depth,
     };
-  } else if (hash < root->hash) {
+  } else if (key < root->key) {
     if (root->left) {
-      return find(root->left, hash);
+      return find(root->left, key);
     }
   } else {
     if (root->right) {
-      return find(root->right, hash);
+      return find(root->right, key);
     }
   }
 
@@ -86,7 +140,7 @@ detail::OverlayEntry find(Treap const& root, vm::CellHash hash) {
 }
 
 Treap node_with_new_children(Treap node, Treap&& left, Treap&& right) {
-  return std::make_shared<detail::Node>(Ref<vm::Cell>{}, node->hash, node->priority, node->reference_count,
+  return std::make_shared<detail::Node>(Ref<vm::Cell>{}, node->key, node->priority, node->reference_count,
                                         node->merkle_depth, true, std::move(left), std::move(right));
 }
 
@@ -108,25 +162,27 @@ Treap merge(Treap const& left, Treap const& right) {
   }
 }
 
-std::pair<Treap, Treap> split(Treap const& root, vm::CellHash hash) {
+std::pair<Treap, Treap> split(Treap const& root, Element const& key) {
   if (!root) {
     return {nullptr, nullptr};
   }
 
   load_node_if_needed(root);
 
-  if (hash == root->hash) {
+  if (key == root->key) {
     return {root->left, root->right};
-  } else if (hash < root->hash) {
-    auto [left, right] = split(root->left, hash);
+  } else if (key < root->key) {
+    auto [left, right] = split(root->left, key);
     return {std::move(left), node_with_new_children(root, std::move(right), std::shared_ptr{root->right})};
   } else {
-    auto [left, right] = split(root->right, hash);
+    auto [left, right] = split(root->right, key);
     return {node_with_new_children(root, std::shared_ptr{root->left}, std::move(left)), std::move(right)};
   }
 }
 
 }  // namespace
+
+DeduplicationProof::~DeduplicationProof() = default;
 
 std::unique_ptr<DeduplicationProof> DeduplicationProof::create_empty() {
   return create({}, 0, 0, {});
@@ -222,23 +278,150 @@ Ref<vm::Cell> DeduplicationProofMutator::materialize() {
     return {};
   }
 
+  if (treap_rollback_idx_ == rollback_list_.size()) {
+    return treap_ ? treap_->cell : Ref<vm::Cell>{};
+  }
+
   // LOG_CHECK(treap_rollback_idx_ <= rollback_list_.size())
   //     << "FIXME: materialize is not implemented for not up-to-date treap on transaction entry";
 
   try {
     // apply changes from treap_rollback_idx_ to rollback_list_.size().
+    struct Update {
+      Element key;
+      td::uint64 ref_cnt;
+      int merkle_depth;
+    };
+
+    std::vector<Update> updates;
+    updates.reserve(rollback_list_.size() - treap_rollback_idx_);
+
     for (size_t i = treap_rollback_idx_; i < rollback_list_.size(); ++i) {
       auto [hash, _] = rollback_list_[i];
-      auto [left, right] = split(treap_, hash);
       auto& entry = overlay_[hash];
-      if (entry.pending_ref_cnt == 0) {
-        treap_ = merge(left, right);
+      // std::cout << Element::from_vm_hash(hash) << " -> " << entry.pending_ref_cnt << " " << entry.ref_cnt << std::endl;
+      updates.push_back({
+          .key = Element::from_vm_hash(hash),
+          .ref_cnt = entry.pending_ref_cnt,
+          .merkle_depth = entry.merkle_depth,
+      });
+    }
+
+    std::sort(updates.begin(), updates.end(), [](Update const& a, Update const& b) { return a.key < b.key; });
+
+    size_t n = updates.size();
+
+    std::vector<std::pair<Element, size_t>> segment_tree(2 * n);
+
+    for (size_t i = 0; i < n; ++i) {
+      segment_tree[n + i] = {updates[i].key.priority(), i};
+    }
+    for (size_t i = n - 1; i > 0; --i) {
+      segment_tree[i] = std::min(segment_tree[2 * i], segment_tree[2 * i + 1]);
+    }
+
+    struct CurrentNode {
+      bool operator>(CurrentNode const& other) const {
+        return priority > other.priority;
+      }
+
+      Element priority;
+
+      Treap node;
+      std::optional<Element> range_left;
+      std::optional<Element> range_right;
+    };
+
+    std::priority_queue<CurrentNode, std::vector<CurrentNode>, std::greater<CurrentNode>> current_nodes;
+
+    auto push_node = [&](Treap const& node, std::optional<Element> range_left, std::optional<Element> range_right) {
+      if (!node) {
+        return;
+      }
+
+      load_node_if_needed(node);
+      current_nodes.push({
+          .priority = node->priority,
+          .node = node,
+          .range_left = range_left,
+          .range_right = range_right,
+      });
+    };
+
+    push_node(treap_, {}, {});
+
+    treap_ = nullptr;
+
+    // std::cout << "materialize" << std::endl;
+
+    while (!current_nodes.empty() || segment_tree[1].second != n) {
+      size_t st_index = segment_tree[1].second;
+      auto& st_priority = segment_tree[1].first;
+      bool st_empty = st_index == n;
+      bool cn_empty = current_nodes.empty();
+
+      auto find_segment = [&](Element const& key) {
+        // std::cout << "trying to find segment for " << key << std::endl;
+        Treap* node = &treap_;
+        std::optional<Element> range_left;
+        std::optional<Element> range_right;
+
+        while (node->get() != nullptr) {
+          // std::cout << "at " << node << " " << node->get() << " " << (*node)->is_loaded << std::endl;
+          CHECK((*node)->is_loaded && (*node)->key != key);
+          if (key < (*node)->key) {
+            range_right = (*node)->key;
+            node = &(*node)->left;
+          } else {
+            range_left = (*node)->key;
+            node = &(*node)->right;
+          }
+        }
+        return std::tuple{node, range_left, range_right};
+      };
+
+      auto maybe_leave_alone = [&](Treap const& treap, std::optional<Element> original_left,
+                                   std::optional<Element> original_right) {};
+
+      auto remove_update = [&] {
+        segment_tree[n + st_index] = {Element::max(), n};
+        size_t i = n + st_index;
+        while (i /= 2) {
+          segment_tree[i] = std::min(segment_tree[2 * i], segment_tree[2 * i + 1]);
+        }
+      };
+
+      if (cn_empty || (!st_empty && st_priority < current_nodes.top().priority)) {
+        auto& update = updates[st_index];
+        if (update.ref_cnt != 0) {
+          // std::cout << "adding update " << update.key << std::endl;
+          auto [place, _1, _2] = find_segment(update.key);
+          *place = std::make_shared<detail::Node>(Ref<vm::Cell>{}, update.key, st_priority, update.ref_cnt,
+                                                  update.merkle_depth, true);
+        }
+        remove_update();
+      } else if (auto cn_priority = current_nodes.top().priority; !st_empty && st_priority == cn_priority) {
+        auto [_, node, range_left, range_right] = current_nodes.top();
+        auto& update = updates[st_index];
+        if (node->reference_count == update.ref_cnt) {
+          // std::cout << "leaving node alone" << node->key << std::endl;
+          maybe_leave_alone(node, range_left, range_right);
+        } else {
+          if (update.ref_cnt != 0) {
+            // std::cout << "applying update " << update.key << std::endl;
+            auto [place, _1, _2] = find_segment(update.key);
+            *place = std::make_shared<detail::Node>(Ref<vm::Cell>{}, update.key, st_priority, update.ref_cnt,
+                                                    update.merkle_depth, true);
+          }
+          push_node(node->left, range_left, node->key);
+          push_node(node->right, node->key, range_right);
+        }
+        remove_update();
+        current_nodes.pop();
       } else {
-        auto priority = hash;
-        std::reverse(priority.as_slice().begin(), priority.as_slice().end());
-        auto node = std::make_shared<detail::Node>(Ref<vm::Cell>{}, hash, priority, entry.pending_ref_cnt,
-                                                   entry.merkle_depth, true);
-        treap_ = merge(left, merge(node, right));
+        auto [_, node, range_left, range_right] = current_nodes.top();
+        maybe_leave_alone(node, range_left, range_right);
+        current_nodes.pop();
       }
     }
   } catch (...) {
@@ -250,7 +433,7 @@ Ref<vm::Cell> DeduplicationProofMutator::materialize() {
   CHECK(transaction_idx_ != std::numeric_limits<int>::max());
   ++transaction_idx_;
 
-  return treap_->cell;
+  return treap_ ? treap_->cell : Ref<vm::Cell>{};
 }
 
 DeduplicationProofMutator::DeduplicationProofMutator(DeduplicationProof const* proof)
@@ -272,13 +455,17 @@ int DeduplicationProofMutator::update_cell(Ref<vm::Cell> const& cell, int delta)
 
   auto it = overlay_.find(hash);
   if (it == overlay_.end()) {
-    auto entry = overlay_is_complete_ || !treap_ ? detail::OverlayEntry{} : find(treap_, hash);
+    detail::OverlayEntry entry{};
+    if (!overlay_is_complete_ && treap_) {
+      entry = find(treap_, Element::from_vm_hash(hash));
+    }
     it = overlay_.insert({hash, entry}).first;
   }
   auto& pending_change = it->second;
 
   if (pending_change.version != transaction_idx_) {
     pending_change.rollback_index = rollback_list_.size();
+    pending_change.version = transaction_idx_;
     rollback_list_.push_back({hash, pending_change.pending_ref_cnt});
   }
   pending_change.pending_ref_cnt += delta;

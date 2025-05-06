@@ -28,22 +28,7 @@ using td::Ref;
 namespace detail {
 
 struct Node;
-
 using Treap = std::shared_ptr<Node>;
-
-struct Node {
-  Ref<vm::Cell> cell;
-
-  vm::CellHash hash;
-  vm::CellHash priority;
-  td::uint64 reference_count{0};
-  int merkle_depth{0};
-
-  bool is_loaded{false};
-
-  Treap left{nullptr};
-  Treap right{nullptr};
-};
 
 struct OverlayEntry {
   td::uint64 ref_cnt{0};
@@ -62,6 +47,8 @@ class DeduplicationProofMutator;
 
 class DeduplicationProof {
  public:
+  ~DeduplicationProof();
+
   static std::unique_ptr<DeduplicationProof> create_empty();
 
   static std::unique_ptr<DeduplicationProof> create(Ref<vm::Cell>&& treap, td::uint64 cells, td::uint64 bits,
@@ -135,7 +122,7 @@ class DeduplicationProofMutator {
   detail::Treap treap_;
   detail::Overlay& overlay_;
   td::uint64 merkle_depths_[merkle_depth_cutoff + 1]{};
-  std::vector<std::pair<vm::CellHash, int>> rollback_list_;
+  std::vector<std::pair<vm::CellHash, td::uint64>> rollback_list_;
   bool is_commited_{false};
   bool overlay_is_complete_;
   int& transaction_idx_;
