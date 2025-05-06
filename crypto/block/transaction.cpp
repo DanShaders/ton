@@ -3064,38 +3064,50 @@ td::Status Transaction::check_state_limits(const SizeLimitsConfig& size_limits, 
       cell_equal(account.library, new_library)) {
     return td::Status::OK();
   }
-  AccountStorageStat storage_stat;
-  if (update_storage_stat && account.account_storage_stat) {
-    storage_stat = AccountStorageStat{&account.account_storage_stat.value()};
-  }
-  {
-    TD_PERF_COUNTER(transaction_storage_stat_a);
-    td::Timer timer;
-    TRY_STATUS(storage_stat.replace_roots({new_code, new_data, new_library}, /* check_merkle_depth = */ true));
-    if (timer.elapsed() > 0.1) {
-      LOG(INFO) << "Compute used storage (1) took " << timer.elapsed() << "s";
+
+  auto do_check = [&](DeduplicationProofMutator& mutator) {
+    {
+      TD_PERF_COUNTER(transaction_storage_stat_a);
+      td::Timer timer;
+      mutator.update({{new_code, new_data, new_library}});
+      if (timer.elapsed() > 0.1) {
+        LOG(INFO) << "Compute used storage (1) took " << timer.elapsed() << "s";
+      }
     }
+
+    if (mutator.max_merkle_depth_of_new_cell() > 2) {
+      return td::Status::Error(PSTRING() << "max merkle depth of a cell in account state is too big");
+    }
+    if (mutator.cells() > size_limits.max_acc_state_cells || mutator.bits() > size_limits.max_acc_state_bits) {
+      return td::Status::Error(PSTRING() << "account state is too big: cells=" << mutator.cells() << ", bits="
+                                         << mutator.bits() << " (max cells=" << size_limits.max_acc_state_cells
+                                         << ", max bits=" << size_limits.max_acc_state_bits << ")");
+    }
+    if (account.is_masterchain() && !cell_equal(account.library, new_library)) {
+      auto libraries_count = get_public_libraries_count(new_library);
+      if (libraries_count > size_limits.max_acc_public_libraries) {
+        return td::Status::Error(PSTRING() << "too many public libraries: " << libraries_count << " (max "
+                                           << size_limits.max_acc_public_libraries << ")");
+      }
+    }
+    return td::Status::OK();
+  };
+
+  if (!update_storage_stat) {
+    auto deduplicator = DeduplicationProof::create_empty();
+    auto mutator = deduplicator->start_transaction();
+    auto status = do_check(*mutator);
+    deduplicator->commit(std::move(mutator));  // Commit changes as happy path is faster than rollback.
+    return status;
   }
 
-  if (storage_stat.get_total_cells() > size_limits.max_acc_state_cells ||
-      storage_stat.get_total_bits() > size_limits.max_acc_state_bits) {
-    return td::Status::Error(PSTRING() << "account state is too big: cells=" << storage_stat.get_total_cells()
-                                       << ", bits=" << storage_stat.get_total_bits()
-                                       << " (max cells=" << size_limits.max_acc_state_cells
-                                       << ", max bits=" << size_limits.max_acc_state_bits << ")");
+  if (!account.account_storage_stat) {
+    new_deduplication_proof = DeduplicationProof::create_empty();
+    new_account_storage_stat = new_deduplication_proof->start_transaction();
+  } else {
+    new_account_storage_stat = account.account_storage_stat->start_transaction();
   }
-  if (account.is_masterchain() && !cell_equal(account.library, new_library)) {
-    auto libraries_count = get_public_libraries_count(new_library);
-    if (libraries_count > size_limits.max_acc_public_libraries) {
-      return td::Status::Error(PSTRING() << "too many public libraries: " << libraries_count << " (max "
-                                         << size_limits.max_acc_public_libraries << ")");
-    }
-  }
-  if (update_storage_stat) {
-    // storage_stat will be reused in compute_state()
-    new_account_storage_stat.value_force() = std::move(storage_stat);
-  }
-  return td::Status::OK();
+  return do_check(*new_account_storage_stat);
 }
 
 /**
@@ -3405,15 +3417,16 @@ bool Transaction::compute_state(const SerializeConfig& cfg) {
 
   // If we need AccountStorageStat, compute it.
   if (need_account_storage_stat) {
-    if (!new_account_storage_stat && account.account_storage_stat) {
-      new_account_storage_stat = AccountStorageStat(&account.account_storage_stat.value());
+    if (!new_account_storage_stat) {
+      if (!account.account_storage_stat) {
+        new_deduplication_proof = DeduplicationProof::create_empty();
+        new_account_storage_stat = new_deduplication_proof->start_transaction();
+      } else {
+        new_account_storage_stat = account.account_storage_stat->start_transaction();
+      }
     }
     // Don't check Merkle depth and size here - they were checked in check_state_limits
-    td::Status S = new_account_storage_stat.value_force().replace_roots(new_storage_for_stat->prefetch_all_refs());
-    if (S.is_error()) {
-      LOG(ERROR) << "Cannot recompute storage stats for account " << account.addr.to_hex() << ": " << S.move_as_error();
-      return false;
-    }
+    new_account_storage_stat->update(new_storage_for_stat->prefetch_all_refs());
   }
 
   if (!storage_refs_changed) {
@@ -3424,8 +3437,8 @@ bool Transaction::compute_state(const SerializeConfig& cfg) {
   } else {
     // Root of AccountStorage is not counted in AccountStorageStat
     new_storage_used = {
-        .cells = new_account_storage_stat.value().get_total_cells() + 1,
-        .bits = new_account_storage_stat.value().get_total_bits() + new_storage_for_stat->size(),
+        .cells = new_account_storage_stat->cells() + 1,
+        .bits = new_account_storage_stat->bits() + new_storage_for_stat->size(),
     };
   }
 
@@ -3437,14 +3450,9 @@ bool Transaction::compute_state(const SerializeConfig& cfg) {
         new_storage_dict_hash = account.storage_dict_hash;
       }
     } else {
-      auto deduplication_state_hash = new_account_storage_stat.value().get_dict_hash();
-      if (deduplication_state_hash.is_error()) {
-        LOG(ERROR) << "Cannot compute storage dict hash for account " << account.addr.to_hex() << ": "
-                   << deduplication_state_hash.move_as_error();
-        return false;
-      }
+      auto deduplication_proof = new_account_storage_stat->materialize();
       if (cfg.deduplication_state_hash == SerializeConfig::DeduplicationStateHash::Store) {
-        new_storage_dict_hash = deduplication_state_hash.move_as_ok();
+        new_storage_dict_hash = td::Bits256{deduplication_proof->get_hash().bits()};
       }
     }
   }
@@ -3829,9 +3837,10 @@ Ref<vm::Cell> Transaction::commit(Account& acc) {
   acc.storage_used = new_storage_used;
   if (new_account_storage_stat) {
     if (acc.account_storage_stat) {
-      acc.account_storage_stat.value().apply_child_stat(std::move(new_account_storage_stat.value()));
+      acc.account_storage_stat->commit(std::move(new_account_storage_stat));
     } else {
-      acc.account_storage_stat = std::move(new_account_storage_stat);
+      new_deduplication_proof->commit(std::move(new_account_storage_stat));
+      acc.account_storage_stat = std::move(new_deduplication_proof);
     }
   }
   acc.storage_dict_hash = new_storage_dict_hash;

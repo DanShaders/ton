@@ -17,7 +17,7 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 #pragma once
-#include "account-storage-stat.h"
+#include "deduplication-proof.h"
 #include "common/refcnt.hpp"
 #include "common/refint.h"
 #include "vm/cells.h"
@@ -283,7 +283,7 @@ struct Account {
   ton::UnixTime last_paid;
   StorageUsed storage_used;
   td::optional<td::Bits256> storage_dict_hash;
-  td::optional<AccountStorageStat> account_storage_stat;
+  std::unique_ptr<DeduplicationProof> account_storage_stat;
 
   block::CurrencyCollection balance;
   td::RefInt256 due_payment;
@@ -395,7 +395,8 @@ struct Transaction {
   std::unique_ptr<ActionPhase> action_phase;
   std::unique_ptr<BouncePhase> bounce_phase;
   StorageUsed new_storage_used;
-  td::optional<AccountStorageStat> new_account_storage_stat;
+  std::unique_ptr<DeduplicationProof> new_deduplication_proof;
+  std::unique_ptr<DeduplicationProofMutator> new_account_storage_stat;
   td::optional<td::Bits256> new_storage_dict_hash;
   bool gas_limit_overridden{false};
   Transaction(const Account& _account, int ttype, ton::LogicalTime req_start_lt, ton::UnixTime _now,
