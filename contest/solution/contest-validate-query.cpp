@@ -765,7 +765,7 @@ bool ContestValidateQuery::fetch_config_params() {
     serialize_cfg_.extra_currency_v2 = config_->get_global_version() >= 10;
     serialize_cfg_.deduplication_state_hash = config_->get_global_version() >= 11
                                                   ? block::SerializeConfig::DeduplicationStateHash::Store
-                                                  : block::SerializeConfig::DeduplicationStateHash::No;
+                                                  : block::SerializeConfig::DeduplicationStateHash::OnlyCompute;
   }
   {
     // fetch block_grams_created
