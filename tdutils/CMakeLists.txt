@@ -1,5 +1,7 @@
 option(TDUTILS_MIME_TYPE "Generate mime types conversion (gperf is required)" ON)
 
+set(TD_HAVE_ZLIB 1)
+set(TD_HAVE_LZ4 1)
 set(TD_HAVE_OPENSSL 1)
 
 if (WIN32)
@@ -12,15 +14,6 @@ endif()
 
 if (NOT DEFINED CMAKE_INSTALL_LIBDIR)
   set(CMAKE_INSTALL_LIBDIR "lib")
-endif()
-
-find_package(PkgConfig REQUIRED)
-if (NOT ZLIB_FOUND)
-  pkg_check_modules(ZLIB zlib)
-endif()
-if (ZLIB_FOUND)
-  set(TD_HAVE_ZLIB 1)
-  message(STATUS "Found ZLIB: ${ZLIB_INCLUDE_DIR} ${ZLIB_LIBRARIES}")
 endif()
 
 if (CRC32C_FOUND)
@@ -117,6 +110,7 @@ set(TDUTILS_SOURCE
   td/utils/TsFileLog.cpp
   td/utils/unicode.cpp
   td/utils/utf8.cpp
+  td/utils/lz4.cpp
 
   td/utils/port/Clocks.h
   td/utils/port/config.h
@@ -273,19 +267,6 @@ if (TDUTILS_MIME_TYPE)
   )
 endif()
 
-if (NOT LZ4_FOUND)
-  pkg_check_modules(LZ4 REQUIRED liblz4)
-endif()
-
-if (LZ4_FOUND)
-  set(TD_HAVE_LZ4 1)
-  set(TDUTILS_SOURCE
-    ${TDUTILS_SOURCE}
-    td/utils/lz4.cpp
-    td/utils/lz4.h
-    )
-endif()
-
 set(TDUTILS_TEST_SOURCE
   ${CMAKE_CURRENT_SOURCE_DIR}/test/buffer.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test/ConcurrentHashMap.cpp
@@ -330,31 +311,9 @@ if (NOT CMAKE_CROSSCOMPILING AND TDUTILS_MIME_TYPE)
   add_dependencies(tdutils tdmime_auto)
 endif()
 
-if (DEFINED CMAKE_THREAD_LIBS_INIT)
-  target_link_libraries(tdutils PUBLIC ${CMAKE_THREAD_LIBS_INIT})
-endif()
 target_include_directories(tdutils PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>)
-
-if (OPENSSL_FOUND)
-  target_link_libraries(tdutils PRIVATE ${OPENSSL_CRYPTO_LIBRARY} ${CMAKE_DL_LIBS} ${ZLIB_LIBRARIES})
-  target_include_directories(tdutils SYSTEM PRIVATE ${OPENSSL_INCLUDE_DIR})
-endif()
-
-if (ZLIB_FOUND)
-  target_link_libraries(tdutils PRIVATE ${ZLIB_LIBRARIES})
-  target_include_directories(tdutils SYSTEM PRIVATE ${ZLIB_INCLUDE_DIR})
-endif()
-
-if (CRC32C_FOUND)
-  target_link_libraries(tdutils PRIVATE crc32c)
-endif()
-
-if (LZ4_FOUND)
-  message(STATUS "Found LZ4 ${LZ4_LIBRARIES} ${LZ4_INCLUDE_DIRS}")
-  target_link_libraries(tdutils PRIVATE ${LZ4_LIBRARIES})
-  target_include_directories(tdutils SYSTEM PRIVATE ${LZ4_INCLUDE_DIRS})
-  target_link_directories(tdutils PUBLIC ${LZ4_LIBRARY_DIRS})
-endif()
+target_link_libraries(tdutils PUBLIC Threads::Threads)
+target_link_libraries(tdutils PRIVATE OpenSSL::Crypto ZLIB::ZLIB PkgConfig::lz4 crc32c)
 
 if (ABSL_FOUND)
   target_link_libraries_system(tdutils absl::flat_hash_map absl::flat_hash_set absl::hash)

@@ -198,12 +198,8 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 
-if (NOT ZLIB_FOUND)
-  find_package(ZLIB REQUIRED)
-else()
-  message(STATUS "Using zlib ${ZLIB_LIBRARIES}")
-endif()
-
+find_package(ZLIB REQUIRED)
+pkg_check_modules(lz4 REQUIRED IMPORTED_TARGET liblz4)
 
 if (TON_ARCH AND NOT MSVC)
   CHECK_CXX_COMPILER_FLAG( "-march=${TON_ARCH}" COMPILER_OPT_ARCH_SUPPORTED )
