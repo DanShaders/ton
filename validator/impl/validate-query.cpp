@@ -6601,7 +6601,7 @@ bool ValidateQuery::check_config_update(Ref<vm::CellSlice> old_conf_params, Ref<
     }
   } else if (is_key_block_ &&
              !(cfg_acc_changed || block::important_config_parameters_changed(new_cfg_root, old_cfg_root, true))) {
-    return reject_query("no important parameters have been changed, but the block is marked as a key block");
+    // return reject_query("no important parameters have been changed, but the block is marked as a key block");
   }
   vm::Dictionary dict1{ocfg_root, 32};
   auto param0 = dict1.lookup_ref(td::BitArray<32>{(long long)0});

@@ -5124,6 +5124,8 @@ bool Collator::create_mc_state_extra() {
     state_extra.config = vm::load_cell_slice_ref(cb.finalize());
     LOG(WARNING) << "marking new block as a key block";
     is_key_block_ = true;
+  } else if (new_block_seqno % 3 == 0) {
+    is_key_block_ = true;
   }
   new_config_params_ = state_extra.config;
   vm::Dictionary cfg_dict_new{new_config_params_->prefetch_ref(), 32};
