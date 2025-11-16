@@ -9,16 +9,17 @@ from dataclasses import dataclass
 from enum import IntEnum, auto
 from ipaddress import IPv4Address
 from pathlib import Path
-from typing import cast, final, override
+from typing import final, override
 
-from pytonlib import TonlibClient, TonlibError  # pyright: ignore[reportMissingTypeStubs]
+from tonlib import TonlibClient, TonlibError
 
-from tl import JSONSerializable, TLObject
+from tl import TLObject
+from .conf import NODE_IP_ADDRESS
 
 from .install import Install
 from .key import Key
 from .log_streamer import LogStreamer
-from .tl import ton_api, tonlib_api
+from .tl import ton_api
 from .zerostate import NetworkConfig, Zerostate, create_zerostate
 
 l = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ class Network:
         def _new_network_address(self) -> _IPv4AddressAndPort:
             self._network._port += 1
             return _IPv4AddressAndPort(
-                IPv4Address("127.0.42.239"),
+                IPv4Address(NODE_IP_ADDRESS),
                 self._network._port,
             )
 
@@ -241,7 +242,7 @@ class Network:
 
         while True:
             try:
-                raw_result = cast(JSONSerializable, await client.get_masterchain_info())  # pyright: ignore[reportUnknownMemberType]
+                mc_info = await client.get_masterchain_info()
             except TonlibError as e:
                 # FIXME: We should really let node notify us that it is ready.
                 try:
@@ -260,7 +261,6 @@ class Network:
                     pass
                 raise
 
-            mc_info = tonlib_api.Blocks_masterchainInfo.from_dict(raw_result)
             assert mc_info.last is not None
 
             if mc_info.last.seqno >= seqno:
@@ -435,7 +435,7 @@ class FullNode(Network.Node):
 
         self._client = TonlibClient(
             ls_index=0,
-            config=config.to_dict(),
+            config=config,
             keystore=str(keystore_dir),
             cdll_path=str(self._install.tonlibjson),
             verbosity_level=3,

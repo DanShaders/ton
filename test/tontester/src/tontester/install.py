@@ -3,6 +3,8 @@ import subprocess
 from pathlib import Path
 from typing import final
 
+from tontester.conf import TONLIBJSON_BIN_PATH
+
 
 @final
 class Install:
@@ -43,7 +45,7 @@ class Install:
 
     @property
     def tonlibjson(self):
-        return self.build_dir / "tonlib/libtonlibjson.so"
+        return self.build_dir / TONLIBJSON_BIN_PATH
 
 
 def run_fift(install: Install, code: str, working_dir: Path):
