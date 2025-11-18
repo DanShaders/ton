@@ -5,7 +5,8 @@ from collections.abc import Mapping, Sequence
 from typing import Callable, Self, TextIO, cast, overload, override
 
 type JSONSerializable = (
-    bool
+    None
+    | bool
     | int
     | float
     | str
@@ -13,8 +14,6 @@ type JSONSerializable = (
     | Sequence["JSONSerializable"]
     | Mapping[str, "JSONSerializable"]
 )
-
-type TLValue = TLObject | bool | list["TLValue"]
 
 
 class TLObject(ABC):
