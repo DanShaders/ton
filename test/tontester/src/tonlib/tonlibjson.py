@@ -8,7 +8,9 @@ import time
 import functools
 import logging
 import typing
+from enum import Enum, auto
 
+from tontester.tl import tonlib_api
 from tl import TLObject, JSONSerializable
 
 import ctypes
@@ -27,51 +29,33 @@ class TonlibNoResponse(TonlibException):
 
 
 class TonlibError(TonlibException):
-    def __init__(self, result: dict[str, JSONSerializable]):
-        self.result: dict[str, JSONSerializable] = result
+    def __init__(self, result: tonlib_api.Error):
+        self.result: tonlib_api.Error = result
         super().__init__()
 
     @property
     def code(self):
-        return int(typing.cast(int, self.result.get('code', 0)))
+        return self.result.code
 
     @override
     def __str__(self) -> str:
-        return typing.cast(str, self.result.get('message', ''))
-
-
-class LiteServerTimeout(TonlibError):
-    pass
-
-
-class BlockNotFound(TonlibError):
-    pass
-
-
-class BlockDeleted(TonlibError):
-    pass
-
-
-class ExternalMessageNotAccepted(TonlibError):
-    pass
+        return self.result.message
 
 
 def parse_tonlib_error(result: dict[str, JSONSerializable]):
     if result.get('@type') == 'error':
-        message = typing.cast(str, result['message'])
-        if 'not in db' in message:
-            return BlockNotFound(result)
-        if "state already gc'd" in message:
-            return BlockDeleted(result)
-        if 'cannot apply external message to current state' in message:
-            return ExternalMessageNotAccepted(result)
-        if 'adnl query timeout' in message:
-            return LiteServerTimeout(result)
-        return TonlibError(result)
+        er = tonlib_api.Error.from_dict(result)
+        return TonlibError(er)
     return None
 
 
-# class TonLib for single liteserver
+class Status(Enum):
+    NONE = auto()
+    FINISHED = auto()
+    CRASHED = auto()
+    STUCK = auto()
+
+
 class TonLib:
     def __init__(self, loop: asyncio.AbstractEventLoop, ls_index: int, cdll_path: str, verbosity_level: int = 0):
         tonlib = ctypes.CDLL(cdll_path)
@@ -107,16 +91,15 @@ class TonLib:
         tonlib_json_client_destroy.argtypes = [ctypes.c_void_p]
         self._tonlib_json_client_destroy: typing.Callable[[int], None] = tonlib_json_client_destroy
 
-        self.futures: dict[str, asyncio.Future[JSONSerializable]] = {}
-        self.loop: asyncio.AbstractEventLoop = loop
-        self.ls_index: int = ls_index
-        self._state: str | None = None  # None, "finished", "crashed", "stuck"
+        self._futures: dict[str, asyncio.Future[JSONSerializable]] = {}
+        self._loop: asyncio.AbstractEventLoop = loop
+        self._ls_index: int = ls_index
+        self._state: Status = Status.NONE
 
         self.is_dead: bool = False
 
         # creating tasks
-        self.read_results_task: asyncio.Task[None] = self.loop.create_task(self.read_results())
-        self.del_expired_futures_task: asyncio.Task[None] = self.loop.create_task(self.del_expired_futures_loop())
+        self._read_results_task: asyncio.Task[None] = self._loop.create_task(self.read_results())
 
     def __del__(self):
         try:
@@ -126,63 +109,49 @@ class TonLib:
             raise RuntimeError(f'Error in tonlibjson.__del__: {ee}')
 
     def send(self, query: JSONSerializable):
-        if not self._is_working:
-            raise RuntimeError(f"TonLib failed with state: {self._state}")
-
+        assert self._is_working, f"TonLib failed with state: {self._state}"
         q = json.dumps(query).encode('utf-8')
-        try:
-            self._tonlib_json_client_send(self._client, q)
-        except Exception as ee:
-            logger.error(f"Exception in tonlibjson.send: {traceback.format_exc()}")
-            raise RuntimeError(f'Error in tonlibjson.send: {ee}')
+        self._tonlib_json_client_send(self._client, q)
 
-    def receive(self, timeout: int = 10) -> JSONSerializable | None:
-        try:
-            result = self._tonlib_json_client_receive(self._client, timeout)
-        except Exception as ee:
-            logger.error(f"Exception in tonlibjson.receive: {traceback.format_exc()}")
-            raise RuntimeError(f'Error in tonlibjson.receive: {ee}')
+    def receive(self, timeout: int = 10) -> JSONSerializable:
+        result = self._tonlib_json_client_receive(self._client, timeout)
         if result is not None:
             result = typing.cast(JSONSerializable, json.loads(result.decode('utf-8')))
         return result
 
-    def execute(self, query: TLObject, timeout: int = 10) -> asyncio.Future[JSONSerializable]:
-        if not self._is_working:
-            raise RuntimeError(f"TonLib failed with state: {self._state}")
+    async def execute(self, query: TLObject, timeout: int = 10) -> JSONSerializable:
+        assert self._is_working, f"TonLib failed with state: {self._state}"
 
-        extra_id = "%s:%s:%s" % (time.time() + timeout, self.ls_index, random.random())
+        extra_id = "%s:%s:%s" % (time.time() + timeout, self._ls_index, random.random())
         query_d = query.to_dict()
         query_d["@extra"] = extra_id
 
-        future_result = self.loop.create_future()
-        self.futures[extra_id] = future_result
+        future: asyncio.Future[JSONSerializable] = self._loop.create_future()
+        self._futures[extra_id] = future
 
-        _ = self.loop.run_in_executor(None, lambda: self.send(query_d))
-        return future_result
+        _ = self._loop.run_in_executor(None, lambda: self.send(query_d))
+        try:
+            result = await asyncio.wait_for(future, timeout + 0.5)  # add extra time since in case timeout == self.tonlib_timeout, it's better to wait for tonlib to answer timeout error
+        except asyncio.TimeoutError:
+            if extra_id in self._futures:
+                _ = self._futures.pop(extra_id)
+            raise TonlibNoResponse()
+        return result
 
     @property
     def _is_working(self):
-        return self._state not in ('crashed', 'stuck', 'finished')
+        return self._state not in (Status.CRASHED, Status.STUCK, Status.FINISHED)
 
-    async def close(self):
+    async def aclose(self):
         try:
-            self._state = 'finished'
-            await self.read_results_task
-            await self.del_expired_futures_task
+            self._state = Status.FINISHED
+            await self._read_results_task
+            for f in self._futures.values():
+                if not f.done():
+                    f.set_exception(TonlibNoResponse())
         except Exception as ee:
             logger.error(f"Exception in tonlibjson.close: {traceback.format_exc()}")
             raise RuntimeError(f'Error in tonlibjson.close: {ee}')
-
-    def cancel_futures(self, cancel_all: bool = False):
-        now = time.time()
-        to_del: list[str] = []
-        for i in self.futures:
-            if float(i.split(":")[0]) <= now or cancel_all:
-                to_del.append(i)
-        logger.debug(f'Pruning {len(to_del)} tasks')
-        for i in to_del:
-            self.futures[i].set_exception(TonlibNoResponse())
-            _ = self.futures.pop(i)
 
     # tasks
     async def read_results(self):
@@ -194,36 +163,27 @@ class TonLib:
                 # return reading result
                 result: JSONSerializable | None = None
                 try:
-                    f: asyncio.Future[JSONSerializable | None] = self.loop.run_in_executor(None, receive_func)
+                    f: asyncio.Future[JSONSerializable | None] = self._loop.run_in_executor(None, receive_func)
                     result = await asyncio.wait_for(f, timeout=timeout + delta)
                 except asyncio.TimeoutError:
-                    logger.critical(f"Tonlib #{self.ls_index:03d} stuck (timeout error)")
-                    self._state = "stuck"
+                    logger.critical(f"Tonlib #{self._ls_index:03d} stuck (timeout error)")
+                    self._state = Status.STUCK
                 except:
-                    logger.critical(f"Tonlib #{self.ls_index:03d} crashed: {traceback.format_exc()}")
-                    self._state = "crashed"
+                    logger.critical(f"Tonlib #{self._ls_index:03d} crashed: {traceback.format_exc()}")
+                    self._state = Status.CRASHED
 
-                if isinstance(result, dict) and ("@extra" in result) and (result["@extra"] in self.futures):
-                    extra_id: str = typing.cast(str, result["@extra"])
+                if isinstance(result, dict) and ("@extra" in result) and (result["@extra"] in self._futures):
+                    assert isinstance(result["@extra"], str)
+                    extra_id: str = result["@extra"]
                     try:
-                        if not self.futures[extra_id].done():
+                        if not self._futures[extra_id].done():
                             tonlib_error = parse_tonlib_error(result)
                             if tonlib_error is not None:
-                                self.futures[extra_id].set_exception(tonlib_error)
+                                self._futures[extra_id].set_exception(tonlib_error)
                             else:
-                                self.futures[extra_id].set_result(result)
-                        _ = self.futures.pop(extra_id)
+                                self._futures[extra_id].set_result(result)
+                        _ = self._futures.pop(extra_id)
                     except Exception as e:
-                        logger.error(f'Tonlib #{self.ls_index:03d} receiving result exception: {e}')
+                        logger.error(f'Tonlib #{self._ls_index:03d} receiving result exception: {e}')
         except Exception as ee:
             logger.critical(f'Task read_results failed: {ee}')
-
-    async def del_expired_futures_loop(self):
-        try:
-            while self._is_working:
-                self.cancel_futures()
-                await asyncio.sleep(1)
-
-            self.cancel_futures(cancel_all=True)
-        except Exception as ee:
-            logger.critical(f'Task del_expired_futures_loop failed: {ee}')

@@ -246,11 +246,11 @@ class Network:
                 # FIXME: We should really let node notify us that it is ready.
                 try:
                     if (
-                        e.result["code"] == 500
+                        e.result.code == 500
                         and (
-                            e.result["message"]
+                            e.result.message
                             == "LITE_SERVER_NETWORKtimeout for adnl query query"  # node is not synced yet
-                            or e.result["message"]
+                            or e.result.message
                             == "LITE_SERVER_NETWORK"  # node is not listening the socket
                         )
                     ):
@@ -446,5 +446,5 @@ class FullNode(Network.Node):
     @override
     async def stop(self):
         if self._client:
-            await self._client.close()
+            await self._client.aclose()
         await super().stop()
