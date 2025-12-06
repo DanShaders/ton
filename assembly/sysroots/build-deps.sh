@@ -1,0 +1,402 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Builds all third-party dependencies into a prefix.
+#
+# Required environment:
+#   TARGET_TRIPLE  - e.g. x86_64-pc-linux-musl, x86_64-pc-windows-msvc, aarch64-apple-darwin, etc.
+#   CC, CXX, AR, RANLIB - compiler tools
+#   SOURCE_DIR     - path to ton/src (for vendored sources in third-party/)
+#   BUILD_DIR      - where to build
+#   TARBALLS_DIR   - where to download tarballs
+#   PREFIX         - install prefix (e.g. /usr), embedded in binaries
+#   DESTDIR        - actual filesystem root to install into (PREFIX is relative to this)
+#
+# Optional environment:
+#   CMAKE_TOOLCHAIN_FILE - toolchain file for cross-compilation (used by CMake deps)
+#   CFLAGS, CXXFLAGS, LDFLAGS - extra flags (sanitizers, arch, etc.)
+#   NPROC          - parallelism (defaults to nproc)
+#   SANITIZERS     - comma-separated list: address,thread,undefined (for CMake deps)
+#
+# Usage: ./build-deps.sh [dep1 dep2 ...] or ./build-deps.sh (builds all)
+
+echo "TARGET_TRIPLE=\"$TARGET_TRIPLE\" \\"
+echo "CC=\"$CC\" \\"
+echo "CXX=\"$CXX\" \\"
+echo "AR=\"$AR\" \\"
+echo "RANLIB=\"$RANLIB\" \\"
+echo "SOURCE_DIR=\"$SOURCE_DIR\" \\"
+echo "BUILD_DIR=\"$BUILD_DIR\" \\"
+echo "TARBALLS_DIR=\"$TARBALLS_DIR\" \\"
+echo "PREFIX=\"$PREFIX\" \\"
+echo "DESTDIR=\"$DESTDIR \"\\" 
+echo "CMAKE_TOOLCHAIN_FILE=\"${CMAKE_TOOLCHAIN_FILE:-}\" \\"
+echo "CFLAGS=\"$CFLAGS\" \\"
+echo "CXXFLAGS=\"$CXXFLAGS\" \\"
+echo "LDFLAGS=\"$LDFLAGS\" \\"
+echo "NPROC=\"$NPROC\" \\"
+echo "SANITIZERS=\"${SANITIZERS:=}\" \\"
+
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
+source "$SCRIPT_DIR/common.sh"
+
+: "${NPROC:=$(nproc 2>/dev/null || echo 4)}"
+: "${SANITIZERS:=}"
+
+BUILD_DIR="$(cd "$BUILD_DIR" >/dev/null && pwd)"
+DESTDIR="$(cd "$DESTDIR" >/dev/null && pwd)"
+mkdir -p "$TARBALLS_DIR"
+
+THIRD_PARTY="$SOURCE_DIR/third-party"
+
+# prepare_source <name> <version> <url> <sha256>
+# Downloads, verifies, and extracts a tarball. Sets PREPARED_SRC to the source directory path.
+prepare_source() {
+    local name="$1" version="$2" url="$3" sha256="$4"
+    local tarball="$TARBALLS_DIR/${name}-${version}.tar.gz"
+
+    (
+        cd "$TARBALLS_DIR"
+        download_verified "$url" "$tarball" "$sha256"
+    )
+
+    PREPARED_SRC="$BUILD_DIR/${name}-${version}"
+    rm -rf "$PREPARED_SRC"
+    echo "Extracting ${name}-${version}..."
+    tar xf "$tarball" -C "$BUILD_DIR"
+}
+
+# ===== CMake helper =====
+# Common CMake args for all CMake-based deps
+cmake_common_args() {
+    local args=(
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_INSTALL_PREFIX="$PREFIX"
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_PREFIX_PATH="$DESTDIR$PREFIX"
+    )
+    if [ -n "${CMAKE_TOOLCHAIN_FILE:-}" ]; then
+        args+=(-DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN_FILE")
+    fi
+    echo "${args[@]}"
+}
+
+cmake_build_install() {
+    local name="$1" src="$2"
+    shift 2
+    local build="$BUILD_DIR/$name"
+
+    echo "=== Building $name ==="
+    rm -rf "$build"
+    (
+        unset CFLAGS
+        unset CXXFLAGS
+        unset LDFLAGS
+        cmake -S "$src" -B "$build" $(cmake_common_args) "$@"
+        cmake --build "$build" --parallel "$NPROC"
+        DESTDIR="$DESTDIR" cmake --install "$build"
+    )
+}
+
+# ===========================================================================
+# Non-CMake dependencies (autotools, custom build scripts)
+# ===========================================================================
+
+# ===== OpenSSL =====
+build_openssl() {
+    echo "=== Building OpenSSL ${OPENSSL_VERSION} ==="
+
+    prepare_source openssl "$OPENSSL_VERSION" "$OPENSSL_URL" "$OPENSSL_SHA256"
+    cd "$PREPARED_SRC"
+
+    local configure_target=""
+    local extra_args=""
+    case "$TARGET_TRIPLE" in
+        *-linux-musl*|*-linux-gnu*)
+            if [[ "$TARGET_TRIPLE" == aarch64-* ]]; then
+                configure_target="linux-aarch64"
+            else
+                configure_target="linux-x86_64"
+            fi
+            ;;
+        *-apple-darwin*)
+            if [[ "$TARGET_TRIPLE" == arm64-* || "$TARGET_TRIPLE" == aarch64-* ]]; then
+                configure_target="darwin64-arm64-cc"
+            else
+                configure_target="darwin64-x86_64-cc"
+            fi
+            ;;
+        *-windows-msvc*|*-pc-windows-msvc*)
+            configure_target="VC-WIN64A"
+            ;;
+        *-mingw*)
+            configure_target="mingw64"
+            extra_args="-DSIO_UDP_NETRESET=SIO_UDP_CONNRESET"
+            ;;
+        *-android*)
+            if [[ "$TARGET_TRIPLE" == aarch64-* || "$TARGET_TRIPLE" == arm64-* ]]; then
+                configure_target="android-arm64"
+            elif [[ "$TARGET_TRIPLE" == arm-* || "$TARGET_TRIPLE" == armv7* ]]; then
+                configure_target="android-arm"
+            elif [[ "$TARGET_TRIPLE" == x86_64-* ]]; then
+                configure_target="android-x86_64"
+            elif [[ "$TARGET_TRIPLE" == i686-* || "$TARGET_TRIPLE" == x86-* ]]; then
+                configure_target="android-x86"
+            fi
+            ;;
+        *-emscripten*|*-wasm*)
+            configure_target="linux-generic32"
+            extra_args="no-asm no-threads"
+            ;;
+        *)
+            echo "ERROR: Cannot determine OpenSSL target for $TARGET_TRIPLE"
+            exit 1
+            ;;
+    esac
+
+    local configure_cmd="./Configure"
+
+    if [[ "$TARGET_TRIPLE" == *-emscripten* || "$TARGET_TRIPLE" == *-wasm* ]]; then
+        configure_cmd="emconfigure ./Configure"
+    fi
+
+    $configure_cmd $configure_target \
+        --prefix="$PREFIX" --openssldir="/openssldir" --release \
+        no-shared no-dso no-unit-test no-tests no-apps enable-quic $extra_args
+
+    if [[ "$TARGET_TRIPLE" == *-emscripten* || "$TARGET_TRIPLE" == *-wasm* ]]; then
+        # sed -i 's/CROSS_COMPILE=.*/CROSS_COMPILE=/g' Makefile
+        # sed -i 's/-ldl//g' Makefile
+        # sed -i 's/-O3/-Os/g' Makefile
+        emmake make depend
+        emmake make -j"$NPROC"
+    else
+        make -j"$NPROC"
+    fi
+
+    make "DESTDIR=$DESTDIR" install_sw -j"$NPROC"
+}
+
+# ===== libsodium =====
+build_sodium() {
+    echo "=== Building libsodium ${LIBSODIUM_VERSION} ==="
+
+    prepare_source libsodium "$LIBSODIUM_VERSION" "$LIBSODIUM_URL" "$LIBSODIUM_SHA256"
+    cd "$PREPARED_SRC"
+
+    local configure_args="--prefix=$PREFIX --with-pic --enable-static --disable-shared"
+
+    case "$TARGET_TRIPLE" in
+        *-emscripten*|*-wasm*)
+            emconfigure ./configure $configure_args --disable-ssp
+            emmake make -j"$NPROC"
+            emmake make "DESTDIR=$DESTDIR" install
+            return
+            ;;
+    esac
+
+    if [ -n "$TARGET_TRIPLE" ]; then
+        configure_args="$configure_args --host=$TARGET_TRIPLE"
+    fi
+
+    ./configure $configure_args
+    make -j"$NPROC"
+    make "DESTDIR=$DESTDIR" install
+}
+
+# ===== libmicrohttpd =====
+build_mhd() {
+    echo "=== Building libmicrohttpd ${LIBMICROHTTPD_VERSION} ==="
+
+    if [[ "$TARGET_TRIPLE" == *-emscripten* || "$TARGET_TRIPLE" == *-wasm* ]]; then
+        echo "Skipping libmicrohttpd (not supported on Emscripten)"
+        return
+    fi
+
+    prepare_source libmicrohttpd "$LIBMICROHTTPD_VERSION" "$LIBMICROHTTPD_URL" "$LIBMICROHTTPD_SHA256"
+    cd "$PREPARED_SRC"
+
+    local configure_args="--prefix=$PREFIX --enable-static --disable-shared --disable-tests --disable-benchmark --disable-https --with-pic --disable-doc"
+
+    if [ -n "$TARGET_TRIPLE" ]; then
+        configure_args="$configure_args --host=$TARGET_TRIPLE"
+    fi
+
+    ./configure $configure_args
+    make -j"$NPROC"
+    make "DESTDIR=$DESTDIR" install
+}
+
+# ===== BLST =====
+build_blst() {
+    echo "=== Building BLST ==="
+
+    local blst_src="$SOURCE_DIR/third-party/blst"
+    local blst_build="$BUILD_DIR/blst-build"
+
+    rm -rf "$blst_build"
+    mkdir -p "$blst_build"
+    cd "$blst_build"
+
+    case "$TARGET_TRIPLE" in
+        *-emscripten*|*-wasm*)
+            emcc -O2 -fno-builtin -fPIC -Wall -Wextra -Werror -D__BLST_NO_ASM__ \
+                -c "$blst_src/src/server.c" -o server.o
+            emar rcs libblst.a server.o
+            emranlib libblst.a
+            ;;
+        *)
+            "$blst_src/build.sh"
+            ;;
+    esac
+
+    mkdir -p "$DESTDIR$PREFIX/lib" "$DESTDIR$PREFIX/include"
+    cp libblst.a "$DESTDIR$PREFIX/lib/"
+    cp "$blst_src/bindings/blst.h" "$DESTDIR$PREFIX/include/"
+    cp "$blst_src/bindings/blst_aux.h" "$DESTDIR$PREFIX/include/"
+    cp -r "$blst_src/bindings/blst.hpp" "$DESTDIR$PREFIX/include/" 2>/dev/null || true
+}
+
+# ===== secp256k1 =====
+build_secp256k1() {
+    cmake_build_install secp256k1 "$THIRD_PARTY/secp256k1" \
+        -DSECP256K1_ENABLE_MODULE_RECOVERY=ON \
+        -DSECP256K1_ENABLE_MODULE_EXTRAKEYS=ON \
+        -DSECP256K1_BUILD_EXAMPLES=OFF \
+        -DBUILD_SHARED_LIBS=OFF
+}
+
+# ===========================================================================
+# CMake-based dependencies
+# ===========================================================================
+
+# ===== zlib =====
+build_zlib() {
+    cmake_build_install zlib "$THIRD_PARTY/zlib" \
+        -DZLIB_BUILD_EXAMPLES=OFF
+}
+
+# ===== lz4 =====
+build_lz4() {
+    cmake_build_install lz4 "$THIRD_PARTY/lz4/build/cmake" \
+        -DLZ4_BUILD_CLI=OFF \
+        -DLZ4_BUILD_LEGACY_LZ4C=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBUILD_STATIC_LIBS=ON \
+        -DLZ4_BUNDLED_MODE=ON \
+        -DLZ4_POSITION_INDEPENDENT_LIB=ON
+}
+
+# ===== libbacktrace =====
+build_libbacktrace() {
+    case "$TARGET_TRIPLE" in
+        *-android*|*-emscripten*|*-wasm*)
+            echo "Skipping libbacktrace (not supported on $TARGET_TRIPLE)"
+            return
+            ;;
+    esac
+
+    local src="$THIRD_PARTY/libbacktrace"
+    local build="$BUILD_DIR/libbacktrace"
+    rm -rf "$build"
+    mkdir -p "$build"
+    cd "$build"
+
+    local configure_args="--prefix=$PREFIX --enable-static --disable-shared --with-pic"
+    if [ -n "$TARGET_TRIPLE" ]; then
+        configure_args="$configure_args --host=$TARGET_TRIPLE"
+    fi
+
+    "$src/configure" $configure_args
+    make -j"$NPROC"
+    make "DESTDIR=$DESTDIR" install
+}
+
+# ===== crc32c =====
+build_crc32c() {
+    cmake_build_install crc32c "$THIRD_PARTY/crc32c" \
+        -DCRC32C_BUILD_TESTS=OFF \
+        -DCRC32C_BUILD_BENCHMARKS=OFF \
+        -DCRC32C_USE_GLOG=OFF \
+        -DCRC32C_INSTALL=ON \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.10
+}
+
+# ===== RocksDB =====
+build_rocksdb() {
+    local sanitizer_args=()
+    if [[ "$SANITIZERS" == *address* ]]; then
+        sanitizer_args+=(-DWITH_ASAN=ON)
+    fi
+    if [[ "$SANITIZERS" == *thread* ]]; then
+        sanitizer_args+=(-DWITH_TSAN=ON)
+    fi
+    if [[ "$SANITIZERS" == *undefined* ]]; then
+        sanitizer_args+=(-DWITH_UBSAN=ON)
+    fi
+
+    local portable_arg=()
+    case "$TARGET_TRIPLE" in
+        *-android*) portable_arg=(-DPORTABLE=ON) ;;
+    esac
+
+    cmake_build_install rocksdb "$THIRD_PARTY/rocksdb" \
+        -DWITH_GFLAGS=OFF \
+        -DWITH_TESTS=OFF \
+        -DWITH_TOOLS=OFF \
+        -DUSE_RTTI=ON \
+        -DFAIL_ON_WARNINGS=OFF \
+        -DROCKSDB_INSTALL_ON_WINDOWS=ON \
+        "${sanitizer_args[@]}" \
+        "${portable_arg[@]}"
+}
+
+# ===== Abseil =====
+build_abseil() {
+    cmake_build_install abseil "$THIRD_PARTY/abseil-cpp" \
+        -DABSL_PROPAGATE_CXX_STD=ON \
+        -DABSL_BUILD_TESTING=OFF \
+        -DABSL_ENABLE_INSTALL=ON
+}
+
+# ===== ngtcp2 =====
+build_ngtcp2() {
+    cmake_build_install ngtcp2 "$THIRD_PARTY/ngtcp2" \
+        -DBUILD_TESTING=OFF \
+        -DENABLE_SHARED_LIB=OFF \
+        -DENABLE_STATIC_LIB=ON
+}
+
+# ===== Main =====
+ALL_DEPS="openssl sodium mhd blst secp256k1 zlib lz4 libbacktrace crc32c rocksdb abseil ngtcp2"
+
+if [ $# -gt 0 ]; then
+    DEPS_TO_BUILD="$@"
+else
+    DEPS_TO_BUILD="$ALL_DEPS"
+fi
+
+for dep in $DEPS_TO_BUILD; do
+    case "$dep" in
+        openssl)        build_openssl ;;
+        sodium)         build_sodium ;;
+        mhd)            build_mhd ;;
+        blst)           build_blst ;;
+        secp256k1)      build_secp256k1 ;;
+        zlib)           build_zlib ;;
+        lz4)            build_lz4 ;;
+        libbacktrace)   build_libbacktrace ;;
+        crc32c)         build_crc32c ;;
+        rocksdb)        build_rocksdb ;;
+        abseil)         build_abseil ;;
+        ngtcp2)         build_ngtcp2 ;;
+        *)
+            echo "ERROR: Unknown dependency '$dep'"
+            echo "Available: $ALL_DEPS"
+            exit 1
+            ;;
+    esac
+done
+
+echo "=== All dependencies built successfully ==="
