@@ -610,7 +610,8 @@ void FullNodeImpl::process_block_broadcast(BlockBroadcast broadcast) {
   send_block_broadcast_to_custom_overlays(broadcast);
   if (broadcast.signatures.empty() && !broadcast.block_id.is_masterchain()) {
     td::actor::send_closure(validator_manager_, &ValidatorManagerInterface::new_block_candidate_broadcast,
-                            broadcast.block_id, std::move(broadcast.data));
+                            broadcast.block_id, broadcast.catchain_seqno, std::move(broadcast.data),
+                            td::PromiseCreator::lambda([](td::Result<td::Unit>) {}));
   } else {
     td::actor::send_closure(validator_manager_, &ValidatorManagerInterface::new_block_broadcast, std::move(broadcast),
                             [](td::Result<td::Unit> R) {
