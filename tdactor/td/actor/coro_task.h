@@ -139,7 +139,11 @@ struct promise_value : promise_common {
     result = std::forward<TT>(v);
   }
 
-  struct ExternalResult {};
+  struct ExternalResult {
+    explicit ExternalResult() {
+    }
+  };
+
   void return_value(ExternalResult&&) noexcept {
   }
 
