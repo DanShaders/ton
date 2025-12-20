@@ -370,14 +370,28 @@ td::optional<ton::NewConsensusConfig> Config::get_new_consensus_config(ton::Work
     return {};
   }
   auto c2 = (wc == ton::masterchainId ? rec.mc : rec.shard)->prefetch_ref();
-  gen::NewConsensusConfig::Record config;
-  if (c2.is_null() || !gen::unpack_cell(c2, config)) {
+  if (c2.is_null()) {
     return {};
   }
   auto consensus_config = get_consensus_config();
-  return ton::NewConsensusConfig{.target_rate_ms = config.target_rate_ms,
-                                 .max_block_size = consensus_config.max_block_size,
-                                 .max_collated_data_size = consensus_config.max_collated_data_size};
+  gen::NewConsensusConfig::Record_null_consensus_config r1;
+  if (gen::unpack_cell(c2, r1)) {
+    return ton::NewConsensusConfig{.target_rate_ms = r1.target_rate_ms,
+                                   .max_block_size = consensus_config.max_block_size,
+                                   .max_collated_data_size = consensus_config.max_collated_data_size,
+                                   .consensus = ton::NewConsensusConfig::NullConsensus{}};
+  }
+  gen::NewConsensusConfig::Record_simplex_config r2;
+  if (gen::unpack_cell(c2, r2)) {
+    return ton::NewConsensusConfig{
+        .target_rate_ms = r2.target_rate_ms,
+        .max_block_size = consensus_config.max_block_size,
+        .max_collated_data_size = consensus_config.max_collated_data_size,
+        .consensus = ton::NewConsensusConfig::Simplex{.slots_per_leader_window = r2.slots_per_leader_window,
+                                                      .first_block_timeout_ms = r2.first_block_timeout_ms,
+                                                      .max_leader_window_desync = r2.max_leader_window_desync}};
+  }
+  return {};
 }
 
 bool Config::foreach_config_param(std::function<bool(int, Ref<vm::Cell>)> scan_func) const {
