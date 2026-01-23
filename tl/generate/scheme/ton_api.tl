@@ -1177,6 +1177,8 @@ quic.answer data:bytes = quic.Response;
 
 engineConsoleClient.config address:string server_public_key:PublicKey client_private_key:PrivateKey = engineConsoleClient.Config;
 
+publicOverlayClient.config db_root:string bind_address:string client_private_key:PrivateKey dht_config:dht.config.Global zerostate:tonNode.zeroStateIdExt shard:long = publicOverlayClient.Config;
+
 consensus.overlayId session_id:int256 nodes:(vector int256) = consensus.OverlayId;
 consensus.dataToSign session_id:int256 data:bytes = consensus.DataToSign;
 

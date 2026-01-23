@@ -126,3 +126,54 @@ class TonlibCDLL:
         client_json_destroy.restype = None
         client_json_destroy.argtypes = [ctypes.c_void_p]
         self.client_json_destroy = cast(Callable[[int], None], client_json_destroy)
+
+        public_overlay_client_init = tonlib.tonlib_public_overlay_client_init
+        public_overlay_client_init.restype = ctypes.c_void_p
+        public_overlay_client_init.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        self.public_overlay_client_init = cast(
+            Callable[[int, bytes], int], public_overlay_client_init
+        )
+
+        public_overlay_client_destroy = tonlib.tonlib_public_overlay_client_destroy
+        public_overlay_client_destroy.restype = None
+        public_overlay_client_destroy.argtypes = [ctypes.c_void_p]
+        self.public_overlay_client_destroy = cast(
+            Callable[[int], None], public_overlay_client_destroy
+        )
+
+        public_overlay_client_await_ready = tonlib.tonlib_public_overlay_client_await_ready
+        public_overlay_client_await_ready.restype = ctypes.c_bool
+        public_overlay_client_await_ready.argtypes = [ctypes.c_void_p]
+        self.public_overlay_client_await_ready = cast(
+            Callable[[int], bool], public_overlay_client_await_ready
+        )
+
+        public_overlay_client_await_suspend = tonlib.tonlib_public_overlay_client_await_suspend
+        public_overlay_client_await_suspend.restype = None
+        public_overlay_client_await_suspend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        self.public_overlay_client_await_suspend = cast(
+            Callable[[int, int], None], public_overlay_client_await_suspend
+        )
+
+        public_overlay_client_is_error = tonlib.tonlib_public_overlay_client_is_error
+        public_overlay_client_is_error.restype = ctypes.c_bool
+        public_overlay_client_is_error.argtypes = [ctypes.c_void_p]
+        self.public_overlay_client_is_error = cast(
+            Callable[[int], bool], public_overlay_client_is_error
+        )
+
+        public_overlay_client_get_error_code = tonlib.tonlib_public_overlay_client_get_error_code
+        public_overlay_client_get_error_code.restype = ctypes.c_int
+        public_overlay_client_get_error_code.argtypes = [ctypes.c_void_p]
+        self.public_overlay_client_get_error_code = cast(
+            Callable[[int], int], public_overlay_client_get_error_code
+        )
+
+        public_overlay_client_get_error_message = (
+            tonlib.tonlib_public_overlay_client_get_error_message
+        )
+        public_overlay_client_get_error_message.restype = ctypes.c_char_p
+        public_overlay_client_get_error_message.argtypes = [ctypes.c_void_p]
+        self.public_overlay_client_get_error_message = cast(
+            Callable[[int], bytes], public_overlay_client_get_error_message
+        )

@@ -85,15 +85,18 @@ target_include_directories(tonlibjson_public_interface INTERFACE
 
 add_library(tonlibjson_private_interface INTERFACE)
 target_link_libraries(tonlibjson_private_interface INTERFACE
-  tonlib tl_tonlib_api_json tonlibjson_public_interface
+  tonlib tl_tonlib_api_json tddb dht keyring overlay tonlibjson_public_interface
 )
 
 add_library(tonlibjson_objects OBJECT
   tonlib/ClientJson.cpp
   tonlib/FFIEngineConsoleClient.cpp
   tonlib/FFIEventLoop.cpp
+  tonlib/FFIPublicOverlayClient.cpp
+  tonlib/PublicOverlayClient.cpp
   tonlib/tonlib_client_json.cpp
   tonlib/tonlib_engine_console.cpp
+  tonlib/tonlib_public_overlay.cpp
 )
 target_link_libraries(tonlibjson_objects
   PRIVATE tonlibjson_private_interface
@@ -181,6 +184,7 @@ endif()
 set(TONLIB_JSON_HEADERS
   tonlib/tonlib_client_json.h
   tonlib/tonlib_engine_console.h
+  tonlib/tonlib_public_overlay.h
 )
 
 install(FILES ${TONLIB_JSON_HEADERS} ${CMAKE_CURRENT_BINARY_DIR}/tonlib/tonlibjson_export.h DESTINATION include/tonlib/)
