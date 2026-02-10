@@ -1,4 +1,5 @@
 import base64
+from collections import defaultdict
 import json
 import logging
 import re
@@ -10,7 +11,24 @@ from typing import cast
 
 from pydantic import BaseModel
 from tonapi.ton_api import (
+    Consensus_stats_blockAccepted,
+    Consensus_stats_candidateReceived,
+    Consensus_stats_collateFinished,
+    Consensus_stats_collateStarted,
+    Consensus_stats_collatedEmpty,
+    Consensus_stats_events,
+    Consensus_stats_id,
+    Consensus_stats_timestampedEvent,
+    Consensus_stats_validationFinished,
+    Consensus_stats_validationStarted,
+    Consensus_simplex_finalizeVote,
+    Consensus_simplex_notarizeVote,
+    Consensus_simplex_skipVote,
+    Consensus_simplex_stats_certObserved,
+    Consensus_simplex_stats_voted,
     TonNode_blockIdExt,
+    TypeConsensus_simplex_Vote,
+    TypeConsensus_stats_Event,
     ValidatorStats_collatedBlock,
     ValidatorStats_collatorNodeResponse,
     ValidatorStats_stats,
@@ -58,6 +76,48 @@ class BlockId:
     seqno: int
     root_hash: bytes
     file_hash: bytes
+
+
+@dataclass
+class ConsensusEventSequence:
+    slot: int
+    validator: str
+    collate_started: float | None = None
+    collate_finished: float | None = None
+    candidate_received: float | None = None
+    validation_started: float | None = None
+    validation_finished: float | None = None
+    notarize_voted: float | None = None
+    notarize_cert_observed: float | None = None
+    finalize_voted: float | None = None
+    finalize_cert_observed: float | None = None
+    block_id: BlockId | None = None
+    is_collator: bool = False
+
+    def has_normal_flow(self) -> bool:
+        if self.is_collator:
+            return all(
+                [
+                    self.collate_started is not None,
+                    self.collate_finished is not None,
+                    self.notarize_voted is not None,
+                    self.notarize_cert_observed is not None,
+                    self.finalize_voted is not None,
+                    self.finalize_cert_observed is not None,
+                ]
+            )
+        else:
+            return all(
+                [
+                    self.candidate_received is not None,
+                    self.validation_started is not None,
+                    self.validation_finished is not None,
+                    self.notarize_voted is not None,
+                    self.notarize_cert_observed is not None,
+                    self.finalize_voted is not None,
+                    self.finalize_cert_observed is not None,
+                ]
+            )
 
 
 config = Config.model_validate_json(Path("config.json").read_bytes())
@@ -202,12 +262,11 @@ def parse_work_time_stats(wt: str) -> dict[str, float]:
 
 
 def process_accepted_block_collate(
-    line: ValidatorStats_stats,
+    timestamp: float,
     collate: ValidatorStats_collatedBlock,
     prod: ValidatorStats_stats_producer,
 ):
-    timestamp = line.timestamp
-    block_id = line.block_id
+    block_id = collate.block_id
     assert block_id is not None
 
     workchain = block_id.workchain
@@ -505,6 +564,194 @@ def add_consensus_stats_validate(
 mc_blocks_accepted_at: dict[BlockId, float] = dict()
 
 
+def process_consensus_events(
+    events_list: list[Consensus_stats_timestampedEvent], validator: str
+) -> dict[int, ConsensusEventSequence]:
+    class SequencesDict(dict[int, ConsensusEventSequence]):
+        def __missing__(self, key: int) -> ConsensusEventSequence:
+            seq = ConsensusEventSequence(slot=key, validator=validator)
+            self[key] = seq
+            return seq
+
+    sequences = SequencesDict()
+
+    for e in events_list:
+        ev = e.event
+        if ev is None or isinstance(ev, Consensus_stats_id):
+            continue
+
+        if isinstance(ev, Consensus_stats_collateStarted):
+            slot = ev.target_slot
+            sequences[slot].collate_started = e.ts
+            sequences[slot].is_collator = True
+
+        elif isinstance(ev, (Consensus_stats_collateFinished, Consensus_stats_collatedEmpty)):
+            if isinstance(ev, Consensus_stats_collateFinished):
+                assert ev.id is not None
+                slot = ev.id.slot
+                assert ev.block is not None
+                block_id = BlockId.create(ev.block)
+            else:
+                assert ev.id is not None
+                slot = ev.id.slot
+                block_id = None
+
+            sequences[slot].collate_finished = e.ts
+            sequences[slot].is_collator = True
+            sequences[slot].block_id = block_id
+
+        elif isinstance(ev, Consensus_stats_candidateReceived):
+            assert ev.id is not None
+            sequences[ev.id.slot].candidate_received = e.ts
+
+        elif isinstance(ev, Consensus_stats_validationStarted):
+            assert ev.id is not None
+            sequences[ev.id.slot].validation_started = e.ts
+
+        elif isinstance(ev, Consensus_stats_validationFinished):
+            assert ev.id is not None
+            sequences[ev.id.slot].validation_finished = e.ts
+
+        elif isinstance(ev, Consensus_simplex_stats_voted):
+            assert ev.vote is not None
+            vote = ev.vote
+            if isinstance(vote, Consensus_simplex_skipVote):
+                continue
+
+            assert vote.id is not None
+
+            if isinstance(vote, Consensus_simplex_notarizeVote):
+                sequences[vote.id.slot].notarize_voted = e.ts
+            else:
+                _: Consensus_simplex_finalizeVote = vote
+                sequences[vote.id.slot].finalize_voted = e.ts
+
+        elif isinstance(ev, Consensus_simplex_stats_certObserved):
+            assert ev.vote is not None
+            vote = ev.vote
+            if isinstance(vote, Consensus_simplex_skipVote):
+                continue
+
+            assert vote.id is not None
+
+            if isinstance(vote, Consensus_simplex_notarizeVote):
+                sequences[vote.id.slot].notarize_cert_observed = e.ts
+            else:
+                _: Consensus_simplex_finalizeVote = vote
+                sequences[vote.id.slot].finalize_cert_observed = e.ts
+
+    return sequences
+
+
+def add_consensus_stats_collate_simplex(
+    seq: ConsensusEventSequence,
+    seq_prev_slot: ConsensusEventSequence | None,
+    collate: ValidatorStats_collatedBlock,
+    workchain: int,
+    timestamp: float,
+) -> None:
+    if not seq.has_normal_flow():
+        return
+    assert seq.collate_started is not None
+    assert seq.collate_finished is not None
+    assert seq.notarize_cert_observed is not None
+    assert seq.finalize_cert_observed is not None
+
+    if seq_prev_slot is None or seq_prev_slot.finalize_cert_observed is None:
+        return
+
+    collate_work = collate.work_time
+    collate_total = collate.total_time
+
+    tss = [
+        seq_prev_slot.finalize_cert_observed,
+        seq.collate_started,
+        seq.collate_started + collate_total - collate_work,
+        seq.collate_finished,
+        seq.collate_finished,
+        seq.collate_finished,
+        seq.collate_finished,
+        seq.notarize_cert_observed,
+        seq.finalize_cert_observed,
+        seq.finalize_cert_observed,
+    ]
+
+    for i in range(1, len(tss) - 1):
+        tss[i + 1] = max(tss[i + 1], tss[i])
+    tss = [tss[i + 1] - tss[i] for i in range(len(tss) - 1)]
+
+    names = [
+        "before_collate",
+        "collate_wait",
+        "collate_work",
+        "before_request",
+        "download",
+        "approve33",
+        "approve66",
+        "sign33",
+        "sign66",
+    ]
+
+    for name, x in zip(names, tss):
+        add_stat_data(f"COLLATE_{name}", workchain, timestamp, x)
+        add_stat_data(f"COLLATE_self_{name}", workchain, timestamp, x)
+
+
+def add_consensus_stats_validate_simplex(
+    seq: ConsensusEventSequence,
+    seq_prev_slot: ConsensusEventSequence | None,
+    validate: ValidatorStats_validatedBlock,
+    workchain: int,
+    timestamp: float,
+) -> None:
+    if not seq.has_normal_flow():
+        return
+    if seq_prev_slot is None or seq_prev_slot.finalize_cert_observed is None:
+        return
+    assert seq.candidate_received is not None
+    assert seq.validation_started is not None
+    assert seq.validation_finished is not None
+    assert seq.notarize_cert_observed is not None
+    assert seq.finalize_cert_observed is not None
+
+    validate_work = validate.actual_time if validate.actual_time else validate.work_time
+    validate_total = validate.total_time
+
+    tss = [
+        seq_prev_slot.finalize_cert_observed,
+        seq.candidate_received,
+        seq.candidate_received,
+        seq.candidate_received,
+        seq.validation_started,
+        seq.validation_started + validate_total - validate_work,
+        seq.validation_finished,
+        seq.validation_finished,
+        seq.notarize_cert_observed,
+        seq.finalize_cert_observed,
+        seq.finalize_cert_observed,
+    ]
+
+    for i in range(1, len(tss) - 1):
+        tss[i + 1] = max(tss[i + 1], tss[i])
+    tss = [tss[i + 1] - tss[i] for i in range(len(tss) - 1)]
+
+    names = [
+        "get_submit",
+        "get_submit_real",
+        "get_block",
+        "before_validate",
+        "validate_wait",
+        "validate_work",
+        "approve33",
+        "approve66",
+        "sign33",
+        "sign66",
+    ]
+
+    for name, x in zip(names, tss):
+        add_stat_data(f"VALIDATE_{name}", workchain, timestamp, x)
+
+
 def process_applied_block(
     line: ValidatorStats_stats, collate: ValidatorStats_collatedBlock, mc_accepted_at: float
 ):
@@ -556,6 +803,8 @@ def main():
             files.append(s)
 
     all_lines: list[StatLine] = []
+    consensus_events_by_group: dict[bytes, list[Consensus_stats_timestampedEvent]] = {}
+
     for file_name in files:
         logging.info(f"Reading {file_name}")
         with open(file_name, "r") as f:
@@ -569,6 +818,11 @@ def main():
                 except json.decoder.JSONDecodeError:
                     continue
 
+                if line["@type"] == "consensus.stats.events":
+                    events = Consensus_stats_events.from_dict(line)
+                    consensus_events_by_group.setdefault(events.id, []).extend(events.events)
+                    continue
+
                 match line["@type"]:
                     case "validatorStats.collatedBlock":
                         line = ValidatorStats_collatedBlock.from_dict(line)
@@ -579,7 +833,6 @@ def main():
                     case "validatorStats.stats":
                         line = ValidatorStats_stats.from_dict(line)
                     case _:
-                        logging.warning(f"Unknown line type: {line['@type']}")
                         continue
 
                 if max_ts is None or ts_from_stat_line(line) < max_ts:
@@ -587,6 +840,14 @@ def main():
 
     all_lines.sort(key=ts_from_stat_line)
     logging.info(f"Total lines: {len(all_lines)}")
+
+    logging.info(f"Processing {len(consensus_events_by_group)} consensus event groups")
+    consensus_sequences: dict[tuple[bytes, int, int], ConsensusEventSequence] = {}
+
+    for group_id, events in consensus_events_by_group.items():
+        sequences = process_consensus_events(events)
+        for (v_id, slot), seq in sequences.items():
+            consensus_sequences[(group_id, v_id, slot)] = seq
 
     stats_collate: dict[BlockId, ValidatorStats_collatedBlock] = dict()
     stats_validate: dict[tuple[str, BlockId], ValidatorStats_validatedBlock] = dict()
@@ -705,6 +966,49 @@ def main():
                     add_consensus_stats_validate(
                         line, line_prev, validate, producer, first_candidate
                     )
+
+    logging.info("Processing consensus sequences")
+    normal_flow_count = 0
+    total_consensus_blocks = 0
+
+    max_slot_per_group: dict[bytes, int] = defaultdict(lambda: 0)
+
+    for (group_id, v_id, slot), seq in consensus_sequences.items():
+        if seq.block_id is None:
+            continue
+
+        max_slot_per_group[group_id] = max(slot, max_slot_per_group[group_id])
+
+        collate = stats_collate.get(seq.block_id)
+        validate = stats_validate.get(
+            (base64.b64encode(consensus_group_info[group_id].self_).decode(), seq.block_id)
+        )
+
+        if seq.block_id.workchain == -1:
+            timestamp = seq.finalize_cert_observed or 0
+            if timestamp > 0 and seq.block_id not in mc_blocks_accepted_at:
+                mc_blocks_accepted_at[seq.block_id] = timestamp
+
+        seq_prev = consensus_sequences.get((group_id, v_id, slot - 1))
+
+        if seq.has_normal_flow():
+            normal_flow_count += 1
+            workchain = seq.block_id.workchain
+            timestamp = seq.finalize_cert_observed or 0
+            if timestamp > 0:
+                add_stat_data("normal_flow_blocks", workchain, timestamp, 1)
+
+            if seq.is_collator and collate is not None:
+                process_accepted_block_collate_from_sequence(seq, collate)
+                add_consensus_stats_collate_simplex(seq, seq_prev, collate, workchain, timestamp)
+            elif not seq.is_collator and validate is not None:
+                add_consensus_stats_validate_simplex(seq, seq_prev, validate, workchain, timestamp)
+
+    if total_consensus_blocks > 0:
+        logging.info(
+            f"Normal flow slots: {normal_flow_count}/{total_consensus_blocks} "
+            f"({100.0 * normal_flow_count / total_consensus_blocks:.1f}%)"
+        )
 
     visited: set[BlockId] = set()
 
