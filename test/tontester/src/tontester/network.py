@@ -5,6 +5,7 @@ import signal
 import subprocess
 import types
 from abc import ABC, abstractmethod
+from collections.abc import Collection
 from dataclasses import dataclass
 from enum import IntEnum, auto
 from ipaddress import IPv4Address
@@ -121,6 +122,7 @@ class Network:
             validator_config: ton_api.Validator_config_global | None,
             additional_args: list[str],
             *,
+            pass_fds: Collection[int] = (),
             debug: DebugType = None,
         ):
             async def process_watcher():
@@ -174,6 +176,7 @@ class Network:
                         cwd=self._directory,
                         env=process_env,
                         stderr=asyncio.subprocess.PIPE,
+                        pass_fds=pass_fds,
                     )
                 case "rr":
                     l.info(f"Recording {self.name} with rr")
@@ -187,6 +190,7 @@ class Network:
                         cwd=self._directory,
                         env=process_env,
                         stderr=asyncio.subprocess.PIPE,
+                        pass_fds=pass_fds,
                     )
 
             assert self.__process.stderr is not None  # to placate pyright
@@ -409,6 +413,8 @@ class FullNode(Network.Node):
     ):
         super().__init__(network, name, install=install, env=env)
 
+        self._console_ready_fd = None
+
         KEY_EXPIRATION = (1 << 31) - 1
 
         self._addr = self._new_network_address()
@@ -496,6 +502,30 @@ class FullNode(Network.Node):
     def validator_key(self):
         return self._validator_key
 
+    async def _wait_console_ready(self):
+        assert self._console_ready_fd is not None
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[None] = loop.create_future()
+        fd = self._console_ready_fd
+        self._console_ready_fd = None
+
+        def on_readable():
+            data = os.read(fd, 1)
+            os.close(fd)
+            if not future.done():
+                if data == b"1":
+                    future.set_result(None)
+                else:
+                    future.set_exception(
+                        RuntimeError(
+                            f"validator-engine console of {self.name} did not start successfully"
+                        )
+                    )
+
+        loop.add_reader(fd, on_readable)
+        future.add_done_callback(lambda f: loop.remove_reader(fd))
+        await future
+
     @override
     async def run(self, *, debug: DebugType = None):
         zerostate = self._get_or_generate_zerostate()
@@ -507,13 +537,29 @@ class FullNode(Network.Node):
                 (static_dir / state.file_hash.hex().upper()).symlink_to(state.file)
             self._static_populated = True
 
-        await self._run(
-            self._install.validator_engine_exe,
-            self._local_config,
-            zerostate.as_validator_config(),
-            ["--initial-sync-delay", "5", "--session-logs", str(self.session_log_path)],
-            debug=debug,
-        )
+        ready_r, ready_w = os.pipe()
+        self._console_ready_fd = ready_r
+
+        try:
+            await self._run(
+                self._install.validator_engine_exe,
+                self._local_config,
+                zerostate.as_validator_config(),
+                [
+                    "--initial-sync-delay",
+                    "5",
+                    "--session-logs",
+                    str(self.session_log_path),
+                    "--console-ready-fd",
+                    str(ready_w),
+                ],
+                debug=debug,
+                pass_fds=(ready_w,),
+            )
+        finally:
+            os.close(ready_w)
+
+        await self._wait_console_ready()
 
     @property
     def _liteserver_config(self):
@@ -604,4 +650,9 @@ class FullNode(Network.Node):
                 await self._blockchain_explorer
             except asyncio.CancelledError:
                 pass
+
+        if self._console_ready_fd is not None:
+            os.close(self._console_ready_fd)
+            self._console_ready_fd = None
+
         await super().stop()
