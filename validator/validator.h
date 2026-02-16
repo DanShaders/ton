@@ -312,6 +312,9 @@ class ValidatorManagerInterface : public td::actor::Actor {
   //virtual void create_validate_block(BlockId block, td::BufferSlice data, td::Promise<Block> promise) = 0;
   virtual void sync_complete(td::Promise<td::Unit> promise) = 0;
 
+  virtual void wait_liteserver_ready(td::Promise<td::Unit> promise) = 0;
+  virtual void wait_initial_sync(td::Promise<td::Unit> promise) = 0;
+
   virtual void get_top_masterchain_state(td::Promise<td::Ref<MasterchainState>> promise) = 0;
   virtual void get_top_masterchain_block(td::Promise<BlockIdExt> promise) = 0;
   virtual void get_top_masterchain_state_block(
