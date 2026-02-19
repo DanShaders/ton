@@ -20,6 +20,8 @@
 
 #include "auto/tl/lite_api.h"
 #include "keys/encryptor.h"
+#include "td/actor/coro_task.h"
+#include "td/actor/coro_utils.h"
 #include "td/utils/Random.h"
 #include "tl-utils/lite-utils.hpp"
 
@@ -112,6 +114,36 @@ class AdnlExtClientImpl : public AdnlExtClient {
       td::actor::send_closure(conn_, &AdnlOutboundConnection::send, serialize_tl_object(obj, true));
     }
   }
+
+  td::actor::Task<td::BufferSlice> send_query_cancellable(td::BufferSlice data) override {
+    if (conn_.empty()) {
+      co_return td::Status::Error(ErrorCode::notready, "Connection closed");
+    }
+
+    auto [response_task, response_promise] = td::actor::StartedTask<td::BufferSlice>::make_bridge();
+
+    auto q_id = generate_next_query_id();
+    auto destroy_cb = [SelfId = actor_id(this)](AdnlQueryId id) {
+      td::actor::send_closure(SelfId, &AdnlExtClientImpl::destroy_query, id);
+    };
+    auto query_actor_id =
+        AdnlQuery::create(std::move(response_promise), std::move(destroy_cb), "", td::Timestamp::never(), q_id);
+    out_queries_.emplace(q_id, query_actor_id);
+
+    auto cancel_cb = [query_actor_id](td::Result<td::Unit> r) {
+      if (r.is_ok()) {
+        td::actor::send_closure(query_actor_id, &AdnlQuery::set_error,
+                                td::Status::Error(ErrorCode::cancelled, "Cancelled"));
+      }
+    };
+    td::actor::current_scope_lease().publish_cancel_promise(td::PromiseCreator::lambda(std::move(cancel_cb)));
+
+    auto obj = create_tl_object<lite_api::adnl_message_query>(q_id, std::move(data));
+    td::actor::send_closure(conn_, &AdnlOutboundConnection::send, serialize_tl_object(obj, true));
+
+    co_return co_await std::move(response_task);
+  }
+
   void destroy_query(AdnlQueryId id) {
     out_queries_.erase(id);
     try_stop();

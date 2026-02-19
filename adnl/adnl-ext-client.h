@@ -18,6 +18,7 @@
 */
 #pragma once
 
+#include "td/actor/coro_task.h"
 #include "td/utils/port/IPAddress.h"
 
 #include "adnl-node-id.hpp"
@@ -38,6 +39,10 @@ class AdnlExtClient : public td::actor::Actor {
   virtual void check_ready(td::Promise<td::Unit> promise) = 0;
   virtual void send_query(std::string name, td::BufferSlice data, td::Timestamp timeout,
                           td::Promise<td::BufferSlice> promise) = 0;
+  virtual td::actor::Task<td::BufferSlice> send_query_cancellable(td::BufferSlice data) {
+    co_return td::Status::Error("Not implemented");
+  }
+
   static td::actor::ActorOwn<AdnlExtClient> create(AdnlNodeIdFull dst, td::IPAddress dst_addr,
                                                    std::unique_ptr<AdnlExtClient::Callback> callback);
   static td::actor::ActorOwn<AdnlExtClient> create(AdnlNodeIdFull dst, std::string dst_host,
