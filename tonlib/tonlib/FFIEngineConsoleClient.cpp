@@ -1,3 +1,6 @@
+#include "td/actor/coro_utils.h"
+
+#include "EngineConsoleClient.h"
 #include "FFIEngineConsoleClient.h"
 
 namespace tonlib {
@@ -11,12 +14,16 @@ FFIEngineConsoleClient::FFIEngineConsoleClient(FFIEventLoop& loop, td::IPAddress
   });
 }
 
-void FFIEngineConsoleClient::request(ton::tl_object_ptr<ton::ton_api::Function> query,
-                                     td::Promise<ton::tl_object_ptr<ton::ton_api::Object>> promise) {
-  loop_.run_in_context(
-      [client = this->client_.get(), query = std::move(query), promise = std::move(promise)]() mutable {
-        td::actor::send_closure(client, &EngineConsoleClient::query, std::move(query), std::move(promise));
-      });
+using Query = ton::tl_object_ptr<ton::ton_api::Function>;
+using Result = ton::tl_object_ptr<ton::ton_api::Object>;
+
+td::actor::Task<Result> FFIEngineConsoleClient::request(Query query) {
+  return loop_.run_in_context([&] {
+    auto func = [](auto client, Query query) -> td::actor::Task<Result> {
+      co_return co_await td::actor::ask(client, &EngineConsoleClient::query, std::move(query));
+    };
+    return func(client_.get(), std::move(query));
+  });
 }
 
 }  // namespace tonlib

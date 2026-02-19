@@ -30,7 +30,7 @@ const void *tonlib_event_loop_wait(TonlibEventLoop *loop, double timeout) {
 
 // ===== Response =====
 void tonlib_response_destroy(TonlibResponse *response) {
-  response->destroy();
+  delete response;
 }
 
 bool tonlib_response_await_ready(TonlibResponse *response) {
@@ -137,15 +137,13 @@ TonlibResponse *tonlib_engine_console_request(TonlibEngineConsole *console, cons
   auto query_or_sync_error = parse_query(query);
 
   if (query_or_sync_error.is_error()) {
-    return TonlibResponse::create_resolved(client.loop(), query_or_sync_error.move_as_error());
+    return new TonlibResponse{TonlibResponse::create_resolved(client.loop(), query_or_sync_error.move_as_error())};
   }
 
   auto transform = [](ton::tl_object_ptr<ton::ton_api::Object> object) -> std::string {
     return td::json_encode<std::string>(td::ToJson(object));
   };
 
-  auto [response, promise] =
-      TonlibResponse::create_bridge<ton::tl_object_ptr<ton::ton_api::Object>>(client.loop(), transform);
-  client.request(query_or_sync_error.move_as_ok(), std::move(promise));
-  return response;
+  auto request = client.request(query_or_sync_error.move_as_ok()).then(transform);
+  return new TonlibResponse{TonlibResponse::create_bridge(client.loop(), std::move(request))};
 }

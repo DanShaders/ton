@@ -1,5 +1,5 @@
-#include "adnl/adnl-ext-client.h"
 #include "auto/tl/ton_api.hpp"
+#include "td/actor/coro_utils.h"
 
 #include "EngineConsoleClient.h"
 
@@ -26,7 +26,6 @@ class EngineConsoleClientCallback : public ton::adnl::AdnlExtClient::Callback {
   }
 
   void on_stop_ready() override {
-    td::actor::send_closure(id_, &EngineConsoleClient::on_stop_ready);
   }
 
  private:
@@ -40,45 +39,29 @@ EngineConsoleClient::EngineConsoleClient(td::IPAddress address, ton::PublicKey s
     , client_private_key_(std::move(client_private_key)) {
 }
 
-void EngineConsoleClient::on_ready() {
-  ready_ = true;
-  for (auto& promise : pending_ready_promises_) {
-    promise.set_value(td::Unit());
-  }
-  pending_ready_promises_.clear();
+EngineConsoleClient::~EngineConsoleClient() = default;
+
+void EngineConsoleClient::start_up() {
+  client_ = ton::adnl::AdnlExtClient::create(ton::adnl::AdnlNodeIdFull{server_public_key_}, client_private_key_,
+                                             address_, std::make_unique<EngineConsoleClientCallback>(actor_id(this)));
+
+  std::tie(ready_future_, ready_promise_) = td::actor::StartedTask<td::Unit>::make_bridge();
 }
 
-void EngineConsoleClient::on_stop_ready() {
-  for (auto& promise : pending_ready_promises_) {
-    promise.set_error(td::Status::Error("Connection closed"));
-  }
-  pending_ready_promises_.clear();
-  ready_ = false;
-  client_ = {};
+void EngineConsoleClient::on_ready() {
+  ready_promise_.set_value({});
 }
 
 td::actor::Task<ton::tl_object_ptr<ton::ton_api::Object>> EngineConsoleClient::query(
     ton::tl_object_ptr<ton::ton_api::Function> object) {
-  if (!ready_) {
-    if (client_.empty()) {
-      client_ =
-          ton::adnl::AdnlExtClient::create(ton::adnl::AdnlNodeIdFull{server_public_key_}, client_private_key_, address_,
-                                           std::make_unique<EngineConsoleClientCallback>(actor_id(this)));
-    }
-
-    auto [ready_awaiter, ready_promise] = td::actor::StartedTask<td::Unit>::make_bridge();
-    pending_ready_promises_.push_back(std::move(ready_promise));
-    co_await std::move(ready_awaiter);
-  }
+  co_await ready_future_.get();
 
   auto query_bytes = ton::serialize_tl_object(object, true);
   auto wrapped_query = ton::serialize_tl_object(
       ton::create_tl_object<ton::ton_api::engine_validator_controlQuery>(std::move(query_bytes)), true);
 
-  auto [response_awaiter, response_promise] = td::actor::StartedTask<td::BufferSlice>::make_bridge();
-  td::actor::send_closure(client_, &ton::adnl::AdnlExtClient::send_query, "query", std::move(wrapped_query),
-                          td::Timestamp::in(10.0), std::move(response_promise));
-  auto response = co_await std::move(response_awaiter);
+  auto response =
+      co_await td::actor::ask(client_, &ton::adnl::AdnlExtClient::send_query_cancellable, std::move(wrapped_query));
 
   auto result_obj = co_await ton::fetch_tl_object<ton::ton_api::Object>(response, true);
   co_return std::move(result_obj);

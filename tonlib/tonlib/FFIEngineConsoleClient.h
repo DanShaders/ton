@@ -2,6 +2,7 @@
 
 #include "auto/tl/ton_api.h"
 #include "keys/keys.hpp"
+#include "td/actor/coro_task.h"
 #include "td/utils/port/IPAddress.h"
 
 #include "EngineConsoleClient.h"
@@ -22,8 +23,7 @@ class FFIEngineConsoleClient {
     }
   }
 
-  void request(ton::tl_object_ptr<ton::ton_api::Function> query,
-               td::Promise<ton::tl_object_ptr<ton::ton_api::Object>> promise);
+  td::actor::Task<ton::tl_object_ptr<ton::ton_api::Object>> request(ton::tl_object_ptr<ton::ton_api::Function> query);
 
   FFIEventLoop& loop() {
     return loop_;
