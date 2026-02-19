@@ -409,7 +409,7 @@ void DhtServer::deleted_key(ton::PublicKeyHash x) {
   auto R = config_.config_del_gc(x);
   R.ensure();
   if (R.move_as_ok()) {
-    write_config([](td::Unit) {});
+    write_config([](td::Result<>) {});
   }
 }
 
@@ -851,7 +851,8 @@ void DhtServer::add_control_interface(ton::PublicKeyHash id, td::int32 port, td:
   }
 
   td::actor::send_closure(control_ext_server_, &ton::adnl::AdnlExtServer::add_local_id, ton::adnl::AdnlNodeIdShort{id});
-  td::actor::send_closure(control_ext_server_, &ton::adnl::AdnlExtServer::add_tcp_port, static_cast<td::uint16>(port));
+  td::actor::send_closure(control_ext_server_, &ton::adnl::AdnlExtServer::add_tcp_port, static_cast<td::uint16>(port),
+                          td::Promise<td::Unit>{});
 
   write_config(std::move(promise));
 }

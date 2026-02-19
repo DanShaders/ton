@@ -285,6 +285,11 @@ void ValidatorManagerImpl::sync_complete(td::Promise<td::Unit> promise) {
       td::actor::send_closure(v.second.actor, &IValidatorGroup::create_session);
     }
   }
+
+  for (auto &p : pending_sync_promises_) {
+    p.set_value(td::Unit());
+  }
+  pending_sync_promises_.clear();
 }
 
 void ValidatorManagerImpl::get_next_block(BlockIdExt block_id, td::Promise<BlockHandle> promise) {
@@ -741,7 +746,7 @@ void ValidatorManagerImpl::add_ext_server_port(td::uint16 port) {
   if (lite_server_.empty()) {
     pending_ext_ports_.push_back(port);
   } else {
-    td::actor::send_closure(lite_server_, &adnl::AdnlExtServer::add_tcp_port, port);
+    td::actor::send_closure(lite_server_, &adnl::AdnlExtServer::add_tcp_port, port, td::Promise<td::Unit>{});
   }
 }
 
@@ -750,11 +755,42 @@ void ValidatorManagerImpl::created_ext_server(td::actor::ActorOwn<adnl::AdnlExtS
   for (auto &id : pending_ext_ids_) {
     td::actor::send_closure(lite_server_, &adnl::AdnlExtServer::add_local_id, id);
   }
+
+  td::MultiPromise mp;
+  auto ig = mp.init_guard();
+  ig.add_promise(td::PromiseCreator::lambda([SelfId = actor_id(this)](td::Result<td::Unit> R) {
+    td::actor::send_closure(SelfId, &ValidatorManagerImpl::liteserver_ports_bound);
+  }));
   for (auto port : pending_ext_ports_) {
-    td::actor::send_closure(lite_server_, &adnl::AdnlExtServer::add_tcp_port, port);
+    td::actor::send_closure(lite_server_, &adnl::AdnlExtServer::add_tcp_port, port, ig.get_promise());
   }
+
   pending_ext_ids_.clear();
   pending_ext_ports_.clear();
+}
+
+void ValidatorManagerImpl::liteserver_ports_bound() {
+  liteserver_ready_ = true;
+  for (auto &p : pending_liteserver_promises_) {
+    p.set_value(td::Unit());
+  }
+  pending_liteserver_promises_.clear();
+}
+
+void ValidatorManagerImpl::wait_liteserver_ready(td::Promise<td::Unit> promise) {
+  if (liteserver_ready_) {
+    promise.set_value(td::Unit());
+  } else {
+    pending_liteserver_promises_.push_back(std::move(promise));
+  }
+}
+
+void ValidatorManagerImpl::wait_initial_sync(td::Promise<td::Unit> promise) {
+  if (started_) {
+    promise.set_value(td::Unit());
+  } else {
+    pending_sync_promises_.push_back(std::move(promise));
+  }
 }
 
 void ValidatorManagerImpl::run_ext_query(td::BufferSlice data, td::Promise<td::BufferSlice> promise) {
@@ -1333,15 +1369,15 @@ void ValidatorManagerImpl::finished_wait_data(BlockHandle handle, td::Result<td:
 
 void ValidatorManagerImpl::set_block_state(BlockHandle handle, td::Ref<ShardState> state, vm::StoreCellHint hint,
                                            td::Promise<td::Ref<ShardState>> promise) {
-  auto P = td::PromiseCreator::lambda(
-      [SelfId = actor_id(this), handle, promise = std::move(promise)](td::Result<td::Ref<ShardState>> R) mutable {
-        if (R.is_error()) {
-          promise.set_error(R.move_as_error());
-        } else {
-          promise.set_value(R.move_as_ok());
-          td::actor::send_closure(SelfId, &ValidatorManagerImpl::written_handle, std::move(handle), [](td::Unit) {});
-        }
-      });
+  auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), handle,
+                                       promise = std::move(promise)](td::Result<td::Ref<ShardState>> R) mutable {
+    if (R.is_error()) {
+      promise.set_error(R.move_as_error());
+    } else {
+      promise.set_value(R.move_as_ok());
+      td::actor::send_closure(SelfId, &ValidatorManagerImpl::written_handle, std::move(handle), [](td::Result<>) {});
+    }
+  });
   td::actor::send_closure(db_, &Db::store_block_state, handle, state, std::move(hint), std::move(P));
 }
 
@@ -1385,42 +1421,42 @@ void ValidatorManagerImpl::store_zero_state_file(BlockIdExt block_id, td::Buffer
 }
 
 void ValidatorManagerImpl::set_block_data(BlockHandle handle, td::Ref<BlockData> data, td::Promise<td::Unit> promise) {
-  auto P = td::PromiseCreator::lambda(
-      [SelfId = actor_id(this), data, handle, promise = std::move(promise)](td::Result<td::Unit> R) mutable {
-        if (R.is_error()) {
-          promise.set_error(R.move_as_error());
-        } else {
-          promise.set_value(td::Unit());
-          td::actor::send_closure(SelfId, &ValidatorManagerImpl::written_handle, std::move(handle), [](td::Unit) {});
-        }
-      });
+  auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), data, handle,
+                                       promise = std::move(promise)](td::Result<td::Unit> R) mutable {
+    if (R.is_error()) {
+      promise.set_error(R.move_as_error());
+    } else {
+      promise.set_value(td::Unit());
+      td::actor::send_closure(SelfId, &ValidatorManagerImpl::written_handle, std::move(handle), [](td::Result<>) {});
+    }
+  });
   td::actor::send_closure(db_, &Db::store_block_data, handle, std::move(data), std::move(P));
 }
 
 void ValidatorManagerImpl::set_block_proof(BlockHandle handle, td::Ref<Proof> proof, td::Promise<td::Unit> promise) {
-  auto P = td::PromiseCreator::lambda(
-      [SelfId = actor_id(this), handle, promise = std::move(promise)](td::Result<td::Unit> R) mutable {
-        if (R.is_error()) {
-          promise.set_error(R.move_as_error());
-        } else {
-          promise.set_value(td::Unit());
-          td::actor::send_closure(SelfId, &ValidatorManagerImpl::written_handle, std::move(handle), [](td::Unit) {});
-        }
-      });
+  auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), handle,
+                                       promise = std::move(promise)](td::Result<td::Unit> R) mutable {
+    if (R.is_error()) {
+      promise.set_error(R.move_as_error());
+    } else {
+      promise.set_value(td::Unit());
+      td::actor::send_closure(SelfId, &ValidatorManagerImpl::written_handle, std::move(handle), [](td::Result<>) {});
+    }
+  });
   td::actor::send_closure(db_, &Db::store_block_proof, handle, std::move(proof), std::move(P));
 }
 
 void ValidatorManagerImpl::set_block_proof_link(BlockHandle handle, td::Ref<ProofLink> proof,
                                                 td::Promise<td::Unit> promise) {
-  auto P = td::PromiseCreator::lambda(
-      [SelfId = actor_id(this), handle, promise = std::move(promise)](td::Result<td::Unit> R) mutable {
-        if (R.is_error()) {
-          promise.set_error(R.move_as_error());
-        } else {
-          promise.set_value(td::Unit());
-          td::actor::send_closure(SelfId, &ValidatorManagerImpl::written_handle, std::move(handle), [](td::Unit) {});
-        }
-      });
+  auto P = td::PromiseCreator::lambda([SelfId = actor_id(this), handle,
+                                       promise = std::move(promise)](td::Result<td::Unit> R) mutable {
+    if (R.is_error()) {
+      promise.set_error(R.move_as_error());
+    } else {
+      promise.set_value(td::Unit());
+      td::actor::send_closure(SelfId, &ValidatorManagerImpl::written_handle, std::move(handle), [](td::Result<>) {});
+    }
+  });
   td::actor::send_closure(db_, &Db::store_block_proof_link, handle, std::move(proof), std::move(P));
 }
 
