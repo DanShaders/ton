@@ -86,3 +86,9 @@ class EngineConsoleClient:
     async def get_actor_stats(self) -> str:
         query = ton_api.Engine_validator_getActorTextStatsRequest()
         return query.parse_result(await self.request(query)).data
+
+    async def wait_for_liteserver(self) -> None:
+        await self.request(ton_api.Engine_validator_waitForLiteServerRequest())
+
+    async def wait_for_initial_sync(self) -> None:
+        await self.request(ton_api.Engine_validator_waitForInitialSyncRequest())

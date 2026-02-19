@@ -15,7 +15,7 @@ from typing import Literal, final, override
 from tonapi import ton_api
 
 from tl import TLObject
-from tonlib import EngineConsoleClient, TonlibCDLL, TonlibClient, TonlibError, TonlibEventLoop
+from tonlib import EngineConsoleClient, TonlibCDLL, TonlibClient, TonlibEventLoop
 
 from .install import Install
 from .key import Key
@@ -317,26 +317,7 @@ class Network:
         client = await self.__full_nodes[0].tonlib_client()
 
         while True:
-            try:
-                mc_info = await client.get_masterchain_info()
-            except TonlibError as e:
-                # FIXME: We should really let node notify us that it is ready.
-                try:
-                    if (
-                        e.result.code == 500
-                        and (
-                            e.result.message
-                            == "LITE_SERVER_NETWORKtimeout for adnl query query"  # node is not synced yet
-                            or e.result.message
-                            == "LITE_SERVER_NETWORK"  # node is not listening the socket
-                        )
-                    ):
-                        await asyncio.sleep(0.2)
-                        continue
-                except Exception:
-                    pass
-                raise
-
+            mc_info = await client.get_masterchain_info()
             assert mc_info.last is not None
 
             if mc_info.last.seqno >= seqno:
@@ -577,6 +558,9 @@ class FullNode(Network.Node):
     async def tonlib_client(self) -> TonlibClient:
         if self._client:
             return self._client
+
+        await self.engine_console.wait_for_liteserver()
+        await self.engine_console.wait_for_initial_sync()
 
         self._client = TonlibClient(
             ls_index=0,
