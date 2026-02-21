@@ -1014,7 +1014,7 @@ void ArchiveManager::run_gc(UnixTime mc_ts, UnixTime gc_ts, double archive_ttl) 
     vec.resize(vec.size() - 1, PackageId::empty(false, true));
 
     for (auto &x : vec) {
-      delete_package(x, [](td::Unit) {});
+      delete_package(x, [](td::Result<>) {});
     }
   }
   vec.clear();
@@ -1038,7 +1038,7 @@ void ArchiveManager::run_gc(UnixTime mc_ts, UnixTime gc_ts, double archive_ttl) 
 
       for (auto &x : vec) {
         LOG(ERROR) << "WARNING: deleting package " << x.id;
-        delete_package(x, [](td::Unit) {});
+        delete_package(x, [](td::Result<>) {});
       }
     }
   }

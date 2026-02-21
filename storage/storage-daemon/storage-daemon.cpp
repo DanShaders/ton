@@ -131,7 +131,7 @@ class StorageDaemon : public td::actor::Actor {
     auto generate_public_key = [&]() -> PublicKey {
       auto pk = PrivateKey{privkeys::Ed25519::random()};
       auto pub = pk.compute_public_key();
-      td::actor::send_closure(keyring_, &keyring::Keyring::add_key, std::move(pk), false, [](td::Unit) {});
+      td::actor::send_closure(keyring_, &keyring::Keyring::add_key, std::move(pk), false, [](td::Result<>) {});
       return pub;
     };
     {
@@ -368,13 +368,13 @@ class StorageDaemon : public td::actor::Actor {
   void run_control_query(ton_api::storage_daemon_setActiveDownload &query, td::Promise<td::BufferSlice> promise) {
     td::actor::send_closure(
         manager_, &StorageManager::set_active_download, query.hash_, query.active_,
-        promise.wrap([](td::Unit &&) { return create_serialize_tl_object<ton_api::storage_daemon_success>(); }));
+        promise.wrap([](td::Result<>) { return create_serialize_tl_object<ton_api::storage_daemon_success>(); }));
   }
 
   void run_control_query(ton_api::storage_daemon_setActiveUpload &query, td::Promise<td::BufferSlice> promise) {
     td::actor::send_closure(
         manager_, &StorageManager::set_active_upload, query.hash_, query.active_,
-        promise.wrap([](td::Unit &&) { return create_serialize_tl_object<ton_api::storage_daemon_success>(); }));
+        promise.wrap([](td::Result<>) { return create_serialize_tl_object<ton_api::storage_daemon_success>(); }));
   }
 
   void run_control_query(ton_api::storage_daemon_getTorrents &query, td::Promise<td::BufferSlice> promise) {
@@ -520,7 +520,7 @@ class StorageDaemon : public td::actor::Actor {
   void run_control_query(ton_api::storage_daemon_removeTorrent &query, td::Promise<td::BufferSlice> promise) {
     td::actor::send_closure(
         manager_, &StorageManager::remove_torrent, query.hash_, query.remove_files_,
-        promise.wrap([](td::Unit &&) { return create_serialize_tl_object<ton_api::storage_daemon_success>(); }));
+        promise.wrap([](td::Result<>) { return create_serialize_tl_object<ton_api::storage_daemon_success>(); }));
   }
 
   void run_control_query(ton_api::storage_daemon_loadFrom &query, td::Promise<td::BufferSlice> promise) {
@@ -602,7 +602,7 @@ class StorageDaemon : public td::actor::Actor {
   void run_control_query(ton_api::storage_daemon_importPrivateKey &query, td::Promise<td::BufferSlice> promise) {
     auto pk = ton::PrivateKey{query.key_};
     td::actor::send_closure(keyring_, &ton::keyring::Keyring::add_key, std::move(pk), false,
-                            promise.wrap([hash = pk.compute_short_id()](td::Unit) mutable {
+                            promise.wrap([hash = pk.compute_short_id()](td::Result<>) mutable {
                               return create_serialize_tl_object<ton_api::storage_daemon_keyHash>(hash.bits256_value());
                             }));
   }
@@ -634,8 +634,9 @@ class StorageDaemon : public td::actor::Actor {
       return;
     }
     TRY_RESULT_PROMISE_PREFIX(promise, address, ContractAddress::parse(query.account_address_), "Invalid address: ");
-    do_init_provider(
-        address, promise.wrap([](td::Unit) { return create_serialize_tl_object<ton_api::storage_daemon_success>(); }));
+    do_init_provider(address, promise.wrap([](td::Result<>) {
+      return create_serialize_tl_object<ton_api::storage_daemon_success>();
+    }));
   }
 
   void do_init_provider(ContractAddress address, td::Promise<td::Unit> promise, bool deploying = false) {
@@ -733,9 +734,10 @@ class StorageDaemon : public td::actor::Actor {
       return;
     }
     TRY_RESULT_PROMISE(promise, params, ProviderParams::create(query.params_));
-    td::actor::send_closure(
-        provider_, &StorageProvider::set_params, std::move(params),
-        promise.wrap([](td::Unit) mutable { return create_serialize_tl_object<ton_api::storage_daemon_success>(); }));
+    td::actor::send_closure(provider_, &StorageProvider::set_params, std::move(params),
+                            promise.wrap([](td::Result<>) mutable {
+                              return create_serialize_tl_object<ton_api::storage_daemon_success>();
+                            }));
   }
 
   template <class T>
@@ -761,7 +763,7 @@ class StorageDaemon : public td::actor::Actor {
     }
     td::actor::send_closure(
         provider_, &StorageProvider::set_provider_config, StorageProvider::Config(query.config_),
-        promise.wrap([](td::Unit) { return create_serialize_tl_object<ton_api::storage_daemon_success>(); }));
+        promise.wrap([](td::Result<>) { return create_serialize_tl_object<ton_api::storage_daemon_success>(); }));
   }
 
   void run_control_query(ton_api::storage_daemon_withdraw &query, td::Promise<td::BufferSlice> promise) {
@@ -770,7 +772,7 @@ class StorageDaemon : public td::actor::Actor {
       return;
     }
     TRY_RESULT_PROMISE_PREFIX(promise, address, ContractAddress::parse(query.contract_), "Invalid address: ");
-    td::actor::send_closure(provider_, &StorageProvider::withdraw, address, promise.wrap([](td::Unit) {
+    td::actor::send_closure(provider_, &StorageProvider::withdraw, address, promise.wrap([](td::Result<>) {
       return create_serialize_tl_object<ton_api::storage_daemon_success>();
     }));
   }
@@ -788,7 +790,7 @@ class StorageDaemon : public td::actor::Actor {
     }
     td::actor::send_closure(
         provider_, &StorageProvider::send_coins, address, amount, std::move(query.message_),
-        promise.wrap([](td::Unit) { return create_serialize_tl_object<ton_api::storage_daemon_success>(); }));
+        promise.wrap([](td::Result<>) { return create_serialize_tl_object<ton_api::storage_daemon_success>(); }));
   }
 
   void run_control_query(ton_api::storage_daemon_closeStorageContract &query, td::Promise<td::BufferSlice> promise) {
@@ -797,9 +799,9 @@ class StorageDaemon : public td::actor::Actor {
       return;
     }
     TRY_RESULT_PROMISE_PREFIX(promise, address, ContractAddress::parse(query.address_), "Invalid address: ");
-    td::actor::send_closure(provider_, &StorageProvider::close_storage_contract, address, promise.wrap([](td::Unit) {
-      return create_serialize_tl_object<ton_api::storage_daemon_success>();
-    }));
+    td::actor::send_closure(
+        provider_, &StorageProvider::close_storage_contract, address,
+        promise.wrap([](td::Result<>) { return create_serialize_tl_object<ton_api::storage_daemon_success>(); }));
   }
 
  private:
