@@ -160,11 +160,7 @@ class DynamicBagOfCellsDb {
 
   virtual void load_cell_async(td::Slice hash, std::shared_ptr<AsyncExecutor> executor,
                                td::Promise<Ref<DataCell>> promise) = 0;
-  td::actor::Task<Ref<DataCell>> load_cell_async(td::Slice hash, std::shared_ptr<AsyncExecutor> executor) {
-    auto [task, promise] = td::actor::StartedTask<Ref<DataCell>>::make_bridge();
-    load_cell_async(hash, std::move(executor), std::move(promise));
-    co_return co_await std::move(task);
-  }
+  td::actor::Task<Ref<DataCell>> load_cell_async(td::Slice hash, std::shared_ptr<AsyncExecutor> executor);
   virtual void prepare_commit_async(std::shared_ptr<AsyncExecutor> executor, StoreCellHint hint,
                                     td::Promise<td::Unit> promise) = 0;
 };

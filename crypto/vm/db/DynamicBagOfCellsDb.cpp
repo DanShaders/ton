@@ -901,4 +901,12 @@ class DynamicBagOfCellsDbImpl : public DynamicBagOfCellsDb, private ExtCellCreat
 std::unique_ptr<DynamicBagOfCellsDb> DynamicBagOfCellsDb::create(CreateV1Options) {
   return std::make_unique<DynamicBagOfCellsDbImpl>();
 }
+
+td::actor::Task<Ref<DataCell>> DynamicBagOfCellsDb::load_cell_async(td::Slice hash,
+                                                                    std::shared_ptr<AsyncExecutor> executor) {
+  auto [task, promise] = td::actor::StartedTask<Ref<DataCell>>::make_bridge();
+  load_cell_async(hash, std::move(executor), std::move(promise));
+  co_return co_await std::move(task);
+}
+
 }  // namespace vm
