@@ -253,8 +253,18 @@ auto ask_new_immediate(TargetId&& to, MemFn mf, Args&&... args) {
   return ask_new_impl<false>(std::forward<TargetId>(to), mf, std::forward<Args>(args)...);
 }
 
+template <typename T>
+concept ActorTarget = IsSpecializationOf<T, ActorId> || IsSpecializationOf<T, ActorOwn>;
+
+template <typename Base, typename ReturnType, typename... Args>
+auto ask(ActorTarget auto&& to, ReturnType (Base::*fn)(Args... args), std::type_identity_t<Args>... args)
+  requires std::is_base_of_v<Base, typename std::remove_cvref_t<decltype(to)>::ActorT>
+{
+  return ask_impl<true>(std::move(to), fn, std::forward<Args>(args)...);
+}
+
 template <class TargetId, class MemFn, class... Args>
-  requires AskArgsValid<MemFn, Args...>
+  requires(unified_result<MemFn>::kind == UnifiedKind::PromiseArgument && AskArgsValid<MemFn, Args...>)
 auto ask(TargetId&& to, MemFn mf, Args&&... args) {
   return ask_impl<true>(std::forward<TargetId>(to), mf, std::forward<Args>(args)...);
 }
