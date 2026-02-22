@@ -27,8 +27,8 @@ td::actor::Task<td::Ref<ChainState>> ChainState::from_manager(td::actor::ActorId
     co_return make_from(ZerostateTip{blocks[0], state});
   }
 
-  std::vector<td::actor::StartedTask<td::Ref<vm::Cell>>> wait_state_root;
-  std::vector<td::actor::StartedTask<td::Ref<BlockData>>> wait_block_data;
+  std::vector<td::actor::Task<td::Ref<vm::Cell>>> wait_state_root;
+  std::vector<td::actor::Task<td::Ref<BlockData>>> wait_block_data;
   for (auto block : blocks) {
     wait_state_root.push_back(
         td::actor::ask(manager, &ManagerFacade::wait_block_state_root, block, td::Timestamp::in(10.0)));

@@ -198,12 +198,14 @@ class TestOverlayNode : public runtime::SpawnsWith<Bus>, public runtime::Connect
       CHECK(message->recipient.value() != bus->local_id.idx);
       td::actor::ask(test_overlay, &TestOverlay::send_message, bus->local_id, instance_idx_,
                      message->recipient->value(), message->message.data.clone())
+          .start()
           .detach_silent();
     } else {
       for (size_t i = 0; i < bus->validator_set.size(); ++i) {
         if (bus->local_id.idx.value() != i) {
           td::actor::ask(test_overlay, &TestOverlay::send_message, bus->local_id, instance_idx_, i,
                          message->message.data.clone())
+              .start()
               .detach_silent();
         }
       }
@@ -215,6 +217,7 @@ class TestOverlayNode : public runtime::SpawnsWith<Bus>, public runtime::Connect
     for (size_t i = 0; i < bus->validator_set.size(); ++i) {
       if (bus->local_id.idx.value() != i) {
         td::actor::ask(test_overlay, &TestOverlay::send_candidate, bus->local_id, instance_idx_, i, event->candidate)
+            .start()
             .detach_silent();
       }
     }

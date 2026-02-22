@@ -318,7 +318,7 @@ class CandidateResolverImpl : public runtime::SpawnsWith<Bus>, public runtime::C
 
   td::actor::Task<> store_to_db(CandidateId id, ResolveState &state) {
     bool storing_info = false, storing_data = false, storing_cert = false;
-    std::vector<td::actor::StartedTask<>> tasks;
+    std::vector<td::actor::Task<>> tasks;
     if (state.data.candidate.has_value()) {
       auto &cand = *state.data.candidate;
       if (!state.stored_info_to_db) {
@@ -327,7 +327,7 @@ class CandidateResolverImpl : public runtime::SpawnsWith<Bus>, public runtime::C
             create_serialize_tl_object<ton_api::consensus_simplex_db_key_candidateResolver_candidateInfo>(id.to_tl());
         auto value = create_serialize_tl_object<ton_api::consensus_simplex_db_candidateResolver_candidateInfo>(
             (int)cand->leader.value(), cand->hash_data().to_tl(), cand->signature.clone());
-        tasks.push_back(owning_bus()->db->set(std::move(key), std::move(value)).start());
+        tasks.push_back(owning_bus()->db->set(std::move(key), std::move(value)));
       }
       if (!state.stored_data_to_db) {
         storing_data = true;
@@ -343,7 +343,7 @@ class CandidateResolverImpl : public runtime::SpawnsWith<Bus>, public runtime::C
       auto key = create_serialize_tl_object<ton_api::consensus_simplex_db_key_candidateResolver_notarCert>(id.to_tl());
       auto value = create_serialize_tl_object<ton_api::consensus_simplex_db_candidateResolver_notarCert>(
           notar->to_tl_vote_signature_set());
-      tasks.push_back(owning_bus()->db->set(std::move(key), std::move(value)).start());
+      tasks.push_back(owning_bus()->db->set(std::move(key), std::move(value)));
     }
 
     co_await td::actor::all(std::move(tasks));
