@@ -22,6 +22,19 @@
 
 namespace td {
 
+// FIXME: Replace with std::unreachable once we update to C++23.
+namespace {
+#if TD_MSVC
+[[noreturn]] void unreachable() {
+  __assume(0);
+}
+#else
+[[noreturn]] void unreachable() {
+  __builtin_unreachable();
+}
+#endif
+}  // namespace
+
 bool TD_TL_writer_hpp::is_documentation_generated() const {
   return true;
 }
@@ -231,6 +244,7 @@ std::string TD_TL_writer_hpp::gen_additional_proxy_function_begin(const std::str
            "switch (obj.get_id()) {";
   }
   assert(false);
+  unreachable();
 }
 
 std::string TD_TL_writer_hpp::gen_additional_proxy_function_case(const std::string &function_name,
@@ -238,7 +252,7 @@ std::string TD_TL_writer_hpp::gen_additional_proxy_function_case(const std::stri
                                                                  int arity) const {
   //assert(function_name == "downcast_call");
   assert(false);
-  return "";
+  unreachable();
 }
 
 std::string TD_TL_writer_hpp::gen_additional_proxy_function_case(const std::string &function_name,
@@ -261,6 +275,7 @@ std::string TD_TL_writer_hpp::gen_additional_proxy_function_case(const std::stri
            "      return true;\n";
   }
   assert(false);
+  unreachable();
 }
 
 std::string TD_TL_writer_hpp::gen_additional_proxy_function_end(const std::string &function_name,

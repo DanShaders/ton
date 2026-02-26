@@ -25,9 +25,6 @@ src:*/crypto/vm/large-boc-serializer.cpp
 src:*/tdactor/td/actor/ActorStats.cpp
 src:*/validator/full-node-fast-sync-overlays.cpp
 
-[return-type]
-src:*/tl/generate/tl_writer_hpp.cpp
-
 [deprecated-declarations]
 src:*/tdutils/test/crypto.cpp
 src:*/third-party/rocksdb/db/memtable.cc
