@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Required environment:
 #   TARGET_TRIPLE  - e.g. x86_64-pc-linux-musl, x86_64-pc-windows-msvc, aarch64-apple-darwin, etc.
-#   CC, CXX, AR, RANLIB - compiler tools
+#   CC, CXX, AR, RANLIB/LINKER - compiler tools
 #   SOURCE_DIR     - path to ton/src (for vendored sources in third-party/)
 #   BUILD_DIR      - where to build
 #   TARBALLS_DIR   - where to download tarballs
@@ -24,12 +24,12 @@ echo "TARGET_TRIPLE=\"$TARGET_TRIPLE\" \\"
 echo "CC=\"$CC\" \\"
 echo "CXX=\"$CXX\" \\"
 echo "AR=\"$AR\" \\"
-echo "RANLIB=\"$RANLIB\" \\"
+# echo "RANLIB=\"$RANLIB\" \\"
 echo "SOURCE_DIR=\"$SOURCE_DIR\" \\"
 echo "BUILD_DIR=\"$BUILD_DIR\" \\"
 echo "TARBALLS_DIR=\"$TARBALLS_DIR\" \\"
 echo "PREFIX=\"$PREFIX\" \\"
-echo "DESTDIR=\"$DESTDIR \"\\" 
+echo "DESTDIR=\"$DESTDIR\" \\" 
 echo "CMAKE_TOOLCHAIN_FILE=\"${CMAKE_TOOLCHAIN_FILE:-}\" \\"
 echo "CFLAGS=\"$CFLAGS\" \\"
 echo "CXXFLAGS=\"$CXXFLAGS\" \\"
@@ -128,7 +128,7 @@ build_openssl() {
             fi
             ;;
         *-windows-msvc*|*-pc-windows-msvc*)
-            configure_target="VC-WIN64A"
+            configure_target="CLANG-CL"
             ;;
         *-mingw*)
             configure_target="mingw64"
@@ -182,27 +182,28 @@ build_openssl() {
 build_sodium() {
     echo "=== Building libsodium ${LIBSODIUM_VERSION} ==="
 
-    prepare_source libsodium "$LIBSODIUM_VERSION" "$LIBSODIUM_URL" "$LIBSODIUM_SHA256"
-    cd "$PREPARED_SRC"
+    local cmake_zip="$TARBALLS_DIR/libsodium-cmake-${LIBSODIUM_CMAKE_COMMIT}.zip"
+    (
+        cd "$TARBALLS_DIR"
+        download_verified "$LIBSODIUM_CMAKE_URL" "$cmake_zip" "$LIBSODIUM_CMAKE_SHA256"
+    )
 
-    local configure_args="--prefix=$PREFIX --with-pic --enable-static --disable-shared"
+    local sodium_tarball="$TARBALLS_DIR/libsodium-${LIBSODIUM_VERSION}.tar.gz"
+    (
+        cd "$TARBALLS_DIR"
+        download_verified "$LIBSODIUM_URL" "$sodium_tarball" "$LIBSODIUM_SHA256"
+    )
 
-    case "$TARGET_TRIPLE" in
-        *-emscripten*|*-wasm*)
-            emconfigure ./configure $configure_args --disable-ssp
-            emmake make -j"$NPROC"
-            emmake make "DESTDIR=$DESTDIR" install
-            return
-            ;;
-    esac
+    local wrapper_dir="$BUILD_DIR/libsodium-cmake-${LIBSODIUM_CMAKE_COMMIT}"
+    rm -rf "$wrapper_dir"
+    unzip -q "$cmake_zip" -d "$BUILD_DIR"
 
-    if [ -n "$TARGET_TRIPLE" ]; then
-        configure_args="$configure_args --host=$TARGET_TRIPLE"
-    fi
+    rm -rf "$wrapper_dir/libsodium"
+    mkdir -p "$wrapper_dir/libsodium"
+    tar xf "$sodium_tarball" --strip-components=1 -C "$wrapper_dir/libsodium"
 
-    ./configure $configure_args
-    make -j"$NPROC"
-    make "DESTDIR=$DESTDIR" install
+    cmake_build_install sodium "$wrapper_dir" \
+        -DSODIUM_DISABLE_TESTS=ON
 }
 
 # ===== libmicrohttpd =====
@@ -262,8 +263,9 @@ build_blst() {
 build_secp256k1() {
     cmake_build_install secp256k1 "$THIRD_PARTY/secp256k1" \
         -DSECP256K1_ENABLE_MODULE_RECOVERY=ON \
-        -DSECP256K1_ENABLE_MODULE_EXTRAKEYS=ON \
-        -DSECP256K1_BUILD_EXAMPLES=OFF \
+        -DSECP256K1_BUILD_BENCHMARK=OFF \
+        -DSECP256K1_BUILD_TESTS=OFF \
+        -DSECP256K1_BUILD_EXHAUSTIVE_TESTS=OFF \
         -DBUILD_SHARED_LIBS=OFF
 }
 
@@ -285,7 +287,7 @@ build_lz4() {
         -DBUILD_SHARED_LIBS=OFF \
         -DBUILD_STATIC_LIBS=ON \
         -DLZ4_BUNDLED_MODE=ON \
-        -DLZ4_POSITION_INDEPENDENT_LIB=ON
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.10
 }
 
 # ===== libbacktrace =====
@@ -369,7 +371,7 @@ build_ngtcp2() {
 }
 
 # ===== Main =====
-ALL_DEPS="openssl sodium mhd blst secp256k1 zlib lz4 libbacktrace crc32c rocksdb abseil ngtcp2"
+ALL_DEPS="sodium mhd blst secp256k1 zlib lz4 libbacktrace crc32c rocksdb abseil ngtcp2"
 
 if [ $# -gt 0 ]; then
     DEPS_TO_BUILD="$@"
