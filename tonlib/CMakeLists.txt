@@ -11,6 +11,7 @@ set(TONLIB_SOURCE
   tonlib/LastBlock.cpp
   tonlib/LastBlockStorage.cpp
   tonlib/LastConfig.cpp
+  tonlib/LiteClient.cpp
   tonlib/Logging.cpp
   tonlib/TonlibClient.cpp
   tonlib/TonlibClientWrapper.cpp
@@ -26,6 +27,7 @@ set(TONLIB_SOURCE
   tonlib/LastBlock.h
   tonlib/LastBlockStorage.h
   tonlib/LastConfig.h
+  tonlib/LiteClient.h
   tonlib/Logging.h
   tonlib/TonlibCallback.h
   tonlib/TonlibClient.h
@@ -85,16 +87,18 @@ target_include_directories(tonlibjson_public_interface INTERFACE
 
 add_library(tonlibjson_private_interface INTERFACE)
 target_link_libraries(tonlibjson_private_interface INTERFACE
-  tonlib tl_tonlib_api_json tonlibjson_public_interface
+  tonlib tl_tonlib_api_json tl_lite_api_json tonlibjson_public_interface
 )
 
 add_library(tonlibjson_objects OBJECT
   tonlib/ClientJson.cpp
   tonlib/FFIEngineConsoleClient.cpp
   tonlib/FFIEventLoop.cpp
+  tonlib/FFILiteClient.cpp
   tonlib/tonlib_client_json.cpp
   tonlib/tonlib_engine_console.cpp
   tonlib/tonlib_event_loop.cpp
+  tonlib/tonlib_lite_client.cpp
 )
 target_link_libraries(tonlibjson_objects
   PRIVATE tonlibjson_private_interface
@@ -183,6 +187,7 @@ set(TONLIB_JSON_HEADERS
   tonlib/tonlib_client_json.h
   tonlib/tonlib_engine_console.h
   tonlib/tonlib_event_loop.h
+  tonlib/tonlib_lite_client.h
 )
 
 install(FILES ${TONLIB_JSON_HEADERS} ${CMAKE_CURRENT_BINARY_DIR}/tonlib/tonlibjson_export.h DESTINATION include/tonlib/)

@@ -1183,6 +1183,7 @@ quic.query data:bytes = quic.Request;
 quic.answer data:bytes = quic.Response;
 
 engineConsoleClient.config address:string server_public_key:PublicKey client_private_key:PrivateKey = engineConsoleClient.Config;
+liteClient.config address:string server_public_key:PublicKey = liteClient.Config;
 
 consensus.overlayId session_id:int256 nodes:(vector int256) = consensus.OverlayId;
 consensus.dataToSign session_id:int256 data:bytes = consensus.DataToSign;

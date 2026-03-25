@@ -75,7 +75,7 @@ void gen_to_json_constructor(StringBuilder &sb, const T *constructor, bool is_he
     auto object = PSTRING() << "object." << tl::simple::gen_cpp_field_name(arg.name);
     if (arg.type->type == tl::simple::Type::Bytes || arg.type->type == tl::simple::Type::SecureBytes) {
       object = PSTRING() << "JsonBytes{" << object << "}";
-    } else if (arg.type->type == tl::simple::Type::Bool) {
+    } else if (arg.type->type == tl::simple::Type::Bool || arg.type->type == tl::simple::Type::True) {
       object = PSTRING() << "JsonBool{" << object << "}";
     } else if (arg.type->type == tl::simple::Type::Int64) {
       object = PSTRING() << "JsonInt64{" << object << "}";
