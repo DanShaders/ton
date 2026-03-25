@@ -69,6 +69,8 @@ int main() {
                {"<string>", "\"td/utils/buffer.h\"", "\"crypto/common/bitstring.h\""});
   td::gen_json_converter(td::tl::read_tl_config_from_file("scheme/ton_api.tlo"), "auto/tl/ton_api_json", "ton_api",
                          td::tl::TL_writer::Mode::All);
+  td::gen_json_converter(td::tl::read_tl_config_from_file("scheme/lite_api.tlo"), "auto/tl/lite_api_json", "lite_api",
+                         td::tl::TL_writer::Mode::All);
 
 #ifdef TONLIB_ENABLE_JNI
   generate_cpp<td::TD_TL_writer_jni_cpp, td::TD_TL_writer_jni_h>(

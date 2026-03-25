@@ -11,6 +11,7 @@ set(TONLIB_SOURCE
   tonlib/LastBlock.cpp
   tonlib/LastBlockStorage.cpp
   tonlib/LastConfig.cpp
+  tonlib/LiteClient.cpp
   tonlib/Logging.cpp
   tonlib/TonlibClient.cpp
   tonlib/TonlibClientWrapper.cpp
@@ -26,6 +27,7 @@ set(TONLIB_SOURCE
   tonlib/LastBlock.h
   tonlib/LastBlockStorage.h
   tonlib/LastConfig.h
+  tonlib/LiteClient.h
   tonlib/Logging.h
   tonlib/TonlibCallback.h
   tonlib/TonlibClient.h
@@ -85,17 +87,19 @@ target_include_directories(tonlibjson_public_interface INTERFACE
 
 add_library(tonlibjson_private_interface INTERFACE)
 target_link_libraries(tonlibjson_private_interface INTERFACE
-  tonlib tl_tonlib_api_json tddb dht keyring overlay tonlibjson_public_interface
+  tonlib tl_tonlib_api_json tl_lite_api_json tddb dht keyring overlay tonlibjson_public_interface
 )
 
 add_library(tonlibjson_objects OBJECT
   tonlib/ClientJson.cpp
   tonlib/FFIEngineConsoleClient.cpp
   tonlib/FFIEventLoop.cpp
+  tonlib/FFILiteClient.cpp
   tonlib/FFIPublicOverlayClient.cpp
   tonlib/PublicOverlayClient.cpp
   tonlib/tonlib_client_json.cpp
   tonlib/tonlib_engine_console.cpp
+  tonlib/tonlib_lite_client.cpp
   tonlib/tonlib_public_overlay.cpp
 )
 target_link_libraries(tonlibjson_objects
@@ -184,6 +188,7 @@ endif()
 set(TONLIB_JSON_HEADERS
   tonlib/tonlib_client_json.h
   tonlib/tonlib_engine_console.h
+  tonlib/tonlib_lite_client.h
   tonlib/tonlib_public_overlay.h
 )
 
