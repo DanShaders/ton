@@ -74,7 +74,17 @@ def _main():
         help='Path to json map {"adnl": "name"} used for validator names',
     )
     _ = parser.add_argument(
+        "--cache-dir",
+        default=os.getenv("CONSENSUS_EXPLORER_CACHE_DIR", ""),
+        help="Directory to cache downloaded key blocks",
+    )
+    _ = parser.add_argument(
         "--web-root", default="/", help="Web root for the Dash app (default: /)"
+    )
+    _ = parser.add_argument(
+        "--sudo-helper",
+        default="",
+        help="Path to helper script for reading files via sudo on permission denied",
     )
 
     args = parser.parse_args()
@@ -98,8 +108,12 @@ def _main():
             if not Path(validator_names_json).exists():
                 parser.error(f"Validator names json not found at {validator_names_json}")
 
+        cache_dir = cast(str, args.cache_dir)
         vset_provider = ValidatorSetInfoProvider(
-            block_explorer_url, show_validator_set_bin, validator_names_json
+            block_explorer_url,
+            show_validator_set_bin,
+            validator_names_json,
+            cache_dir=cache_dir or None,
         )
 
     def run_app(parser: GroupParser):
@@ -115,8 +129,11 @@ def _main():
         stats_dir = Path(stats_dir_str)
         db_path = Path(db_path_str) if db_path_str else stats_dir / "index.db"
 
-        file_index = FileIndex(stats_dir, db_path)
-        cached_parser = CachedGroupParser(file_index, hostname_regex)
+        sudo_helper = cast(str, args.sudo_helper)
+        file_index = FileIndex(stats_dir, db_path, sudo_helper=sudo_helper or None)
+        cached_parser = CachedGroupParser(
+            file_index, hostname_regex, sudo_helper=sudo_helper or None
+        )
         file_index.install_callback(cached_parser)
 
         with file_index:
