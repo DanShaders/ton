@@ -530,7 +530,7 @@ class FullNode(Network.Node):
         return self._validator_key
 
     @override
-    async def run(self, *, debug: DebugType = None):
+    async def run(self, additional_args: list[str] | None = None, *, debug: DebugType = None):
         zerostate = self._get_or_generate_zerostate()
 
         if not self._static_populated:
@@ -551,7 +551,8 @@ class FullNode(Network.Node):
                 str(self.session_log_path),
                 "--quic-flood-control",
                 "-1",
-            ],
+            ]
+            + (additional_args or []),
             debug=debug,
         )
 
