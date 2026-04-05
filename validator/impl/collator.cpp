@@ -6698,12 +6698,16 @@ void Collator::after_get_external_messages(td::Result<std::vector<std::pair<Ref<
     return;
   }
   auto vect = res.move_as_ok();
-  for (auto& p : vect) {
-    ++stats_.ext_msgs_total;
-    if (register_external_message(p.first, p.second).is_error()) {
-      ++stats_.ext_msgs_filtered;
-      bad_ext_msgs_.emplace_back(p.first->hash());
+  {
+    td::RealCpuTimer timer;
+    for (auto& p : vect) {
+      ++stats_.ext_msgs_total;
+      if (register_external_message(p.first, p.second).is_error()) {
+        ++stats_.ext_msgs_filtered;
+        bad_ext_msgs_.emplace_back(p.first->hash());
+      }
     }
+    stats_.work_time.register_ext_msgs += timer.elapsed_both();
   }
   LOG(WARNING) << "got " << vect.size() << " external messages from mempool, " << bad_ext_msgs_.size()
                << " bad messages";
