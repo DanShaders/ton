@@ -100,19 +100,19 @@ async def main() -> None:
         NODES_COUNT = 2
 
         network.config.shard_valgroup_lifetime = 250
-        # network.config.shard_consensus = SimplexConsensusConfig(
-        #     target_block_rate_ms=400,
-        #     slots_per_leader_window=4,
-        #     first_block_timeout_ms=700,
-        #     max_leader_window_desync=250,
-        # )
+        network.config.shard_consensus = SimplexConsensusConfig(
+            target_block_rate_ms=400,
+            slots_per_leader_window=4,
+            first_block_timeout_ms=700,
+            max_leader_window_desync=250,
+        )
         network.config.mc_valgroup_lifetime = 250
-        # network.config.mc_consensus = SimplexConsensusConfig(
-        #     target_block_rate_ms=400,
-        #     slots_per_leader_window=4,
-        #     first_block_timeout_ms=800,
-        #     max_leader_window_desync=250,
-        # )
+        network.config.mc_consensus = SimplexConsensusConfig(
+            target_block_rate_ms=400,
+            slots_per_leader_window=4,
+            first_block_timeout_ms=800,
+            max_leader_window_desync=250,
+        )
         network.config.shard_validators = NODES_COUNT
 
         nodes: list[FullNode] = []
