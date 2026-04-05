@@ -27,6 +27,7 @@
 */
 #include <cassert>
 #include <cstring>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <string>
@@ -35,7 +36,7 @@
 #include "validator/db/fileref.hpp"
 #include "validator/db/package.hpp"
 
-void run(std::string filename) {
+void run(std::string filename, std::string extract_key, std::string output_file) {
   auto R = ton::Package::open(filename, true, false);
   if (R.is_error()) {
     std::cerr << "failed to open archive '" << filename << "': " << R.move_as_error().to_string();
@@ -47,6 +48,17 @@ void run(std::string filename) {
     auto E = ton::validator::FileReference::create(filename);
     if (E.is_error()) {
       std::cout << "bad filename\n";
+    } else if (!extract_key.empty()) {
+      if (filename == extract_key) {
+        std::ofstream ofs(output_file, std::ios::binary);
+        if (!ofs) {
+          std::cerr << "failed to open output file: " << output_file << "\n";
+          std::_Exit(2);
+        }
+        ofs.write(reinterpret_cast<const char *>(data.data()), data.size());
+        std::cout << "extracted " << data.size() << " bytes to " << output_file << "\n";
+        return false;
+      }
     } else {
       std::cout << filename << " " << data.size() << "\n";
     }
@@ -58,6 +70,13 @@ void run(std::string filename) {
 }
 
 int main(int argc, char **argv) {
-  run(argv[1]);
+  if (argc == 4) {
+    run(argv[1], argv[2], argv[3]);
+  } else if (argc == 2) {
+    run(argv[1], "", "");
+  } else {
+    std::cerr << "usage: pack-viewer <pack-file> [<entry-key> <output-file>]\n";
+    return 1;
+  }
   return 0;
 }
