@@ -72,7 +72,7 @@ async def main() -> None:
     install.tonlibjson.client_set_verbosity_level(0)
 
     logging.basicConfig(
-        level=logging.WARNING,
+        level=logging.INFO,
         format="[%(levelname)s][%(asctime)s][%(name)s] %(message)s",
     )
 

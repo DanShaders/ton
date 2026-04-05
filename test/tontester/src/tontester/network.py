@@ -551,6 +551,8 @@ class FullNode(Network.Node):
                 str(self.session_log_path),
                 "--quic-flood-control",
                 "-1",
+                "--verbosity",
+                "1",
             ],
             debug=debug,
         )
