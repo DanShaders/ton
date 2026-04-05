@@ -543,7 +543,8 @@ void ValidatorManagerImpl::wait_block_message_queue_short(BlockIdExt block_id, t
 }
 
 void ValidatorManagerImpl::get_external_messages(
-    ShardIdFull shard, td::Promise<std::vector<std::pair<td::Ref<ExtMessage>, int>>> promise) {
+    ShardIdFull shard, std::unique_ptr<ExtMsgCallback> callback,
+    td::Promise<std::vector<std::pair<td::Ref<ExtMessage>, int>>> promise) {
   std::vector<std::pair<td::Ref<ExtMessage>, int>> res;
   for (const auto &x : ext_messages_) {
     res.emplace_back(x, 0);
@@ -577,6 +578,9 @@ void ValidatorManagerImpl::get_shard_blocks_for_collator(
 
 void ValidatorManagerImpl::complete_external_messages(std::vector<ExtMessage::Hash> to_delay,
                                                       std::vector<ExtMessage::Hash> to_delete) {
+}
+
+void ValidatorManagerImpl::cleanup_applied_external_messages(BlockHandle handle, td::Ref<BlockData> block) {
 }
 
 void ValidatorManagerImpl::complete_ihr_messages(std::vector<IhrMessage::Hash> to_delay,
