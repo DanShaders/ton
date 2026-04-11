@@ -39,7 +39,7 @@ void ShardExternalsPool::activate(td::Badge<ShardExternalsPoolReader>, ExtMessag
       auto message = entry.message;
       self.pushed_to_queue_[entry.hash] = {message, priority};
       self.remove({priority, i});
-      co_await queue->queue.push(message);
+      co_await queue->queue.push({message, priority});
     }
     co_return {};
   }(*this, queue_);

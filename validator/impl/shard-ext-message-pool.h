@@ -13,15 +13,6 @@ namespace ton::validator {
 
 class WorkchainExternalsPool;
 
-struct PrioritizedExternal {
-  td::Ref<ExtMessage> message;
-  int priority;
-
-  ExtMessage::Hash hash() const {
-    return message->hash_norm();
-  }
-};
-
 class ShardExternalsPoolReader;
 
 class ShardExternalsPool : public td::actor::Actor {

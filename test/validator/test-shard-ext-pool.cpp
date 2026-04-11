@@ -58,8 +58,8 @@ td::Ref<ExtMessage> make_msg(WorkchainId wc, td::uint64 prefix, td::uint8 id) {
 }
 
 // Helper: extract the id byte we put in the hash.
-td::uint8 msg_id(const td::Ref<ExtMessage>& m) {
-  return m->hash_norm().as_array()[0];
+td::uint8 msg_id(const PrioritizedExternal& m) {
+  return m.hash().as_array()[0];
 }
 
 Hash hash_for(td::uint8 id) {
@@ -89,7 +89,7 @@ TEST(ShardExternalsPool, ActivateDelivers) {
     auto got = co_await queue.pop();
     EXPECT_EQ(1, msg_id(got));
 
-    token.deactivate({got->hash_norm()});
+    token.deactivate({got.hash()});
     co_await ts.wait_sync_work();
     wpool.store_token(std::move(token));
     co_return {};
@@ -116,7 +116,7 @@ TEST(ShardExternalsPool, AddAfterActivateWakes) {
     auto got = co_await std::move(pop_task);
     EXPECT_EQ(2, msg_id(got));
 
-    token.deactivate({got->hash_norm()});
+    token.deactivate({got.hash()});
     co_await ts.wait_sync_work();
     wpool.store_token(std::move(token));
     co_return {};
@@ -143,7 +143,7 @@ TEST(ShardExternalsPool, DeactivateReturnsUnapplied) {
     auto got2 = co_await queue.pop();
 
     // Deactivate, saying got1 was applied. got2 should be returned to the pool.
-    token.deactivate({got1->hash_norm()});
+    token.deactivate({got1.hash()});
     co_await ts.wait_sync_work();
 
     // Activate again and verify we get back the unapplied message.
@@ -153,7 +153,7 @@ TEST(ShardExternalsPool, DeactivateReturnsUnapplied) {
     auto got3 = co_await queue2.pop();
     EXPECT_EQ(msg_id(got2), msg_id(got3));
 
-    token.deactivate({got3->hash_norm()});
+    token.deactivate({got3.hash()});
     co_await ts.wait_sync_work();
     wpool.store_token(std::move(token));
     co_return {};
@@ -207,7 +207,7 @@ TEST(ShardExternalsPool, RemoveMessages) {
     auto got = co_await queue.pop();
     EXPECT_EQ(2, msg_id(got));
 
-    token.deactivate({got->hash_norm()});
+    token.deactivate({got.hash()});
     co_await ts.wait_sync_work();
     wpool.store_token(std::move(token));
     co_return {};
@@ -242,7 +242,7 @@ TEST(ShardExternalsPool, AddMessages) {
     EXPECT(ids.count(10));
     EXPECT(ids.count(11));
 
-    token.deactivate({got1->hash_norm(), got2->hash_norm()});
+    token.deactivate({got1.hash(), got2.hash()});
     co_await ts.wait_sync_work();
     wpool.store_token(std::move(token));
     co_return {};
@@ -267,7 +267,7 @@ TEST(ShardExternalsPool, DuplicateHashIgnored) {
     EXPECT_EQ(1, msg_id(got));
 
     // Nothing else should be in the pool -- deactivate with got applied, reactivate -- pool empty.
-    token.deactivate({got->hash_norm()});
+    token.deactivate({got.hash()});
     co_await ts.wait_sync_work();
 
     auto queue2 = token.activate();
@@ -302,7 +302,7 @@ TEST(ShardExternalsPool, HighPriorityFirst) {
     auto got = co_await queue.pop();
     EXPECT_EQ(2, msg_id(got));
 
-    token.deactivate({got->hash_norm()});
+    token.deactivate({got.hash()});
     co_await ts.wait_sync_work();
     wpool.store_token(std::move(token));
     co_return {};
@@ -373,7 +373,7 @@ TEST(WorkchainExternalsPool, AddExternalRouted) {
     auto got = co_await queue.pop();
     EXPECT_EQ(1, msg_id(got));
 
-    token.deactivate({got->hash_norm()});
+    token.deactivate({got.hash()});
     co_await ts.wait_sync_work();
     wpool.store_token(std::move(token));
     co_return {};
@@ -415,8 +415,8 @@ TEST(WorkchainExternalsPool, SplitRoutesMessages) {
     auto got_r = co_await rq.pop();
     EXPECT_EQ(2, msg_id(got_r));
 
-    left_token.deactivate({got_l->hash_norm()});
-    right_token.deactivate({got_r->hash_norm()});
+    left_token.deactivate({got_l.hash()});
+    right_token.deactivate({got_r.hash()});
     co_await ts.wait_sync_work();
 
     wpool.store_token(std::move(left_token));
@@ -461,7 +461,7 @@ TEST(WorkchainExternalsPool, MergeCollectsMessages) {
     EXPECT(ids.count(1));
     EXPECT(ids.count(2));
 
-    merged_token.deactivate({got1->hash_norm(), got2->hash_norm()});
+    merged_token.deactivate({got1.hash(), got2.hash()});
     co_await ts.wait_sync_work();
     wpool.store_token(std::move(merged_token));
     co_return {};
@@ -488,7 +488,7 @@ TEST(WorkchainExternalsPool, AddExternalAfterSplit) {
     auto got = co_await rq.pop();
     EXPECT_EQ(3, msg_id(got));
 
-    right_token.deactivate({got->hash_norm()});
+    right_token.deactivate({got.hash()});
     co_await ts.wait_sync_work();
 
     wpool.store_token(std::move(left_token));
@@ -547,7 +547,7 @@ TEST(ShardExternalsPoolReader, ActivateDeactivateCycle) {
     EXPECT_EQ(7, msg_id(got));
 
     // Deactivate with applied messages.
-    token.deactivate({got->hash_norm()});
+    token.deactivate({got.hash()});
     co_await ts.wait_sync_work();
 
     wpool.store_token(std::move(token));
@@ -587,7 +587,7 @@ TEST(ShardExternalsPoolReader, RemoveAndAddMessages) {
     auto got2 = co_await queue.pop();
     EXPECT_EQ(2, msg_id(got2));
 
-    token.deactivate({got1->hash_norm(), got2->hash_norm()});
+    token.deactivate({got1.hash(), got2.hash()});
     co_await ts.wait_sync_work();
     wpool.store_token(std::move(token));
     co_return {};

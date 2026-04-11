@@ -41,7 +41,16 @@ class ExtMessage : public td::CntObject {
   virtual ton::StdSmcAddress addr() const = 0;
 };
 
-using ExtMessageQueue = td::actor::BackpressureQueue<td::Ref<ExtMessage>>;
+struct PrioritizedExternal {
+  td::Ref<ExtMessage> message;
+  int priority;
+
+  ExtMessage::Hash hash() const {
+    return message->hash_norm();
+  }
+};
+
+using ExtMessageQueue = td::actor::BackpressureQueue<PrioritizedExternal>;
 
 }  // namespace validator
 
