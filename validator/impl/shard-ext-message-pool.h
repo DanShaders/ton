@@ -79,7 +79,6 @@ class ShardExternalsPool : public td::actor::Actor {
 
 class ShardExternalsPoolReader {
  public:
-  ShardExternalsPoolReader() = default;
   ShardExternalsPoolReader(const ShardExternalsPoolReader&) = delete;
   ShardExternalsPoolReader(ShardExternalsPoolReader&&) = default;
   ShardExternalsPoolReader& operator=(const ShardExternalsPoolReader&) = delete;

@@ -516,14 +516,9 @@ TEST(ShardExternalsPoolReader, MoveSemantics) {
     EXPECT(static_cast<bool>(token2));
     EXPECT(token2.shard() == shard);
 
-    // Move assign.
-    ShardExternalsPoolReader token3;
-    EXPECT(!static_cast<bool>(token3));
-    token3 = std::move(token2);
-    EXPECT(!static_cast<bool>(token2));
-    EXPECT(static_cast<bool>(token3));
+    wpool.store_token(std::move(token2));
 
-    wpool.store_token(std::move(token3));
+    EXPECT(wpool.has_token(shard));
     co_return {};
   });
 }

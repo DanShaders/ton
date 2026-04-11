@@ -28,6 +28,10 @@ void WorkchainExternalsPool::add_external(td::Ref<ExtMessage> message, int prior
                           PrioritizedExternal{std::move(message), priority});
 }
 
+bool WorkchainExternalsPool::has_token(ShardIdFull shard) const {
+  return stored_tokens_.contains(shard);
+}
+
 ShardExternalsPoolReader WorkchainExternalsPool::take_token(ShardIdFull shard) {
   CHECK(shard.workchain == workchain_);
 

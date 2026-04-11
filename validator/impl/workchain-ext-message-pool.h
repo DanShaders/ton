@@ -22,6 +22,7 @@ class WorkchainExternalsPool {
 
   void add_external(td::Ref<ExtMessage> message, int priority);
 
+  bool has_token(ShardIdFull shard) const;
   ShardExternalsPoolReader take_token(ShardIdFull shard);
   void store_token(ShardExternalsPoolReader token);
 
