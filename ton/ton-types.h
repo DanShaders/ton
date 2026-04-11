@@ -113,6 +113,16 @@ struct ShardIdFull {
   int pfx_len() const {
     return shard_pfx_len(shard);
   }
+  ShardIdFull left() const {
+    CHECK(!(shard & 1));
+    auto len = pfx_len();
+    return ShardIdFull{workchain, shard ^ (1ULL << (63 - len)) ^ (1ULL << (63 - len - 1))};
+  }
+  ShardIdFull right() const {
+    CHECK(!(shard & 1));
+    auto len = pfx_len();
+    return ShardIdFull{workchain, shard ^ (1ULL << (63 - len - 1))};
+  }
   ShardIdFull operator+(int delta) const {
     return ShardIdFull{workchain, shard + delta};
   }
@@ -169,6 +179,10 @@ struct AccountIdPrefixFull {
   }
   ShardIdFull as_leaf_shard() const {
     return ShardIdFull{workchain, account_id_prefix | 1};
+  }
+  bool inside(ShardIdFull shard) const {
+    td::uint64 x = td::lower_bit64(shard.shard);
+    return workchain == shard.workchain && !((account_id_prefix ^ shard.shard) & (td::bits_negate64(x) << 1));
   }
   std::string to_str() const {
     char buffer[64];

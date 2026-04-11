@@ -20,6 +20,7 @@
 
 #include "crypto/common/refcnt.hpp"
 #include "crypto/vm/cells.h"
+#include "td/actor/BackpressureQueue.h"
 #include "ton/ton-types.h"
 
 namespace ton {
@@ -39,6 +40,8 @@ class ExtMessage : public td::CntObject {
   virtual ton::WorkchainId wc() const = 0;
   virtual ton::StdSmcAddress addr() const = 0;
 };
+
+using ExtMessageQueue = td::actor::BackpressureQueue<td::Ref<ExtMessage>>;
 
 }  // namespace validator
 
