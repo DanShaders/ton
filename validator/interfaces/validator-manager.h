@@ -49,6 +49,7 @@ constexpr int VERBOSITY_NAME(VALIDATOR_EXTRA_DEBUG) = verbosity_DEBUG + 1;
 
 struct CandidateAccept {
   double ok_from_utime = 0.0;
+  std::vector<td::Ref<vm::Cell>> accepted_ext_messages = {};
 };
 
 struct CandidateReject {

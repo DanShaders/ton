@@ -258,7 +258,10 @@ void ValidateQuery::finish_query() {
     record_stats(true);
     LOG(WARNING) << "validate query done";
     double ok_from_utime = now_ms_ ? (double)now_ms_.value() / 1000.0 : (double)now_;
-    main_promise.set_result(CandidateAccept{.ok_from_utime = ok_from_utime});
+    main_promise.set_result(CandidateAccept{
+        .ok_from_utime = ok_from_utime,
+        .accepted_ext_messages = std::move(accepted_ext_messages_),
+    });
   }
   stop();
 }
@@ -3912,6 +3915,7 @@ bool ValidateQuery::check_in_msg(td::ConstBitPtr key, Ref<vm::CellSlice> in_msg)
         return reject_query("cannot unpack destination address of inbound external message with hash "s +
                             key.to_hex(256));
       }
+      accepted_ext_messages_.push_back(msg);
       break;
     }
     case block::gen::InMsg::msg_import_imm: {
