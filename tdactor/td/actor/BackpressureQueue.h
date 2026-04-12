@@ -123,8 +123,6 @@ class BackpressureQueue {
   using A = BackpressureQueueActor<T>;
 
  public:
-  BackpressureQueue() = default;
-
   explicit BackpressureQueue(td::Slice name, size_t capacity) {
     actor_ = std::make_shared<ActorOwn<A>>(create_actor<A>(name, capacity));
   }
