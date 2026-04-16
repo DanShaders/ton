@@ -9,6 +9,7 @@
 #include "block/block.h"
 #include "block/validator-set.h"
 #include "consensus/simplex/bus.h"
+#include "impl/workchain-ext-message-pool.h"
 #include "consensus/utils.h"
 #include "td/actor/BusRuntime.h"
 #include "td/actor/coro_utils.h"
@@ -694,8 +695,10 @@ class TestConsensus : public td::actor::Actor {
                              PSTRING() << "consensus." << node_idx << "." << instance_idx);
     inst.status = Instance::Running;
     inst.bus.publish<BlockFinalizedInMasterchain>(last_accepted_block_);
+    WorkchainExternalsPool wpool(SHARD.workchain);
     inst.bus.publish<Start>(
-        td::make_ref<ChainState>(ChainState::ZerostateTip{FIRST_PARENT, gen_shard_state(0)}, MIN_MC_BLOCK_ID));
+        td::make_ref<ChainState>(ChainState::ZerostateTip{FIRST_PARENT, gen_shard_state(0)}, MIN_MC_BLOCK_ID),
+        wpool.take_token(SHARD)).start().detach();
     LOG(ERROR) << "Starting node #" << node_idx << "." << instance_idx;
   }
 

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: LGPL-2.0-or-later
  */
 
+#include "td/db/KeyValueAsync.h"
 #include "td/db/RocksDb.h"
 #include "td/utils/port/path.h"
 #include "validator/consensus/simplex/bus.h"
@@ -173,10 +174,11 @@ class BridgeImpl final : public IValidatorGroup {
       : is_create_session_called_(params.is_create_session_called), params_(std::move(params)) {
   }
 
-  virtual void start(std::vector<BlockIdExt> blocks, BlockIdExt min_mc_block_id) override {
+  virtual void start(std::vector<BlockIdExt> blocks, BlockIdExt min_mc_block_id,
+                     ShardExternalsPoolReader ext_pool_reader) override {
     CHECK(!is_start_called_);
     is_start_called_ = true;
-    resolve_state_and_start(blocks, min_mc_block_id).start().detach();
+    resolve_state_and_start(blocks, min_mc_block_id, std::move(ext_pool_reader)).start().detach();
   }
 
   virtual void create_session() override {
@@ -211,8 +213,8 @@ class BridgeImpl final : public IValidatorGroup {
     }
   }
 
-  void destroy() override {
-    destroy_inner().start().detach();
+  void destroy(td::Promise<ShardExternalsPoolReader> promise) override {
+    destroy_inner(std::move(promise)).start().detach();
   }
 
   void start_up() override {
@@ -289,7 +291,13 @@ class BridgeImpl final : public IValidatorGroup {
   }
 
  private:
-  td::actor::Task<> destroy_inner() {
+  td::actor::Task<> destroy_inner(td::Promise<ShardExternalsPoolReader> promise) {
+    if (is_started_) {
+      auto token = co_await bus_.publish<StealExternalsPool>();
+      promise.set_value(std::move(token));
+    } else {
+      promise.set_error(td::Status::Error("Validator group was never provided a reader"));
+    }
     if (bus_) {
       LOG(INFO) << "Destroying validator group";
       bus_.publish<StopRequested>();
@@ -309,9 +317,10 @@ class BridgeImpl final : public IValidatorGroup {
     co_return td::Unit{};
   }
 
-  td::actor::Task<> resolve_state_and_start(std::vector<BlockIdExt> blocks, BlockIdExt min_mc_block_id) {
+  td::actor::Task<> resolve_state_and_start(std::vector<BlockIdExt> blocks, BlockIdExt min_mc_block_id,
+                                            ShardExternalsPoolReader ext_pool_reader) {
     auto state = co_await ChainState::from_manager(manager_facade_.get(), params_.shard, blocks, min_mc_block_id);
-    start_event_ = std::make_shared<Start>(state);
+    start_event_ = std::make_shared<Start>(Start{state, std::move(ext_pool_reader)});
     maybe_start_group();
     co_return {};
   }
@@ -321,7 +330,7 @@ class BridgeImpl final : public IValidatorGroup {
       return;
     }
     is_started_ = true;
-    bus_.publish(start_event_);
+    bus_.publish(start_event_).start().detach();
   }
 
   bool is_start_called_ = false;

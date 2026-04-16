@@ -111,6 +111,7 @@ class BlockProducerImpl : public td::actor::SpawnsWith<Bus>, public td::actor::C
             .shard = bus.shard,
             .min_masterchain_block_id = state->min_mc_block_id(),
             .prev = state->block_ids(),
+            .ext_msg_queue = event->queue,
             .creator = Ed25519_PublicKey{bus.local_id.key.ed25519_value().raw()},
             .skip_store_candidate = true,
             .utime = slot_start.at_unix(),

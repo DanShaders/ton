@@ -65,6 +65,10 @@ std::string SaveCertificate::contents_to_string() const {
   return PSTRING() << "{cert=" << certificate_to_string(cert) << "}";
 }
 
+std::string ForkCollapsed::contents_to_string() const {
+  return PSTRING() << "{" << externals.size() << " externals}";
+}
+
 namespace {
 
 class SimplexCollatorSchedule : public CollatorSchedule {

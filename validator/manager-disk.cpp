@@ -152,12 +152,32 @@ void ValidatorManagerImpl::sync_complete(td::Promise<td::Unit> promise) {
   }
   Ed25519_PublicKey created_by{td::Bits256::zero()};
   td::as<td::uint32>(created_by.as_bits256().data() + 32 - 4) = ((unsigned)std::time(nullptr) >> 8);
-  run_collate_query(CollateParams{.shard = shard_id,
-                                  .min_masterchain_block_id = last_masterchain_block_id_,
-                                  .prev = prev,
-                                  .creator = created_by,
-                                  .validator_set = val_set},
-                    actor_id(this), {}, std::move(P));
+
+  ExtMessageQueue queue{"ExtMessageQueue", ext_messages_.size()};
+
+  auto populate_queue = [](std::vector<td::Ref<ExtMessage>> messages, ExtMessageQueue queue) -> td::actor::Task<> {
+    for (const auto &x : messages) {
+      co_await queue.push({x, 0});
+    }
+    queue.close();
+    co_return {};
+  };
+  auto collate = [=, SelfId = actor_id(this), last = last_masterchain_block_id_,
+                  Q = std::move(P)](td::Unit) mutable -> td::Result<> {
+    run_collate_query(
+        CollateParams{
+            .shard = shard_id,
+            .min_masterchain_block_id = last,
+            .prev = prev,
+            .ext_msg_queue = queue,
+            .creator = created_by,
+            .validator_set = val_set,
+        },
+        SelfId, {}, std::move(Q));
+    return {};
+  };
+
+  populate_queue(std::move(ext_messages_), queue).start().then(std::move(collate)).detach();
 }
 
 void ValidatorManagerImpl::validate_fake(BlockCandidate candidate, std::vector<BlockIdExt> prev, BlockIdExt last,
@@ -542,20 +562,6 @@ void ValidatorManagerImpl::wait_block_message_queue_short(BlockIdExt block_id, t
   get_block_handle(block_id, true, std::move(P));
 }
 
-void ValidatorManagerImpl::get_external_messages(ShardIdFull shard, std::unique_ptr<ExtMsgCallback> callback) {
-  if (callback) {
-    auto task = [](std::vector<td::Ref<ExtMessage>> messages,
-                   std::unique_ptr<ExtMsgCallback> callback) -> td::actor::Task<> {
-      for (const auto &x : messages) {
-        co_await callback->queue.try_push(std::make_pair(x, 0));
-      }
-      callback->queue.close();
-      co_return {};
-    };
-    task(ext_messages_, std::move(callback)).start().detach();
-  }
-}
-
 void ValidatorManagerImpl::get_ihr_messages(ShardIdFull shard, td::Promise<std::vector<td::Ref<IhrMessage>>> promise) {
   promise.set_result(ihr_messages_);
 }
@@ -578,13 +584,6 @@ void ValidatorManagerImpl::get_shard_blocks_for_collator(
     // LOG(DEBUG) << "postponed get_shard_blocks query because pending_new_shard_block_descr_=" << pending_new_shard_block_descr_;
     waiting_new_shard_block_descr_.push_back(std::move(promise));
   }
-}
-
-void ValidatorManagerImpl::complete_external_messages(std::vector<ExtMessage::Hash> to_delay,
-                                                      std::vector<ExtMessage::Hash> to_delete) {
-}
-
-void ValidatorManagerImpl::cleanup_applied_external_messages(BlockHandle handle, td::Ref<BlockData> block) {
 }
 
 void ValidatorManagerImpl::complete_ihr_messages(std::vector<IhrMessage::Hash> to_delay,

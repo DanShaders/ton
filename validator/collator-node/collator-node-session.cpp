@@ -201,11 +201,13 @@ void CollatorNodeSession::generate_block(std::vector<BlockIdExt> prev_blocks,
   };
   cache_entry->started = true;
   cache_entry->block_seqno = block_seqno;
+  UNREACHABLE();  // FIXME: Support new mempool interface.
   run_collate_query(
       CollateParams{
           .shard = shard_,
           .min_masterchain_block_id = min_masterchain_block_id_,
           .prev = std::move(prev_blocks),
+          .ext_msg_queue = ExtMessageQueue("FIXME", 1),
           .validator_set = validator_set_,
           .collator_opts = opts_->get_collator_options(),
           .collator_node_id = local_id_,

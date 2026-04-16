@@ -26,7 +26,7 @@
 #include "collator-node/collator-node.hpp"
 #include "common/refcnt.hpp"
 #include "db/db-event-publisher.hpp"
-#include "impl/ext-message-pool.hpp"
+#include "impl/workchain-ext-message-pool.h"
 #include "interfaces/db.h"
 #include "interfaces/validator-manager.h"
 #include "rldp/rldp.h"
@@ -58,7 +58,6 @@ class WaitBlockState;
 class WaitZeroState;
 class WaitShardState;
 class WaitBlockData;
-class AppliedExtMessageCleanupActor;
 
 class BlockHandleLru : public td::ListNode {
  public:
@@ -206,8 +205,7 @@ class ValidatorManagerImpl : public ValidatorManager {
   td::LRUCache<BlockIdExt, td::BufferSlice> cached_block_data_{/* max_size = */ 128};
   td::LRUCache<BlockIdExt, td::Unit> cached_checked_shard_block_descriptions_{/* max_size = */ 1024};
 
-  td::actor::ActorOwn<ExtMessagePool> ext_message_pool_;
-  td::actor::ActorOwn<AppliedExtMessageCleanupActor> applied_ext_message_cleanup_actor_;
+  std::map<WorkchainId, WorkchainExternalsPool> workchain_ext_pools_;
 
  private:
   // VALIDATOR GROUPS
@@ -231,10 +229,18 @@ class ValidatorManagerImpl : public ValidatorManager {
     bool started = false;
     td::uint32 cc_seqno = 0;
   };
+
+  struct PendingGroupStarts {
+    td::actor::ActorId<IValidatorGroup> actor;
+    std::vector<BlockIdExt> prev;
+    BlockIdExt min_mc_block_id;
+  };
+
   std::map<ValidatorSessionId, ValidatorGroupEntry> validator_groups_;
   std::map<ValidatorSessionId, ValidatorGroupEntry> next_validator_groups_;
   std::map<adnl::AdnlNodeIdShort, td::actor::ActorOwn<CollationManager>> collation_managers_;
   std::set<ValidatorSessionId> destroyed_validator_sessions_;
+  std::map<ShardIdFull, PendingGroupStarts> pending_ext_pool_starts_;
 
  private:
   // MASTERCHAIN LAST BLOCK
@@ -285,6 +291,9 @@ class ValidatorManagerImpl : public ValidatorManager {
   void checked_archive_slice(BlockSeqno new_last_mc_seqno, BlockSeqno new_shard_client_seqno);
   void finish_prestart_sync();
   void completed_prestart_sync();
+
+  void return_ext_pool_token(ShardExternalsPoolReader token);
+  td::actor::Task<td::Ref<ExtMessage>> check_and_add_external_message(td::BufferSlice data, int priority);
 
  public:
   void install_callback(std::unique_ptr<Callback> new_callback, td::Promise<td::Unit> promise) override {
@@ -345,8 +354,6 @@ class ValidatorManagerImpl : public ValidatorManager {
 
   td::actor::Task<> new_external_message_broadcast(td::BufferSlice data, int priority) override;
   td::actor::Task<> new_external_message_query(td::BufferSlice data) override;
-  td::actor::Task<> new_external_message_query_cont(td::Ref<ExtMessage> message,
-                                                    td::actor::StartedTask<> wait_allow_broadcast);
 
   void new_ihr_message(td::BufferSlice data) override;
   void new_shard_block_description_broadcast(BlockIdExt block_id, CatchainSeqno cc_seqno,
@@ -420,13 +427,9 @@ class ValidatorManagerImpl : public ValidatorManager {
                                 td::Promise<td::Ref<MessageQueue>> promise) override;
   void wait_block_message_queue_short(BlockIdExt id, td::uint32 priority, td::Timestamp timeout,
                                       td::Promise<td::Ref<MessageQueue>> promise) override;
-  void get_external_messages(ShardIdFull shard, std::unique_ptr<ExtMsgCallback> callback) override;
   void get_ihr_messages(ShardIdFull shard, td::Promise<std::vector<td::Ref<IhrMessage>>> promise) override;
   void get_shard_blocks_for_collator(BlockIdExt masterchain_block_id,
                                      td::Promise<std::vector<td::Ref<ShardTopBlockDescription>>> promise) override;
-  void complete_external_messages(std::vector<ExtMessage::Hash> to_delay,
-                                  std::vector<ExtMessage::Hash> to_delete) override;
-  void cleanup_applied_external_messages(BlockHandle handle, td::Ref<BlockData> block) override;
   void complete_ihr_messages(std::vector<IhrMessage::Hash> to_delay, std::vector<IhrMessage::Hash> to_delete) override;
 
   void set_next_block(BlockIdExt prev, BlockIdExt next, td::Promise<td::Unit> promise) override;

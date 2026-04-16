@@ -93,11 +93,18 @@ struct SaveCertificate {
   std::string contents_to_string() const;
 };
 
+struct ForkCollapsed {
+  std::vector<PrioritizedExternal> externals;
+
+  std::string contents_to_string() const;
+};
+
 class Bus : public consensus::Bus {
  public:
   using Parent = consensus::Bus;
-  using Events = td::TypeList<BroadcastVote, NotarizationObserved, FinalizationObserved, LeaderWindowObserved,
-                              WaitForParent, ResolveCandidate, StoreCandidate, ResolveState, SaveCertificate>;
+  using Events =
+      td::TypeList<BroadcastVote, NotarizationObserved, FinalizationObserved, LeaderWindowObserved, WaitForParent,
+                   ResolveCandidate, StoreCandidate, ResolveState, SaveCertificate, ForkCollapsed>;
 
   Bus() = default;
 

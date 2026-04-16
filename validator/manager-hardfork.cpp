@@ -55,9 +55,30 @@ void ValidatorManagerImpl::sync_complete(td::Promise<td::Unit> promise) {
   });
 
   LOG(ERROR) << "running collate query";
-  run_collate_query(
-      CollateParams{.shard = shard_id, .min_masterchain_block_id = block_id, .prev = prev, .is_hardfork = true},
-      actor_id(this), {}, std::move(P));
+
+  ExtMessageQueue queue{"ExtMessageQueue", ext_messages_.size()};
+
+  auto populate_queue = [](std::vector<td::Ref<ExtMessage>> messages, ExtMessageQueue queue) -> td::actor::Task<> {
+    for (const auto &x : messages) {
+      co_await queue.push({x, 0});
+    }
+    queue.close();
+    co_return {};
+  };
+  auto collate = [=, SelfId = actor_id(this), Q = std::move(P)](td::Unit) mutable -> td::Result<> {
+    run_collate_query(
+        CollateParams{
+            .shard = shard_id,
+            .min_masterchain_block_id = block_id,
+            .prev = prev,
+            .ext_msg_queue = queue,
+            .is_hardfork = true,
+        },
+        SelfId, {}, std::move(Q));
+    return {};
+  };
+
+  populate_queue(std::move(ext_messages_), queue).start().then(std::move(collate)).detach();
 }
 
 void ValidatorManagerImpl::created_candidate(BlockCandidate candidate) {
@@ -375,20 +396,6 @@ void ValidatorManagerImpl::wait_block_message_queue_short(BlockIdExt block_id, t
                                 std::move(promise));
       });
   get_block_handle(block_id, true, std::move(P));
-}
-
-void ValidatorManagerImpl::get_external_messages(ShardIdFull shard, std::unique_ptr<ExtMsgCallback> callback) {
-  if (callback) {
-    auto task = [](std::vector<td::Ref<ExtMessage>> messages,
-                   std::unique_ptr<ExtMsgCallback> callback) -> td::actor::Task<> {
-      for (const auto &x : messages) {
-        co_await callback->queue.try_push(std::make_pair(x, 0));
-      }
-      callback->queue.close();
-      co_return {};
-    };
-    task(ext_messages_, std::move(callback)).start().detach();
-  }
 }
 
 void ValidatorManagerImpl::get_ihr_messages(ShardIdFull shard, td::Promise<std::vector<td::Ref<IhrMessage>>> promise) {

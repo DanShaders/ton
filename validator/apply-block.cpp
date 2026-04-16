@@ -294,12 +294,7 @@ void ApplyBlock::applied_set() {
   }
 }
 
-void ApplyBlock::schedule_external_messages_cleanup() {
-  td::actor::send_closure(manager_, &ValidatorManager::cleanup_applied_external_messages, handle_, block_);
-}
-
 void ApplyBlock::cleanup_and_finish() {
-  schedule_external_messages_cleanup();
   finish_query();
 }
 

@@ -71,7 +71,6 @@ class ApplyBlock : public td::actor::Actor {
   void applied_prev();
   void applied_set();
   void cleanup_and_finish();
-  void schedule_external_messages_cleanup();
 
  private:
   BlockIdExt id_;

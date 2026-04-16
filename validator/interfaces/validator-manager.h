@@ -265,16 +265,6 @@ struct CollatorNodeResponseStats {
   }
 };
 
-using ExtMsgQueue = td::actor::BackpressureQueue<std::pair<td::Ref<ExtMessage>, int>>;
-
-struct ExtMsgCallback {
-  ShardIdFull shard;
-  ExtMsgQueue queue;
-  td::CancellationToken cancellation_token;
-  td::Timestamp timeout;
-  bool sync_only = false;
-};
-
 using ValidateCandidateResult = td::Variant<CandidateAccept, CandidateReject>;
 
 class ValidatorManager : public ValidatorManagerInterface {
@@ -334,13 +324,9 @@ class ValidatorManager : public ValidatorManagerInterface {
                                         td::Promise<td::Ref<MessageQueue>> promise) = 0;
   virtual void wait_block_message_queue_short(BlockIdExt id, td::uint32 priority, td::Timestamp timeout,
                                               td::Promise<td::Ref<MessageQueue>> promise) = 0;
-  virtual void get_external_messages(ShardIdFull shard, std::unique_ptr<ExtMsgCallback> callback) = 0;
   virtual void get_ihr_messages(ShardIdFull shard, td::Promise<std::vector<td::Ref<IhrMessage>>> promise) = 0;
   virtual void get_shard_blocks_for_collator(BlockIdExt masterchain_block_id,
                                              td::Promise<std::vector<td::Ref<ShardTopBlockDescription>>> promise) = 0;
-  virtual void complete_external_messages(std::vector<ExtMessage::Hash> to_delay,
-                                          std::vector<ExtMessage::Hash> to_delete) = 0;
-  virtual void cleanup_applied_external_messages(BlockHandle handle, td::Ref<BlockData> block) = 0;
   virtual void complete_ihr_messages(std::vector<IhrMessage::Hash> to_delay,
                                      std::vector<IhrMessage::Hash> to_delete) = 0;
 

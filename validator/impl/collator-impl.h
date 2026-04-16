@@ -123,11 +123,6 @@ class Collator final : public td::actor::Actor {
   void load_prev_states_blocks();
   void alarm() override;
 
-  void tear_down() override {
-    ext_msg_cancellation_.cancel();
-    ext_msg_queue_.close();
-  }
-
   int verbosity{3 * 0};
   int verify{1};
   bool full_collated_data_ = false;
@@ -204,9 +199,7 @@ class Collator final : public td::actor::Actor {
   std::unique_ptr<vm::AugmentedDictionary> fees_import_dict_;
 
   std::set<td::Bits256> registered_ext_msgs_;
-  ExtMsgQueue ext_msg_queue_;
-  std::optional<std::pair<td::Ref<ExtMessage>, int>> pending_ext_msg_;
-  td::CancellationTokenSource ext_msg_cancellation_;
+  std::optional<PrioritizedExternal> pending_ext_msg_;
 
   std::priority_queue<NewOutMsg, std::vector<NewOutMsg>, std::greater<NewOutMsg>> new_msgs;
   std::pair<ton::LogicalTime, ton::Bits256> last_proc_int_msg_, first_unproc_int_msg_;

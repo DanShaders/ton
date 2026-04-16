@@ -7,12 +7,9 @@
 #pragma once
 
 #include "consensus/misbehavior.h"
-#include "keyring/keyring.hpp"
+#include "impl/shard-ext-message-pool.h"
 #include "overlay/overlays.h"
-#include "quic/quic-sender.h"
-#include "rldp2/rldp.h"
 #include "td/actor/BusRuntime.h"
-#include "td/db/KeyValueAsync.h"
 #include "ton/ton-types.h"
 
 #include "chain-state.h"
@@ -22,7 +19,10 @@
 namespace ton::validator::consensus {
 
 struct Start {
+  using ReturnType = td::Unit;
+
   ChainStateRef state;
+  ShardExternalsPoolReader ext_pool_reader;
 
   std::string contents_to_string() const;
 };
@@ -30,6 +30,10 @@ struct Start {
 using StartEvent = std::shared_ptr<const Start>;
 
 struct StopRequested {};
+
+struct StealExternalsPool {
+  using ReturnType = ShardExternalsPoolReader;
+};
 
 struct FinalizeBlock {
   using ReturnType = td::Unit;
@@ -46,6 +50,7 @@ struct OurLeaderWindowStarted {
   td::uint32 start_slot;
   td::uint32 end_slot;
   td::Timestamp start_time;
+  ExtMessageQueue queue;
 
   std::string contents_to_string() const;
 };
@@ -164,10 +169,11 @@ class Db {
 
 class Bus : public td::actor::Bus {
  public:
-  using Events = td::TypeList<Start, StopRequested, FinalizeBlock, OurLeaderWindowStarted, CandidateGenerated,
-                              CandidateReceived, ValidationRequest, IncomingProtocolMessage, OutgoingProtocolMessage,
-                              IncomingOverlayRequest, OutgoingOverlayRequest, BlockFinalizedInMasterchain,
-                              MisbehaviorReport, TraceEvent, NoncriticalParamsUpdated, PrecheckCandidateBroadcast>;
+  using Events =
+      td::TypeList<Start, StopRequested, StealExternalsPool, FinalizeBlock, OurLeaderWindowStarted, CandidateGenerated,
+                   CandidateReceived, ValidationRequest, IncomingProtocolMessage, OutgoingProtocolMessage,
+                   IncomingOverlayRequest, OutgoingOverlayRequest, BlockFinalizedInMasterchain, MisbehaviorReport,
+                   TraceEvent, NoncriticalParamsUpdated, PrecheckCandidateBroadcast>;
 
   Bus() = default;
   ~Bus() override {

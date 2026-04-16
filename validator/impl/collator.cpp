@@ -237,20 +237,8 @@ void Collator::start_up() {
   if (params_.is_hardfork) {
     LOG(WARNING) << "generating a hardfork block";
   }
-  // 3. install external message queue
-  if (!params_.is_hardfork) {
-    LOG(DEBUG) << "installing external message queue";
-    ext_msg_queue_ = ExtMsgQueue("ext_msg_queue", 500);
-    auto callback = std::make_unique<ExtMsgCallback>();
-    callback->shard = shard_;
-    callback->cancellation_token = ext_msg_cancellation_.get_cancellation_token();
-    callback->timeout = params_.wait_externals_until ? params_.wait_externals_until : td::Timestamp::now();
-    callback->sync_only = !params_.wait_externals_until;
-    callback->queue = ext_msg_queue_;
-    td::actor::send_closure_later(manager, &ValidatorManager::get_external_messages, shard_, std::move(callback));
-  }
   if (is_masterchain() && !params_.is_hardfork) {
-    // 4. load shard block info messages
+    // 3. load shard block info messages
     LOG(DEBUG) << "sending get_shard_blocks_for_collator() query to Manager";
     ++pending;
     auto token = perf_log_.start_action("get_shard_blocks_for_collator");
@@ -262,7 +250,7 @@ void Collator::start_up() {
                                                                   std::move(res), std::move(token));
                                   });
   }
-  // 5. get storage stat cache
+  // 4. get storage stat cache
   ++pending;
   LOG(DEBUG) << "sending get_storage_stat_cache() query to Manager";
   td::actor::send_closure_later(manager, &ValidatorManager::get_storage_stat_cache,
@@ -273,7 +261,7 @@ void Collator::start_up() {
                                                                 &Collator::after_get_storage_stat_cache, std::move(res),
                                                                 std::move(token));
                                 });
-  // 6. set timeout
+  // 5. set timeout
   alarm_timestamp() = timeout_;
   CHECK(pending);
 }
@@ -4334,18 +4322,18 @@ td::actor::Task<bool> Collator::process_inbound_external_messages() {
     if (!check_cancelled()) {
       co_return false;
     }
-    std::pair<td::Ref<ExtMessage>, int> item;
+    PrioritizedExternal item;
     if (pending_ext_msg_) {
       item = std::move(*pending_ext_msg_);
       pending_ext_msg_.reset();
     } else {
-      td::Result<std::pair<td::Ref<ExtMessage>, int>> maybe;
+      td::Result<PrioritizedExternal> maybe;
       td::Timer wait_timer;
       if (params_.wait_externals_until) {
-        maybe = co_await ext_msg_queue_.try_pop().wrap();
+        maybe = co_await params_.ext_msg_queue.try_pop().wrap();
       } else {
         // In this case queue is closed after pushing the first batch of messages
-        maybe = co_await ext_msg_queue_.pop().wrap();
+        maybe = co_await params_.ext_msg_queue.pop().wrap();
       }
       wait_externals_total_time_ += wait_timer.elapsed();
       if (maybe.is_error()) {
@@ -6577,12 +6565,6 @@ bool Collator::create_block_candidate() {
                                                                   std::move(saved), std::move(token));
                                   });
   }
-  // 5. communicate about bad and delayed external messages
-  if (!bad_ext_msgs_.empty() || !delay_ext_msgs_.empty()) {
-    LOG(INFO) << "sending complete_external_messages() to Manager";
-    td::actor::send_closure_later(manager, &ValidatorManager::complete_external_messages, std::move(delay_ext_msgs_),
-                                  std::move(bad_ext_msgs_));
-  }
   if (!storage_stat_cache_update_.empty()) {
     td::actor::send_closure(manager, &ValidatorManager::update_storage_stat_cache,
                             std::move(storage_stat_cache_update_));
@@ -6683,7 +6665,7 @@ td::Status Collator::register_external_message(Ref<ExtMessage> ext_msg, int prio
  * Wait for an external message from the backpressure queue, or timeout.
  */
 td::actor::Task<> Collator::wait_for_external_message(td::Timestamp timeout) {
-  auto result = co_await td::actor::await_with_timeout(ext_msg_queue_.pop(), timeout).wrap();
+  auto result = co_await td::actor::await_with_timeout(params_.ext_msg_queue.pop(), timeout).wrap();
   if (result.is_error()) {
     co_return result.move_as_error();
   }

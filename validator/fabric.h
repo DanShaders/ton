@@ -32,6 +32,7 @@ struct CollateParams {
   ShardIdFull shard;
   BlockIdExt min_masterchain_block_id;
   std::vector<BlockIdExt> prev;
+  ExtMessageQueue ext_msg_queue;
   bool is_hardfork = false;
   Ed25519_PublicKey creator{td::Bits256::zero()};
   td::Ref<block::ValidatorSet> validator_set = {};

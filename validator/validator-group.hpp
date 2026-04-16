@@ -20,6 +20,7 @@
 
 #include <list>
 
+#include "impl/shard-ext-message-pool.h"
 #include "interfaces/validator-manager.h"
 #include "quic/quic-sender.h"
 #include "rldp/rldp.h"
@@ -44,7 +45,8 @@ class IValidatorGroup : public td::actor::Actor {
       td::actor::ActorId<CollationManager> collation_manager, bool create_session, bool allow_unsafe_self_blocks_resync,
       td::Ref<ValidatorManagerOptions> opts, bool monitoring_shard);
 
-  virtual void start(std::vector<BlockIdExt> prev, BlockIdExt min_masterchain_block_id) = 0;
+  virtual void start(std::vector<BlockIdExt> prev, BlockIdExt min_masterchain_block_id,
+                     ShardExternalsPoolReader ext_pool_reader) = 0;
   virtual void create_session() = 0;
 
   virtual void update_options(td::Ref<ValidatorManagerOptions> opts, bool apply_blocks) = 0;
@@ -54,7 +56,7 @@ class IValidatorGroup : public td::actor::Actor {
 
   virtual void notify_mc_finalized(BlockIdExt block) = 0;
 
-  virtual void destroy() = 0;
+  virtual void destroy(td::Promise<ShardExternalsPoolReader> promise) = 0;
 };
 
 }  // namespace validator

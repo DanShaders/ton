@@ -26,7 +26,7 @@
 #include "downloaders/wait-block-data.hpp"
 #include "downloaders/wait-block-state-merge.hpp"
 #include "downloaders/wait-block-state.hpp"
-#include "impl/applied-ext-message-cleanup.hpp"
+#include "impl/external-message.hpp"
 #include "interfaces/validator-full-id.h"
 #include "td/actor/MultiPromise.h"
 #include "td/actor/coro_utils.h"
@@ -426,47 +426,46 @@ void ValidatorManagerImpl::get_key_block_proof_link(BlockIdExt block_id, td::Pro
   td::actor::send_closure(db_, &Db::get_key_block_proof, block_id, std::move(P));
 }
 
+td::actor::Task<td::Ref<ExtMessage>> ValidatorManagerImpl::check_and_add_external_message(td::BufferSlice data,
+                                                                                          int priority) {
+  if (!last_masterchain_state_.not_null()) {
+    co_return td::Status::Error(ErrorCode::notready, "not ready");
+  }
+  auto message = co_await create_ext_message(std::move(data), last_masterchain_state_->get_ext_msg_limits());
+  auto [shard_acc, utime, lt, config] =
+      co_await run_fetch_account_state(message->wc(), message->addr(), actor_id(this));
+  bool special = message->wc() == masterchainId && config->is_special_smartcontract(message->addr());
+  block::Account acc;
+  if (!acc.unpack(shard_acc, utime, special)) {
+    co_return td::Status::Error("failed to unpack account state");
+  }
+  acc.block_lt = lt;
+  co_await ExtMessageQ::run_message_on_account(message->wc(), &acc, utime, lt + 1, message->root_cell(),
+                                               std::move(config));
+  auto wc = message->wc();
+  auto& wpool = workchain_ext_pools_.try_emplace(wc, wc).first->second;
+  wpool.add_external(message, priority);
+  co_return message;
+}
+
 td::actor::Task<> ValidatorManagerImpl::new_external_message_broadcast(td::BufferSlice data, int priority) {
   if (!started_) {
     co_return td::Status::Error(ErrorCode::notready, "node not synced");
   }
-  auto r_check_result =
-      co_await td::actor::ask(ext_message_pool_, &ExtMessagePool::check_add_external_message, std::move(data), priority,
-                              /* add_to_mempool = */ is_validator() || !collator_nodes_.empty())
-          .wrap();
-  if (r_check_result.is_error()) {
-    VLOG(VALIDATOR_DEBUG) << "Dropping external message broadcast (prio=" << priority
-                          << ") : " << r_check_result.error();
-    co_return r_check_result.move_as_error();
+  auto result = co_await check_and_add_external_message(std::move(data), priority).wrap();
+  if (result.is_error()) {
+    VLOG(VALIDATOR_DEBUG) << "Dropping external message broadcast (prio=" << priority << ") : " << result.error();
+    co_return result.move_as_error();
   }
-  auto check_result = r_check_result.move_as_ok();
-  auto allow_broadcast = co_await std::move(check_result.wait_allow_broadcast).wrap();
-  if (allow_broadcast.is_error()) {
-    VLOG(VALIDATOR_DEBUG) << "Dropping external message broadcast (prio=" << priority
-                          << ") : " << allow_broadcast.error();
-    co_return allow_broadcast.move_as_error();
-  }
-  VLOG(VALIDATOR_DEBUG) << "Checked external message broadcast to " << check_result.message->wc() << ":"
-                        << check_result.message->addr().to_hex() << " (prio=" << priority << ")";
   co_return td::Unit{};
 }
 
 td::actor::Task<> ValidatorManagerImpl::new_external_message_query(td::BufferSlice data) {
-  auto [message, wait_allow_broadcast] =
-      co_await td::actor::ask(ext_message_pool_, &ExtMessagePool::check_add_external_message, std::move(data), 0,
-                              /* add_to_mempool = */ is_validator() || !collator_nodes_.empty());
-  new_external_message_query_cont(std::move(message), std::move(wait_allow_broadcast)).start().detach();
-  co_return td::Unit{};
-}
-
-td::actor::Task<> ValidatorManagerImpl::new_external_message_query_cont(td::Ref<ExtMessage> message,
-                                                                        td::actor::StartedTask<> wait_allow_broadcast) {
-  auto result = co_await std::move(wait_allow_broadcast).wrap();
+  auto result = co_await check_and_add_external_message(std::move(data), 0).wrap();
   if (result.is_error()) {
-    LOG(INFO) << "Cannot send external message to " << message->wc() << ":" << message->addr().to_hex() << " : "
-              << result.error();
+    LOG(INFO) << "Cannot add external message: " << result.error();
   } else {
-    LOG(INFO) << "Sending external message to " << message->wc() << ":" << message->addr().to_hex();
+    auto message = result.move_as_ok();
     callback_->send_ext_message(message->shard(), message->serialize());
   }
   co_return td::Unit{};
@@ -1110,10 +1109,6 @@ void ValidatorManagerImpl::wait_block_message_queue_short(BlockIdExt block_id, t
   get_block_handle(block_id, true, std::move(P));
 }
 
-void ValidatorManagerImpl::get_external_messages(ShardIdFull shard, std::unique_ptr<ExtMsgCallback> callback) {
-  td::actor::send_closure(ext_message_pool_, &ExtMessagePool::install_collator_queue, shard, std::move(callback));
-}
-
 void ValidatorManagerImpl::get_ihr_messages(ShardIdFull shard, td::Promise<std::vector<td::Ref<IhrMessage>>> promise) {
 }
 
@@ -1129,18 +1124,21 @@ void ValidatorManagerImpl::get_shard_blocks_for_collator(
   promise.set_value(std::move(v));
 }
 
-void ValidatorManagerImpl::complete_external_messages(std::vector<ExtMessage::Hash> to_delay,
-                                                      std::vector<ExtMessage::Hash> to_delete) {
-  td::actor::send_closure(ext_message_pool_, &ExtMessagePool::complete_external_messages, std::move(to_delay),
-                          std::move(to_delete));
-}
+void ValidatorManagerImpl::return_ext_pool_token(ShardExternalsPoolReader token) {
+  auto shard = token.shard();
 
-void ValidatorManagerImpl::cleanup_applied_external_messages(BlockHandle handle, td::Ref<BlockData> block) {
-  if (applied_ext_message_cleanup_actor_.empty() || !handle) {
+  // Check if a new group is waiting for this token
+  auto pending_it = pending_ext_pool_starts_.find(shard);
+  if (pending_it != pending_ext_pool_starts_.end()) {
+    auto pending = std::move(pending_it->second);
+    pending_ext_pool_starts_.erase(pending_it);
+    LOG(INFO) << "Completing deferred start for shard " << shard.to_str();
+    td::actor::send_closure(pending.actor, &IValidatorGroup::start, std::move(pending.prev), pending.min_mc_block_id,
+                            std::move(token));
     return;
   }
-  td::actor::send_closure(applied_ext_message_cleanup_actor_, &AppliedExtMessageCleanupActor::cleanup_applied_block,
-                          std::move(handle), std::move(block));
+
+  workchain_ext_pools_.at(shard.workchain).store_token(std::move(token));
 }
 
 void ValidatorManagerImpl::complete_ihr_messages(std::vector<IhrMessage::Hash> to_delay,
@@ -1933,9 +1931,6 @@ void ValidatorManagerImpl::start_up() {
   lite_server_cache_ = create_liteserver_cache_actor(actor_id(this), db_root_);
   token_manager_ = td::actor::create_actor<TokenManager>("tokenmanager");
   storage_stat_cache_ = td::actor::create_actor<StorageStatCache>("storagestatcache");
-  ext_message_pool_ = td::actor::create_actor<ExtMessagePool>("extmessages", opts_, actor_id(this));
-  applied_ext_message_cleanup_actor_ = td::actor::create_actor<AppliedExtMessageCleanupActor>(
-      "extmessagecleanup", ext_message_pool_.get(), actor_id(this));
   td::mkdir(db_root_ + "/tmp/").ensure();
   td::mkdir(db_root_ + "/catchains/").ensure();
 
@@ -2279,7 +2274,6 @@ void ValidatorManagerImpl::new_masterchain_block() {
   for (auto &[_, actor] : shard_block_retainers_) {
     td::actor::send_closure(actor, &ShardBlockRetainer::update_masterchain_state, last_masterchain_state_);
   }
-  td::actor::send_closure(ext_message_pool_, &ExtMessagePool::update_last_masterchain_state, last_masterchain_state_);
   if (last_masterchain_seqno_ % 1024 == 0) {
     LOG(WARNING) << "applied masterchain block " << last_masterchain_block_id_.to_str();
   } else {
@@ -2460,9 +2454,22 @@ void ValidatorManagerImpl::update_shards() {
         auto entry = find_or_create_validator_group();
 
         if (!entry->started) {
-          LOG(INFO) << "Started " << entry->name() << ":" << val_group_id;
-          td::actor::send_closure(entry->actor, &IValidatorGroup::start, prev, last_masterchain_block_id_);
           entry->started = true;
+
+          auto &wpool = workchain_ext_pools_.try_emplace(shard.workchain, shard.workchain).first->second;
+          if (wpool.has_token(shard)) {
+            LOG(INFO) << "Started " << entry->name() << ":" << val_group_id;
+            auto token = wpool.take_token(shard);
+            td::actor::send_closure(entry->actor, &IValidatorGroup::start, prev, last_masterchain_block_id_,
+                                    std::move(token));
+          } else {
+            LOG(INFO) << "Scheduled start of " << entry->name() << ":" << val_group_id;
+            pending_ext_pool_starts_[shard] = PendingGroupStarts{
+                .actor = entry->actor.get(),
+                .prev = prev,
+                .min_mc_block_id = last_masterchain_block_id_,
+            };
+          }
         }
 
         if (shard.is_masterchain()) {
@@ -2540,9 +2547,17 @@ void ValidatorManagerImpl::update_shards() {
     destroyed_validator_sessions_.insert(id);
     next_validator_groups_.erase(id);
   }
-  auto destroy_sessions = [to_destroy = std::move(to_destroy)]() {
+  auto destroy_sessions = [SelfId = actor_id(this), to_destroy = std::move(to_destroy)]() {
     for (const auto &s : to_destroy) {
-      td::actor::send_closure(s, &IValidatorGroup::destroy);
+      td::actor::send_closure(
+          s, &IValidatorGroup::destroy, td::PromiseCreator::lambda([SelfId](td::Result<ShardExternalsPoolReader> R) {
+            if (R.is_ok()) {
+              auto token = R.move_as_ok();
+              if (token) {
+                td::actor::send_closure(SelfId, &ValidatorManagerImpl::return_ext_pool_token, std::move(token));
+              }
+            }
+          }));
     }
   };
 
@@ -2651,8 +2666,6 @@ ValidatorSessionId ValidatorManagerImpl::get_validator_set_id(ShardIdFull shard,
 td::actor::ActorOwn<IValidatorGroup> ValidatorManagerImpl::create_validator_group(
     ValidatorSessionId session_id, ShardIdFull shard, td::Ref<block::ValidatorSet> validator_set, BlockSeqno key_seqno,
     validatorsession::ValidatorSessionOptions opts, bool init_session) {
-  td::actor::send_closure(ext_message_pool_, &ExtMessagePool::cleanup_external_messages, shard);
-
   auto validator_id = get_validator(shard, validator_set);
   CHECK(!validator_id.is_zero());
   auto descr = validator_set->get_validator(validator_id.bits256_value());
@@ -3150,7 +3163,6 @@ void ValidatorManagerImpl::prepare_stats(td::Promise<std::vector<std::pair<std::
   vec.emplace_back("stateserializerenabled", serializer_enabled ? "true" : "false");
 
   merger.make_promise("").set_value(std::move(vec));
-  td::actor::send_closure(ext_message_pool_, &ExtMessagePool::prepare_stats, merger.make_promise(""));
 
   if (!serializer_.empty()) {
     td::actor::send_closure(serializer_, &AsyncStateSerializer::prepare_stats, merger.make_promise(""));
@@ -3486,7 +3498,6 @@ void ValidatorManagerImpl::update_options(td::Ref<ValidatorManagerOptions> opts)
   if (!shard_block_verifier_.empty()) {
     td::actor::send_closure(shard_block_verifier_, &ShardBlockVerifier::update_options, opts);
   }
-  td::actor::send_closure(ext_message_pool_, &ExtMessagePool::update_options, opts);
   opts_ = std::move(opts);
 }
 
