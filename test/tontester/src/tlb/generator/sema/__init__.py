@@ -59,8 +59,7 @@ def analyze(schema: Schema) -> tuple[TypeRegistry, list[ResolvedType]]:
     for rt in user_types:
         rt.match_tree = build_match_tree(rt)
 
-    for rt in user_types:
-        rt.inference = classify_inference(rt)
+    classify_inference(user_types)
 
     for rt in user_types:
         for rc in rt.constructors:

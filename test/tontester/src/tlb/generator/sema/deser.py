@@ -1,5 +1,7 @@
 """Deserialization plan generation and inference capability classification."""
 
+from collections.abc import Callable
+
 from ..ast_nodes import CompareOp
 from .types import (
     AnonymousRecordType,
@@ -8,6 +10,7 @@ from .types import (
     CellRefType,
     CheckConstraint,
     DeserStep,
+    InferenceChain,
     InferenceInfo,
     InferenceStep,
     NatAdd,
@@ -36,45 +39,164 @@ from .types import (
     TypeApply,
     TypeParamDef,
     TypeParamRef,
+    collect_type_params,
     is_nat,
+    is_type,
 )
 
 
-def classify_inference(resolved_type: ResolvedType) -> list[InferenceInfo]:
-    """For each Type parameter, check if output params can propagate through it.
+def classify_inference(resolved_types: list[ResolvedType]) -> None:
+    """For each type and each Type parameter, precompute the extraction chain.
 
     A Type param is inference-capable if EVERY constructor has exactly one
-    non-conditional field whose type is directly TypeParamRef to the
-    corresponding implicit param, and no other fields reference that param.
+    non-conditional field referencing it, and the chain from that field to
+    the param value can be resolved (possibly through other types' inference).
+
+    Populates type.inference for all resolved types. Handles cycles by
+    marking in-progress resolutions as not-capable.
     """
-    result: list[InferenceInfo] = []
+    resolving: set[tuple[int, int]] = set()  # (id(type), tlp_position)
 
-    for tlp in resolved_type.type_level_params:
-        if tlp.kind != ParamKind.TYPE:
+    def resolve_type(t: ResolvedType) -> None:
+        if t.inference:
+            return  # already resolved
+        result: list[InferenceInfo] = []
+        for tlp in t.type_level_params:
+            if tlp.kind != ParamKind.TYPE:
+                continue
+            result.append(_resolve_param(t, tlp.position, resolving))
+        t.inference = result
+
+    def _resolve_param(
+        t: ResolvedType, position: int, in_progress: set[tuple[int, int]]
+    ) -> InferenceInfo:
+        key = (id(t), position)
+        if key in in_progress:
+            return InferenceInfo()  # cycle — not capable
+        in_progress.add(key)
+        try:
+            return _resolve_param_inner(t, position, resolve_type)
+        finally:
+            in_progress.discard(key)
+
+    for t in resolved_types:
+        resolve_type(t)
+
+
+def _resolve_param_inner(
+    t: ResolvedType,
+    position: int,
+    resolve_type: _ResolveTypeFn,
+) -> InferenceInfo:
+    """Resolve inference for one type param position across all constructors."""
+    info = InferenceInfo()
+    if not t.constructors:
+        return info
+
+    for constructor in t.constructors:
+        param = _param_for_type_position(constructor, position)
+        if param is None:
+            return info  # not capable
+        chain = _build_chain_for_constructor(constructor, param, resolve_type)
+        if chain is None:
+            return info  # not capable
+        info.constructor_chains[constructor] = chain
+
+    info.is_capable = True
+    return info
+
+
+type _ResolveTypeFn = Callable[[ResolvedType], None]
+
+
+def _build_chain_for_constructor(
+    constructor: ResolvedConstructor,
+    param: TypeParamDef,
+    resolve_type: _ResolveTypeFn,
+) -> InferenceChain | None:
+    """Build the extraction chain for a param in one constructor.
+
+    Returns None if the param can't be extracted (no unique field, conditional, etc).
+    """
+    # Find the unique non-conditional field referencing this param
+    found: ResolvedField | None = None
+    for field in constructor.fields:
+        refs: set[TypeParamDef] = set()
+        collect_type_params(field.type_expr, refs)
+        if param not in refs:
             continue
-        i = tlp.position
+        if found is not None:
+            return None  # ambiguous — multiple fields
+        found = field
 
-        info = InferenceInfo()
-        if not resolved_type.constructors:
-            result.append(info)
+    if found is None or found.condition is not None:
+        return None
+
+    steps = _build_chain_through_expr(found.type_expr, param, resolve_type)
+    if steps is None:
+        return None
+    return InferenceChain(field=found, steps=steps)
+
+
+def _build_chain_through_expr(
+    expr: ResolvedTypeExpr,
+    param: TypeParamDef,
+    resolve_type: _ResolveTypeFn,
+) -> list[InferenceStep] | None:
+    """Build the chain of InferenceSteps to navigate from expr's value to param's value.
+
+    Returns None if the param is not reachable through inference.
+    """
+    if isinstance(expr, TypeParamRef) and expr.param is param:
+        return []
+
+    if not isinstance(expr, TypeApply):
+        return None  # CellRef, Tuple, etc — can't navigate
+
+    applied_type = expr.type
+
+    # Find which arg position contains the param (must be unique and TYPE-kinded)
+    target_arg_idx: int | None = None
+    for arg_idx, arg in enumerate(expr.arguments):
+        if arg_idx >= len(applied_type.type_level_params):
             continue
+        if applied_type.type_level_params[arg_idx].kind != ParamKind.TYPE:
+            continue
+        assert is_type(arg)
+        refs: set[TypeParamDef] = set()
+        collect_type_params(arg, refs)
+        if param in refs:
+            if target_arg_idx is not None:
+                return None  # param at multiple arg positions
+            target_arg_idx = arg_idx
 
-        all_have = True
-        for constructor in resolved_type.constructors:
-            param = _param_for_type_position(constructor, i)
-            if param is None:
-                all_have = False
-                break
-            field = _field_exposing_param(constructor, param)
-            if field is None:
-                all_have = False
-                break
-            info.constructor_field[constructor] = field
+    if target_arg_idx is None:
+        return None
 
-        info.is_capable = all_have
-        result.append(info)
+    target_arg = expr.arguments[target_arg_idx]
+    assert is_type(target_arg)
 
-    return result
+    # Ensure the applied type's inference is resolved for this position
+    resolve_type(applied_type)
+
+    inf_idx = _inference_index_for_param(applied_type, target_arg_idx)
+    if inf_idx is None or inf_idx >= len(applied_type.inference):
+        return None
+    if not applied_type.inference[inf_idx].is_capable:
+        return None
+
+    # This step navigates from applied_type's value to its type param's value
+    step = InferenceStep(
+        type=applied_type,
+        param_idx=target_arg_idx,
+        concrete_arg=target_arg,
+    )
+
+    # Recurse into the concrete arg
+    rest = _build_chain_through_expr(target_arg, param, resolve_type)
+    if rest is None:
+        return None
+    return [step] + rest
 
 
 def _param_for_type_position(
@@ -93,18 +215,6 @@ def _param_for_type_position(
             return None
         if tlp.kind == ParamKind.TYPE:
             type_idx += 1
-    return None
-
-
-def _field_exposing_param(
-    constructor: ResolvedConstructor, param: TypeParamDef
-) -> ResolvedField | None:
-    """Find a non-conditional field whose type is directly TypeParamRef(param)."""
-    for field in constructor.fields:
-        if field.condition is not None:
-            continue
-        if isinstance(field.type_expr, TypeParamRef) and field.type_expr.param is param:
-            return field
     return None
 
 
@@ -302,6 +412,7 @@ def _scan_for_outputs(
         extraction = OutputExtraction(
             source_field=source_field,
             chain=list(chain),
+            result_type=type_expr,
             result_param_position=arg_idx,
         )
         steps.append(BindOutputParam(target_param=arg.param, extraction=extraction))
@@ -311,12 +422,17 @@ def _scan_for_outputs(
         if not isinstance(arg, TypeApply):
             continue
         inf_idx = _inference_index_for_param(applied_type, arg_idx)
-        if inf_idx is not None and inf_idx < len(applied_type.inference):
-            if applied_type.inference[inf_idx].is_capable:
-                new_chain = chain + [
-                    InferenceStep(type=applied_type, param_idx=arg_idx, concrete_arg=arg)
-                ]
-                _scan_for_outputs(source_field, arg, constructor, known_params, steps, new_chain)
+        if inf_idx is None or inf_idx >= len(applied_type.inference):
+            continue
+        inf_info = applied_type.inference[inf_idx]
+        if not inf_info.is_capable:
+            continue
+        # Add the top-level step + the precomputed intermediate steps.
+        # The intermediate steps navigate within the type to reach the type param.
+        first_chain = next(iter(inf_info.constructor_chains.values()))
+        top_step = InferenceStep(type=applied_type, param_idx=arg_idx, concrete_arg=arg)
+        new_chain = chain + [top_step] + first_chain.steps
+        _scan_for_outputs(source_field, arg, constructor, known_params, steps, new_chain)
 
 
 def _inference_index_for_param(resolved_type: ResolvedType, arg_position: int) -> int | None:

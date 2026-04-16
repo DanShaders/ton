@@ -342,12 +342,7 @@ class ConstructorGenerator:
                 expr = source_name
                 for inf_step in extraction.chain:
                     expr = self._emit_inference_access(inf_step, expr, sb)
-                if extraction.chain:
-                    strat = StrategyBuilder(self.ctx, self.scope).build(
-                        extraction.chain[-1].concrete_arg
-                    )
-                else:
-                    strat = self.strategies[IdentityKey(extraction.source_field)]
+                strat = StrategyBuilder(self.ctx, self.scope).build(extraction.result_type)
                 expr = strat.emit_get_output(expr, extraction.result_param_position)
                 sb.line(f"{var_name} = {expr}")
                 sb.line(f"if {var_name} < 0:")
@@ -380,19 +375,22 @@ class ConstructorGenerator:
 
         Returns the expression for the accessed field value.
         """
-        cons_fields = inf_step.type.inference[inf_step.param_idx].constructor_field
+        # Map TLP position to inference list index (count only TYPE params before it)
+        tlps = inf_step.type.type_level_params
+        inf_idx = sum(1 for p in tlps[: inf_step.param_idx] if p.kind == ParamKind.TYPE)
+        cons_chains = inf_step.type.inference[inf_idx].constructor_chains
         field_names: set[str] = set()
-        for inf_cons, inf_field in cons_fields.items():
+        for inf_cons, chain in cons_chains.items():
             inf_scope = self.ctx.get_constructor(inf_cons).scope
-            field_names.add(inf_scope.lookup(inf_field))
+            field_names.add(inf_scope.lookup(chain.field))
         if len(field_names) == 1:
             return f"{expr}.{next(iter(field_names))}"
         tmp = self.ctx.tmp("_inf")
-        items = list(cons_fields.items())
-        for i, (inf_cons, inf_field) in enumerate(items):
+        items = list(cons_chains.items())
+        for i, (inf_cons, chain) in enumerate(items):
             cons_name = self.ctx.scope.lookup(inf_cons)
             inf_scope = self.ctx.get_constructor(inf_cons).scope
-            field_name = inf_scope.lookup(inf_field)
+            field_name = inf_scope.lookup(chain.field)
             if i == 0:
                 sb.line(f"if isinstance({expr}, {cons_name}):")
             elif i < len(items) - 1:

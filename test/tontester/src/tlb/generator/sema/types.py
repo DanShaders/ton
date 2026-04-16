@@ -258,6 +258,7 @@ class OutputExtraction:
 
     source_field: ResolvedField
     chain: list[InferenceStep]
+    result_type: ResolvedTypeExpr  # concrete type at the end of the chain
     result_param_position: int
 
 
@@ -313,7 +314,7 @@ class ResolvedConstraint:
 type FieldOrConstraint = ResolvedField | ResolvedConstraint
 
 
-def _collect_type_params(expr: ResolvedTypeExpr, out: set[TypeParamDef]) -> None:
+def collect_type_params(expr: ResolvedTypeExpr, out: set[TypeParamDef]) -> None:
     """Walk a type expression tree and collect all referenced TypeParamDefs."""
     match expr:
         case TypeParamRef(param=p):
@@ -321,11 +322,11 @@ def _collect_type_params(expr: ResolvedTypeExpr, out: set[TypeParamDef]) -> None
         case TypeApply(arguments=args):
             for a in args:
                 if is_type(a):
-                    _collect_type_params(a, out)
+                    collect_type_params(a, out)
         case TupleType(element=elem):
-            _collect_type_params(elem, out)
+            collect_type_params(elem, out)
         case CellRefType(inner=inner):
-            _collect_type_params(inner, out)
+            collect_type_params(inner, out)
         case AnonymousRecordType():
             pass
 
@@ -349,7 +350,7 @@ class ResolvedConstructor:
         """Type params actually referenced by this constructor's field types."""
         result: set[TypeParamDef] = set()
         for f in self.fields:
-            _collect_type_params(f.type_expr, result)
+            collect_type_params(f.type_expr, result)
         return frozenset(result)
 
 
@@ -402,12 +403,20 @@ class MatchFail:
 type MatchTree = MatchTag | MatchBit | MatchConstraint | MatchConstructor | MatchFail
 
 
+@dataclass(frozen=True)
+class InferenceChain:
+    """Full navigation path from a constructor field to a type param's value."""
+
+    field: ResolvedField
+    steps: list[InferenceStep]
+
+
 @dataclass
 class InferenceInfo:
     """Per-Type-param: can output params propagate through this param?"""
 
     is_capable: bool = False
-    constructor_field: dict[ResolvedConstructor, ResolvedField] = field(default_factory=dict)
+    constructor_chains: dict[ResolvedConstructor, InferenceChain] = field(default_factory=dict)
 
 
 @dataclass(eq=False)
