@@ -1,182 +1,192 @@
 import asyncio
+import fcntl
+import json
 import logging
+import os
 import signal
+from collections.abc import Awaitable
 from pathlib import Path
-from typing import final
+from typing import cast, final
 
 import uvicorn
-from pydantic import ValidationError
+
+from tl import JSONSerializable
 
 from .api import create_app
-from .config import ConfigWatcher, DaemonConfig
-from .container import ScrapeTarget, ServiceManager
-from .ipc import DaemonInfo, IPCServer
+from .compose import Compose
+from .config import DaemonConfig
+from .ipc import RunUrlResolver
+from .runs import RunsManager
+from .services import GrafanaProvisioning, grafana_container_name, grafana_service
 from .sqlite_storage import SQLiteStorage
-from .storage import TestMetadata
 
 logger = logging.getLogger(__name__)
 
 
+class DaemonAlreadyRunning(RuntimeError):
+    pass
+
+
+def acquire_instance_lock(instance_dir: Path) -> int:
+    """Acquire an exclusive ``flock`` on ``<instance_dir>/daemon.lock``.
+
+    Returns the file descriptor; caller must close it (and the OS releases
+    the lock automatically when the fd is closed or the process dies). Any
+    second daemon pointed at the same instance dir blocks here instead of
+    racing the socket-bind, which is the only serialization point that
+    survives ``systemd-run`` transient-unit churn.
+    """
+    instance_dir.mkdir(parents=True, exist_ok=True)
+    lockfile = instance_dir / "daemon.lock"
+    fd = os.open(str(lockfile), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        raise DaemonAlreadyRunning(
+            f"Another daemon holds the lock at {lockfile}"
+        )
+    return fd
+
+
 @final
 class DashboardDaemon:
-    def __init__(self, config_path: Path, socket_path: Path, frontend_dir: Path):
-        self.config_path: Path = config_path
-        self.socket_path: Path = socket_path
-        self.frontend_dir: Path = frontend_dir
+    def __init__(self, instance_dir: Path, socket_path: Path, frontend_dir: Path):
+        self.instance_dir = instance_dir
+        self.socket_path = socket_path
+        self.frontend_dir = frontend_dir
 
-        self._storage: SQLiteStorage = SQLiteStorage()
-        self._ipc_server: IPCServer = IPCServer(
-            socket_path,
-            info_provider=self._daemon_info,
-            on_register=self._on_run_register,
-            on_complete=self._on_run_complete,
-        )
-
-        self._shutdown_event: asyncio.Event = asyncio.Event()
-        self._config_change_event: asyncio.Event = asyncio.Event()
-        self._current_config: DaemonConfig | None = None
-        self._new_config: DaemonConfig | None = None
-
-        self._service_manager: ServiceManager | None = None
-        self._scrape_lock: asyncio.Lock = asyncio.Lock()
-
-        self._config_watcher: ConfigWatcher = ConfigWatcher(config_path, self._on_config_change)
-
-    def _daemon_info(self) -> DaemonInfo:
-        cfg = self._current_config
-        if cfg is None:
-            return DaemonInfo(prometheus_url="", grafana_url="")
-        return DaemonInfo(
-            prometheus_url=f"http://{cfg.host}:{cfg.prometheus_port}",
-            grafana_url=f"http://{cfg.host}:{cfg.grafana_port}",
-        )
-
-    def _on_config_change(self, new_config: DaemonConfig | ValidationError | None) -> None:
-        if new_config is None:
-            self._shutdown_event.set()
-        elif isinstance(new_config, ValidationError):
-            logger.error(f"Invalid configuration: {new_config}")
-        elif new_config != self._new_config:
-            self._new_config = new_config
-            self._config_change_event.set()
-
-    async def _on_run_register(self, run_id: str, metadata: TestMetadata) -> None:
-        await self._storage.register_run(run_id, metadata)
-        await self._sync_scrape_targets()
-        logger.info(f"Registered run {run_id} with {len(metadata.nodes)} node(s)")
-
-    async def _on_run_complete(self, run_id: str) -> None:
-        await self._storage.update_run_status(run_id, "completed")
-        await self._sync_scrape_targets()
-        logger.info(f"Completed run {run_id}")
-
-    async def _sync_scrape_targets(self) -> None:
-        async with self._scrape_lock:
-            if self._service_manager is None:
-                return
-            runs = await self._storage.list_active_runs()
-            groups: list[ScrapeTarget] = []
-            for run in runs:
-                for node in run.metadata.nodes:
-                    groups.append(
-                        ScrapeTarget(
-                            targets=[node.address],
-                            labels={"run_id": run.run_id, "node": node.name},
-                        )
-                    )
-            await self._service_manager.apply_scrape_targets(groups)
-
-    async def _http_server_manager(self, initial_config: DaemonConfig) -> None:
-        current_config = initial_config
-        while True:
-            app = create_app(self._storage, self._daemon_info, str(self.frontend_dir))
-            uvicorn_config = uvicorn.Config(
-                app,
-                host=current_config.host,
-                port=current_config.dashboard_port,
-                log_level="info",
-            )
-            uvicorn_server = uvicorn.Server(uvicorn_config)
-            server_task = asyncio.create_task(uvicorn_server.serve())
-            config_task = asyncio.create_task(self._config_change_event.wait())
-            shutdown_task = asyncio.create_task(self._shutdown_event.wait())
-
-            _ = await asyncio.wait(
-                [server_task, config_task, shutdown_task],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            uvicorn_server.should_exit = True
-            if not server_task.done():
-                await server_task
-            for task in (config_task, shutdown_task):
-                if not task.done():
-                    _ = task.cancel()
-
-            if self._shutdown_event.is_set():
-                break
-
-            if self._config_change_event.is_set():
-                self._config_change_event.clear()
-                if self._new_config is not None:
-                    current_config = self._new_config
-                    self._current_config = current_config
+        self._shutdown_event = asyncio.Event()
+        self._storage = SQLiteStorage(instance_dir / "runs.db")
+        self._compose = Compose(network="tontester")
 
     async def run(self) -> None:
-        initial_config = self._config_watcher.get_current_config()
-        if initial_config is None:
-            raise RuntimeError(f"No configuration found at {self.config_path}")
-        if isinstance(initial_config, ValidationError):
-            raise RuntimeError("Invalid configuration") from initial_config
+        lock_fd = acquire_instance_lock(self.instance_dir)
+        try:
+            await self._run_locked()
+        finally:
+            os.close(lock_fd)
 
-        self._current_config = initial_config
-        self._new_config = initial_config
+    async def _run_locked(self) -> None:
+        config = _load_config(self.instance_dir / "config.json")
 
-        services_dir = self.socket_path.parent / "services"
-        services_dir.mkdir(parents=True, exist_ok=True)
-        self._service_manager = ServiceManager(
-            instance_dir=services_dir,
-            prometheus_port=initial_config.prometheus_port,
-            grafana_port=initial_config.grafana_port,
+        dashboard_url = f"http://{config.host}:{config.dashboard_port}"
+        grafana_url = f"http://{config.host}:{config.grafana_port}"
+
+        provisioning = GrafanaProvisioning(
+            provisioning_dir=self.instance_dir / "grafana" / "provisioning",
+            daemon_host_url=dashboard_url,
+        )
+        provisioning.write_dashboard_provider()
+        provisioning.write_dashboard()
+
+        runs = RunsManager(
+            instance_dir=self.instance_dir,
+            storage=self._storage,
+            compose=self._compose,
+            provisioning=provisioning,
+            port_range=config.prometheus_port_range,
         )
 
-        started_services = False
+        await self._compose.ensure_network()
+        await runs.recover()
+        await runs.start_reaper()
+
+        grafana_started = False
         try:
-            await self._service_manager.start_all()
-            started_services = True
-        except RuntimeError as e:
-            logger.warning(f"Could not start services: {e}")
+            await self._compose.up(
+                grafana_service(
+                    host_port=config.grafana_port,
+                    data_dir=self.instance_dir / "grafana" / "data",
+                    provisioning_dir=self.instance_dir / "grafana" / "provisioning",
+                )
+            )
+            grafana_started = True
+        except Exception:
+            logger.warning("Could not start Grafana; dashboard queries will fail", exc_info=True)
 
-        await self._sync_scrape_targets()
+        url_resolver = RunUrlResolver(dashboard_url=dashboard_url, grafana_url=grafana_url)
+        app, state = create_app(
+            storage=self._storage,
+            runs=runs,
+            url_resolver=url_resolver,
+            frontend_dir=str(self.frontend_dir),
+            on_shutdown_request=self._shutdown_event.set,
+        )
 
-        await self._ipc_server.start()
+        self.socket_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.socket_path.exists() or self.socket_path.is_symlink():
+            self.socket_path.unlink()
 
-        http_task = asyncio.create_task(self._http_server_manager(initial_config))
-        watch_task = asyncio.create_task(self._config_watcher.watch())
+        tcp_config = uvicorn.Config(
+            app,
+            host=config.host,
+            port=config.dashboard_port,
+            log_level="info",
+            lifespan="off",
+        )
+        uds_config = uvicorn.Config(
+            app,
+            uds=str(self.socket_path),
+            log_level="info",
+            lifespan="off",
+        )
+        tcp_server = uvicorn.Server(tcp_config)
+        uds_server = uvicorn.Server(uds_config)
+
+        tcp_task = asyncio.create_task(tcp_server.serve(), name="tcp-server")
+        uds_task = asyncio.create_task(uds_server.serve(), name="uds-server")
 
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, self._shutdown_event.set)
         loop.add_signal_handler(signal.SIGINT, self._shutdown_event.set)
+        # SIGHUP arrives when our foreground systemd-run wrapper loses its
+        # PTY (terminal closed). Treat the same as SIGTERM.
+        loop.add_signal_handler(signal.SIGHUP, self._shutdown_event.set)
+
+        logger.info(f"Dashboard: {dashboard_url}")
+        logger.info(f"Grafana:   {grafana_url}")
+        logger.info(f"IPC:       {self.socket_path}")
 
         try:
             _ = await self._shutdown_event.wait()
         finally:
-            self._config_watcher.stop()
+            logger.info("Shutting down...")
 
-            if not http_task.done():
-                await http_task
-
-            _ = watch_task.cancel()
+            tcp_server.should_exit = True
+            uds_server.should_exit = True
             try:
-                await watch_task
-            except asyncio.CancelledError:
-                pass
+                _ = await asyncio.wait_for(
+                    asyncio.gather(tcp_task, uds_task, return_exceptions=True),
+                    timeout=30.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("uvicorn servers did not stop in time; cancelling")
+                _ = tcp_task.cancel()
+                _ = uds_task.cancel()
+                _ = await asyncio.gather(tcp_task, uds_task, return_exceptions=True)
 
-            await self._ipc_server.stop()
+            await state.proxy.aclose()
 
-            if started_services:
-                assert self._service_manager is not None
-                await self._service_manager.stop_all()
-                await self._service_manager.cleanup()
+            # runs.shutdown and Grafana teardown are independent; one failing
+            # must not skip the other.
+            teardown: list[Awaitable[object]] = [runs.shutdown()]
+            if grafana_started:
+                teardown.append(self._compose.down(grafana_container_name()))
+            for result in await asyncio.gather(*teardown, return_exceptions=True):
+                if isinstance(result, BaseException):
+                    logger.exception("Teardown step failed", exc_info=result)
+
+            if self.socket_path.exists():
+                self.socket_path.unlink()
 
             self._storage.close()
+
+
+def _load_config(path: Path) -> DaemonConfig:
+    if not path.exists():
+        raise RuntimeError(f"No configuration at {path}")
+    raw = cast(JSONSerializable, json.loads(path.read_text()))
+    if not isinstance(raw, dict):
+        raise RuntimeError(f"Configuration at {path} is not a JSON object")
+    return DaemonConfig.model_validate(raw)

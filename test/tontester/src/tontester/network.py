@@ -15,7 +15,8 @@ from ipaddress import IPv4Address
 from pathlib import Path
 from typing import Literal, final, override
 
-from daemon.ipc import IPCClient, RegisterResponse
+from daemon.client import DashboardClient
+from daemon.ipc import RegisterOk
 from daemon.storage import NodeTarget, TestMetadata
 from tonapi import ton_api
 
@@ -291,8 +292,8 @@ class Network:
         )
         self._dashboard_description: str = description
         self._dashboard_run_id: str = run_id or uuid.uuid4().hex[:12]
-        self._dashboard_client: IPCClient | None = None
-        self._dashboard_response: RegisterResponse | None = None
+        self._dashboard_client: DashboardClient | None = None
+        self._dashboard_response: RegisterOk | None = None
 
     @property
     def zerostate(self) -> Zerostate:
@@ -370,7 +371,7 @@ class Network:
         commit = await run(["git", "rev-parse", "HEAD"])
         return branch, commit
 
-    async def register_with_dashboard(self) -> RegisterResponse | None:
+    async def register_with_dashboard(self) -> RegisterOk | None:
         """Register the currently-started full nodes with the tontester daemon.
 
         Safe to call once after all nodes are launched. Returns the daemon response (with Grafana
@@ -400,14 +401,14 @@ class Network:
             ],
         )
 
-        client = IPCClient(self._dashboard_socket)
-        response = await client.connect_and_register(self._dashboard_run_id, metadata)
+        client = DashboardClient(self._dashboard_socket)
+        response = await client.register(self._dashboard_run_id, metadata)
         self._dashboard_client = client
         self._dashboard_response = response
         l.info(
             (
                 f"Registered run {response.run_id} with tontester daemon "
-                f"(prometheus={response.prometheus_url}, grafana={response.grafana_url})"
+                f"(grafana={response.grafana_url})"
             )
         )
         return response
@@ -420,7 +421,7 @@ class Network:
     ) -> bool | None:
         if self._dashboard_client is not None:
             try:
-                await self._dashboard_client.disconnect()
+                await self._dashboard_client.aclose()
             except Exception:
                 pass
             self._dashboard_client = None

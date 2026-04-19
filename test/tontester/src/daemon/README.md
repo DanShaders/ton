@@ -1,114 +1,157 @@
 # tontester dashboard daemon
 
-Long-running local process that boots a Prometheus + Grafana pair (via `podman`)
-and discovers scrape targets from tontester test runs over a Unix socket.
+Long-running local process that boots Grafana + one Prometheus instance
+**per test run** (via `podman`) and exposes a dashboard to browse live and
+archived runs.
 
-Result: you start a tontester network and immediately see per-validator
-Prometheus metrics in Grafana — no manual compose/podman/prom config wrangling.
+## Why per-run Prometheus?
+
+A single shared Prometheus with `run_id` as a label blows up cardinality:
+every new run creates a fresh series for every metric. Instead, each run
+gets its own Prometheus container over its own data directory; runs are
+isolated by container, not by label. When the run ends the container is
+stopped (data stays on disk); when someone queries that run later the
+daemon lazy-boots a fresh read-only container from the same data dir.
 
 ## Components
 
 ```
- test harness (tontester Network)
-        │  unix socket
+  test harness (tontester Network)
+        │  websocket over UDS (handshake + heartbeat)
         ▼
- daemon  ─────────────►  file_sd  ─────►  prometheus (podman)
-   │                                          │
-   │                                          ▼
-   └─► fastapi dashboard    ◄────────  grafana (podman)
+  daemon ────► Compose ────► podman
+   │            (primitives)    │
+   │                            ├── tontester-grafana
+   │                            ├── tontester-prom-<run_id>  (live)
+   │                            └── tontester-prom-<run_id>  (lazy-booted archive)
+   │
+   ├── FastAPI app
+   │     • /api/runs, /api/info   — dashboard JSON
+   │     • /runs/{id}/prom/*      — proxy to live/archive Prometheus
+   │     • WS /runs/{id}          — harness IPC (register + heartbeat)
+   │     • POST /admin/shutdown   — graceful stop
+   │
+   └── Grafana provisioning
+         • one datasource YAML per run (hot-reloaded)
+         • one dashboard with a datasource-variable dropdown
 ```
 
-- `daemon/daemon.py` — `DashboardDaemon` orchestrator. Starts IPC server,
-  HTTP API, and the Prometheus/Grafana containers.
-- `daemon/container.py` — `PrometheusController`, `GrafanaController`,
-  `ServiceManager`. Manages container lifecycle; writes a file_sd
-  `targets.json` that Prometheus re-reads every 5 s.
-- `daemon/ipc.py` — Unix-socket protocol. `IPCClient.connect_and_register`
-  holds the connection open; the daemon marks the run "completed" and drops
-  its scrape targets when the client disconnects.
-- `daemon/storage.py` + `sqlite_storage.py` — in-memory SQLite keyed by
-  `run_id`, recording `TestMetadata` (description, git info, list of
-  `NodeTarget`).
-- `daemon/config.py` — `ConfigWatcher` uses `watchfiles` to auto-reload
-  `config.json`. Deleting the config tells the daemon to shut down.
-- `daemon/api.py` — FastAPI: `/api/info`, `/api/runs`, `/api/runs/{id}`,
-  `/health`, plus `/grafana` and `/prometheus` redirects. Serves the
-  SPA from `daemon/frontend/`.
-- `daemon/cli.py` — `start`, `stop`, `status`, `info` commands.
+### Files
 
-## Usage
+- `compose.py` — the only file in the package that shells out to `podman`.
+  `Service` is a plain pydantic model; `Compose` runs/stops/inspects
+  containers and knows about the network. No tontester concepts leak in.
+- `services.py` — factory functions `prometheus_service(...)`,
+  `grafana_service(...)`, plus `GrafanaProvisioning` for on-disk YAMLs.
+- `runs.py` — `RunsManager` owns the per-run lifecycle state machine
+  (`LIVE` ↔ `DORMANT`) and handles crash recovery.
+- `prom_proxy.py` — FastAPI router that resolves `/runs/{id}/prom/*` to
+  whichever container is currently serving that run, lazy-booting archive
+  containers with an idle TTL.
+- `ipc.py` — the WS route; see "IPC" below.
+- `api.py` — assembles all routers into one FastAPI app.
+- `daemon.py` — lifecycle orchestrator: start Grafana, start uvicorn on
+  both TCP and UDS, run until shutdown, archive everything cleanly on exit.
+- `client.py` — harness-side client (`DashboardClient`) that opens the WS
+  and keeps it alive with heartbeats.
+- `storage.py` / `sqlite_storage.py` — on-disk SQLite at
+  `.dashboard/runs.db`, single source of truth for run lifecycle.
+- `config.py` — `DaemonConfig` (host, ports, Prometheus port range).
+  Config is loaded once at startup; edits require a restart.
 
-### 1. Start the daemon
+## Lifecycle & IPC
+
+Test harness code:
+
+```python
+async with Network(install, working_dir, enable_dashboard=True) as network:
+    ...
+    await network.register_with_dashboard()  # after nodes are launched
+```
+
+Under the hood `DashboardClient` opens `ws+unix:<socket>:/runs/<id>`, sends
+a register handshake with `TestMetadata`, and receives URLs back. Every
+10 s it sends a heartbeat. The daemon moves the run to `DORMANT` when:
+
+- the client closes the WS cleanly, or
+- the heartbeat times out after 30 s, or
+- the daemon itself shuts down.
+
+Data stays queryable either way — the same URL pattern
+(`/runs/{id}/prom/...`) serves both live and dormant runs; dormant ones
+are lazy-booted from their data directory on demand.
+
+## Crash recovery
+
+Every persistent write is ordered: filesystem → SQLite → podman. On
+startup the daemon reconciles all three:
+
+- DB row `LIVE` with or without a running container → flip to `DORMANT`
+  (no daemon ⇒ no active WS ⇒ nobody holds the run). Data is preserved
+  and remains queryable via lazy-boot.
+- Running `tontester-prom-*` container → stop it; lazy-boot recreates
+  fresh when a query arrives.
+- Datasource YAML without a DB row → delete it.
+
+## CLI
 
 ```sh
-uv run daemon start
+uv run daemon start              # foreground, lifetime bound to terminal
+uv run daemon start --daemonize  # background, survives shell exit
+uv run daemon status             # hits GET /health over the UDS socket
+uv run daemon info               # prints URLs and socket path
+uv run daemon stop               # POST /admin/shutdown over the UDS socket
 ```
 
-First run writes a default config to `test/integration/.dashboard/config.json`:
+`start` (both modes) wraps the real daemon in a transient systemd user
+unit via ``systemd-run``, so:
+
+- Ctrl+C / SIGTERM / SIGHUP (terminal close) → clean graceful shutdown.
+- SIGKILL / OOM / hard terminal death → systemd tears down the whole
+  cgroup atomically, so podman children die with the daemon and no
+  orphan containers survive.
+
+This requires a working ``systemd --user`` session; on boxes without it,
+``daemon start`` refuses to run with a clear error. `daemon status` /
+`daemon stop` / `daemon info` do not depend on systemd — they talk to
+the daemon over its UDS socket.
+
+To follow logs of a detached daemon:
+
+```sh
+journalctl --user -fu 'tontester-dashboard-*'
+```
+
+## Default paths
+
+```
+test/integration/.dashboard/
+├── config.json         # DaemonConfig
+├── daemon.sock         # UDS (FastAPI + WS)
+├── runs.db             # SQLite: run lifecycle
+├── runs/<run_id>/
+│   ├── data/           # Prometheus TSDB (live + archive)
+│   └── config/         # prometheus.yml + targets.json
+└── grafana/
+    ├── data/           # Grafana state
+    └── provisioning/   # datasources (per-run YAML) + dashboards
+```
+
+## Default config
 
 ```json
 {
   "host": "127.0.0.1",
   "dashboard_port": 8080,
-  "prometheus_port": 9090,
-  "grafana_port": 3000
+  "grafana_port": 3000,
+  "prometheus_port_range": [9100, 9499]
 }
 ```
 
-Editing the file reloads the HTTP server; deleting it shuts the daemon down.
+## View metrics
 
-### 2. Run a tontester network with `enable_dashboard=True`
+- Dashboard: http://127.0.0.1:8080
+- Grafana:   http://127.0.0.1:3000 (anonymous admin)
 
-```python
-async with Network(install, working_dir, enable_dashboard=True) as network:
-    ...  # create_full_node, run, etc.
-    await network.register_with_dashboard()  # call after nodes are launched
-```
-
-`Network.register_with_dashboard()` opens the Unix socket, sends the list of
-`NodeTarget(name, host.containers.internal:<port>)` to the daemon, and
-receives back the Grafana / Prometheus URLs.
-
-See `test/integration/test_metrics.py` for a full example.
-
-### 3. View metrics
-
-- Dashboard:  http://127.0.0.1:8080
-- Prometheus: http://127.0.0.1:9090
-- Grafana:    http://127.0.0.1:3000 (anonymous admin)
-
-The Grafana instance is auto-provisioned with a Prometheus datasource and a
-minimal "TON Validator Overview" dashboard.
-
-## How scrape target discovery works
-
-Each `FullNode` allocates an exporter port and launches `validator-engine`
-with `--exporter-address 0.0.0.0:<port>`. From inside the Prometheus
-container, the host is reached via `host.containers.internal` (provided by
-`--add-host=...:host-gateway`).
-
-When the test connects over IPC, the daemon writes
-`services/prometheus-config/targets.json`:
-
-```json
-[
-  {"targets": ["host.containers.internal:9101"], "labels": {"run_id": "abc", "node": "node-0"}},
-  {"targets": ["host.containers.internal:9102"], "labels": {"run_id": "abc", "node": "node-1"}}
-]
-```
-
-Prometheus' `file_sd_configs` picks this up every 5 seconds (no reload
-needed). On disconnect the daemon rewrites the file without that run's
-entries.
-
-## CLI
-
-```sh
-uv run daemon start     # foreground, streams logs to stdout
-uv run daemon status    # pings the socket
-uv run daemon info      # prints the URLs
-uv run daemon stop      # removes the config -> triggers graceful shutdown
-```
-
-`Ctrl-C`/`SIGTERM`/`SIGINT` also trigger a graceful shutdown (stops and
-removes the containers).
+Every panel queries `${datasource}`, which resolves to the run you pick
+from the dropdown. The dashboard has no `run_id` label matchers anywhere.

@@ -5,13 +5,15 @@ requires-python = ">=3.14"
 dependencies = [
     "dash",
     "fastapi",
+    "httpx",
     "plotly",
     "pydantic",
     "pytoniq-core",
     "pyyaml",
     "types-pyyaml",
-    "uvicorn",
+    "uvicorn[standard]",
     "watchfiles",
+    "websockets",
 ]
 
 [project.scripts]

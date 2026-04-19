@@ -1,184 +1,202 @@
+"""WebSocket entry point for test-harness <-> daemon IPC.
+
+Single endpoint ``/runs/{run_id}``. The client:
+
+1. Opens the WebSocket.
+2. Sends the *handshake* message (``action="register"``) carrying
+   :class:`TestMetadata`.
+3. Receives a response with the Grafana / Prometheus URLs.
+4. Sends a ``heartbeat`` every ~10 s until the run ends.
+5. Closes the socket (clean) — or the daemon times out the heartbeat and
+   closes with code 4000.
+
+Either way, the run is archived when the WebSocket goes away. A crash on
+either side lands the run in the same state (``archived`` on clean close,
+``crashed`` on abnormal close) so the run is queryable regardless.
+"""
+
 import asyncio
-import json
 import logging
-from collections.abc import Awaitable, Callable
-from pathlib import Path
-from typing import cast, final
+from typing import Annotated, Literal, final
 
-from pydantic import BaseModel
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from tl import JSONSerializable
-
+from .runs import DaemonStopped, RunAlreadyActive, RunsManager, RunStartFailed
 from .storage import TestMetadata
 
 logger = logging.getLogger(__name__)
 
 
-class PingResponse(BaseModel):
-    status: str
+DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 30.0
+
+
+class RegisterMessage(BaseModel):
+    action: Literal["register"]
+    metadata: TestMetadata
+
+
+class HeartbeatMessage(BaseModel):
+    action: Literal["heartbeat"]
+
+
+class CompleteMessage(BaseModel):
+    action: Literal["complete"]
+
+
+type ClientMessage = Annotated[
+    RegisterMessage | HeartbeatMessage | CompleteMessage,
+    Field(discriminator="action"),
+]
+
+_client_message_adapter: TypeAdapter[ClientMessage] = TypeAdapter(ClientMessage)
+
+
+class RegisterOk(BaseModel):
+    status: Literal["ok"] = "ok"
+    run_id: str
+    dashboard_url: str
+    grafana_url: str
+    prometheus_url: str
+
+
+class RegisterError(BaseModel):
+    status: Literal["error"] = "error"
+    code: str
     message: str
 
 
-class RegisterResponse(BaseModel):
-    status: str
-    run_id: str
-    prometheus_url: str
-    grafana_url: str
-
-
-class DaemonInfo(BaseModel):
-    prometheus_url: str
-    grafana_url: str
-
-
-type RegisterCallback = Callable[[str, TestMetadata], Awaitable[None]]
-type CompleteCallback = Callable[[str], Awaitable[None]]
-
-
 @final
-class IPCServer:
-    def __init__(
-        self,
-        socket_path: Path,
-        info_provider: Callable[[], DaemonInfo],
-        on_register: RegisterCallback,
-        on_complete: CompleteCallback,
-    ):
-        self.socket_path: Path = socket_path
-        self._info_provider: Callable[[], DaemonInfo] = info_provider
-        self._on_register: RegisterCallback = on_register
-        self._on_complete: CompleteCallback = on_complete
-        self._server: asyncio.Server | None = None
-        self._active_writers: set[asyncio.StreamWriter] = set()
+class RunUrlResolver:
+    """Computes the externally-visible URLs for a given run."""
 
-    async def handle_client(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
-        self._active_writers.add(writer)
-        run_id: str | None = None
-        try:
-            line = await reader.readline()
-            if not line:
-                return
+    def __init__(self, dashboard_url: str, grafana_url: str):
+        self.dashboard_url = dashboard_url
+        self.grafana_url = grafana_url
 
-            hello = cast(JSONSerializable, json.loads(line.decode()))
-            if not isinstance(hello, dict):
-                return
-
-            command = hello.get("command")
-            if command == "ping":
-                response = PingResponse(status="ok", message="pong")
-                writer.write((response.model_dump_json() + "\n").encode())
-                await writer.drain()
-                return
-
-            run_id_raw = hello.get("run_id")
-            if not isinstance(run_id_raw, str):
-                return
-            run_id = run_id_raw
-
-            metadata_raw = hello.get("metadata", {})
-            if not isinstance(metadata_raw, dict):
-                return
-
-            metadata = TestMetadata.model_validate(metadata_raw)
-            await self._on_register(run_id, metadata)
-
-            info = self._info_provider()
-            response = RegisterResponse(
-                status="ok",
-                run_id=run_id,
-                prometheus_url=info.prometheus_url,
-                grafana_url=info.grafana_url,
-            )
-            writer.write((response.model_dump_json() + "\n").encode())
-            await writer.drain()
-
-            # Keep connection alive until the client disconnects.
-            while True:
-                chunk = await reader.read(4096)
-                if not chunk:
-                    break
-
-        except Exception:
-            logger.exception("IPC client error")
-        finally:
-            self._active_writers.discard(writer)
-            if run_id is not None:
-                await self._on_complete(run_id)
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                pass
-
-    async def start(self) -> None:
-        if self.socket_path.exists():
-            self.socket_path.unlink()
-        self.socket_path.parent.mkdir(parents=True, exist_ok=True)
-        self._server = await asyncio.start_unix_server(
-            self.handle_client, path=str(self.socket_path)
+    def for_run(self, run_id: str) -> RegisterOk:
+        grafana = f"{self.grafana_url}/d/ton-overview?refresh=5s&var-datasource=run-{run_id}"
+        # Grafana proxies the datasource, but expose the direct proxy URL too
+        # so users can hit Prometheus's raw UI if they need ad-hoc queries.
+        prom = f"{self.dashboard_url}/runs/{run_id}/prom/"
+        return RegisterOk(
+            run_id=run_id,
+            dashboard_url=self.dashboard_url,
+            grafana_url=grafana,
+            prometheus_url=prom,
         )
 
-    async def stop(self) -> None:
-        if self._server:
-            self._server.close()
-            # Force-close any still-connected clients so wait_closed() returns.
-            for writer in list(self._active_writers):
-                if not writer.is_closing():
-                    try:
-                        writer.close()
-                    except Exception:
-                        pass
-            try:
-                await asyncio.wait_for(self._server.wait_closed(), timeout=5.0)
-            except asyncio.TimeoutError:
-                logger.warning("IPC server wait_closed() timed out; forcing shutdown")
-        if self.socket_path.exists():
-            self.socket_path.unlink()
+
+def build_ws_router(
+    runs: RunsManager,
+    urls: RunUrlResolver,
+    *,
+    heartbeat_timeout_seconds: float = DEFAULT_HEARTBEAT_TIMEOUT_SECONDS,
+) -> APIRouter:
+    router = APIRouter()
+
+    @router.websocket("/runs/{run_id}")
+    async def _(ws: WebSocket, run_id: str) -> None:
+        await _handle_run_ws(runs, urls, ws, run_id, heartbeat_timeout_seconds)
+
+    return router
 
 
-@final
-class IPCClient:
-    def __init__(self, socket_path: Path):
-        self.socket_path: Path = socket_path
-        self._reader: asyncio.StreamReader | None = None
-        self._writer: asyncio.StreamWriter | None = None
+async def _handle_run_ws(
+    runs: RunsManager,
+    urls: RunUrlResolver,
+    ws: WebSocket,
+    run_id: str,
+    heartbeat_timeout_seconds: float,
+) -> None:
+    await ws.accept()
+    registered = False
+    try:
+        hello_raw = await asyncio.wait_for(ws.receive_text(), timeout=heartbeat_timeout_seconds)
+        hello = _parse(hello_raw)
+        if not isinstance(hello, RegisterMessage):
+            await ws.send_text(
+                RegisterError(
+                    code="bad_handshake",
+                    message="first message must be action=register",
+                ).model_dump_json()
+            )
+            await ws.close(code=4001)
+            return
 
-    async def connect_and_register(self, run_id: str, metadata: TestMetadata) -> RegisterResponse:
-        self._reader, self._writer = await asyncio.open_unix_connection(str(self.socket_path))
-
-        hello = {"run_id": run_id, "metadata": metadata.model_dump()}
-        self._writer.write((json.dumps(hello) + "\n").encode())
-        await self._writer.drain()
-
-        line = await self._reader.readline()
-        response = RegisterResponse.model_validate_json(line)
-        if response.status != "ok":
-            raise RuntimeError(f"Failed to register run: {response}")
-        return response
-
-    async def disconnect(self) -> None:
-        if self._writer:
-            self._writer.close()
-            try:
-                await self._writer.wait_closed()
-            except Exception:
-                pass
-            self._reader = None
-            self._writer = None
-
-    async def ping(self) -> PingResponse:
-        reader, writer = await asyncio.open_unix_connection(str(self.socket_path))
         try:
-            writer.write((json.dumps({"command": "ping"}) + "\n").encode())
-            await writer.drain()
+            _ = await runs.register(run_id, hello.metadata)
+        except RunAlreadyActive:
+            await ws.send_text(
+                RegisterError(
+                    code="run_already_active",
+                    message=f"run {run_id} is already active",
+                ).model_dump_json()
+            )
+            await ws.close(code=4002)
+            return
+        except RunStartFailed as e:
+            await ws.send_text(
+                RegisterError(
+                    code="start_failed",
+                    message=str(e),
+                ).model_dump_json()
+            )
+            await ws.close(code=4003)
+            return
+        except DaemonStopped:
+            await ws.send_text(
+                RegisterError(
+                    code="daemon_stopping",
+                    message="daemon is shutting down",
+                ).model_dump_json()
+            )
+            await ws.close(code=4004)
+            return
 
-            line = await reader.readline()
-            return PingResponse.model_validate_json(line)
-        finally:
-            writer.close()
+        registered = True
+        await ws.send_text(urls.for_run(run_id).model_dump_json())
+
+        # Main loop: receive heartbeats / complete until disconnect.
+        while True:
             try:
-                await writer.wait_closed()
+                raw = await asyncio.wait_for(ws.receive_text(), timeout=heartbeat_timeout_seconds)
+            except asyncio.TimeoutError:
+                logger.warning(f"Heartbeat timeout for run {run_id}")
+                await ws.close(code=4000)
+                return
+            msg = _parse(raw)
+            match msg:
+                case None:
+                    # Malformed frame would otherwise defeat the heartbeat timeout.
+                    await ws.close(code=4001)
+                    return
+                case HeartbeatMessage():
+                    continue
+                case CompleteMessage():
+                    await ws.close()
+                    return
+                case RegisterMessage():
+                    # Protocol violation — a second register on a live WS
+                    # would otherwise reset the heartbeat window forever.
+                    logger.warning(f"Duplicate register on live WS for run {run_id}")
+                    await ws.close(code=4001)
+                    return
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception(f"Error on run WebSocket for {run_id}")
+    finally:
+        if registered:
+            try:
+                await runs.release(run_id)
             except Exception:
-                pass
+                logger.exception(f"Error finalizing run {run_id}")
+
+
+def _parse(raw: str) -> ClientMessage | None:
+    try:
+        return _client_message_adapter.validate_json(raw)
+    except ValidationError:
+        logger.warning(f"Unparseable client message: {raw[:200]}")
+        return None
