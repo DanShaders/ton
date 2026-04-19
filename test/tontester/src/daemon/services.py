@@ -285,7 +285,6 @@ class GrafanaProvisioning(ProvisioningLike):
                     "url": datasource_url,
                     "isDefault": False,
                     "editable": False,
-                    "jsonData": {"httpMethod": "POST"},
                 }
             ],
         }
@@ -368,6 +367,7 @@ def _default_dashboard() -> dict[str, JSONSerializable]:
                     "refId": chr(ord("A") + i),
                     "legendFormat": legend,
                     "datasource": {"type": "prometheus", "uid": "${datasource}"},
+                    "interval": "5s",
                 }
                 for i, (expr, legend) in enumerate(targets)
             ],
@@ -438,7 +438,10 @@ def _default_dashboard() -> dict[str, JSONSerializable]:
             "QUIC RX bytes/s: app vs stream vs UDP",
             [
                 (app_rate("ton_quic_app_deliver_bytes_total"), "{{run_id}} {{node}} app_deliver"),
-                (rate("ton_quic_summary_stream_bytes_received_total"), "{{run_id}} {{node}} stream_rx"),
+                (
+                    rate("ton_quic_summary_stream_bytes_received_total"),
+                    "{{run_id}} {{node}} stream_rx",
+                ),
                 (rate("ton_quic_udp_ingress_bytes_total"), "{{run_id}} {{node}} udp_ingress"),
             ],
             12,
@@ -686,6 +689,12 @@ def _default_dashboard() -> dict[str, JSONSerializable]:
         "refresh": 1,
         "multi": True,
         "includeAll": False,
+        # hide=2: hide both label and dropdown. The variable is driven
+        # exclusively by the ``var-datasource=...`` URL param set by the
+        # dashboard SPA's per-run and overlay buttons, so there's nothing
+        # to interact with here — and no "Selected"-button foot-gun that
+        # could boot every archive run at once.
+        "hide": 2,
         "current": {"text": "", "value": "", "selected": False},
     }
     node_var: dict[str, JSONSerializable] = {
@@ -711,7 +720,7 @@ def _default_dashboard() -> dict[str, JSONSerializable]:
         "tags": ["ton"],
         "timezone": "browser",
         "schemaVersion": 38,
-        "version": 7,
+        "version": 10,
         # Off by default so dormant-run links don't re-query a frozen
         # range. The frontend appends ``?refresh=5s`` for live runs.
         # (``?refresh=off`` on the URL doesn't work due to a long-standing

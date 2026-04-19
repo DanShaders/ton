@@ -213,7 +213,7 @@ async def test_cancel_during_acquire_pin_triggers_compensating_release(fault_rig
     await _yield_for(50)
 
     # Pin count drained back to 0 — reaper can collect the archive now.
-    snap = await fault_rig.manager.inspect("r1")
+    snap = await fault_rig.manager.snapshot("r1")
     assert snap is not None
     assert snap.pins == 0
 

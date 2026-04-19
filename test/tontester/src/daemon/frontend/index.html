@@ -8,16 +8,17 @@
   <body>
     <header>
       <h1>tontester dashboard</h1>
-      <nav>
-        <a id="grafana-link" target="_blank" rel="noopener">Grafana</a>
-      </nav>
     </header>
     <main>
       <section>
-        <h2>Runs</h2>
+        <div class="toolbar">
+          <button id="overlay-btn" type="button" disabled>Overlay in Grafana</button>
+          <span id="overlay-count" class="muted">0 selected</span>
+        </div>
         <table id="runs">
           <thead>
             <tr>
+              <th class="select-col"><input type="checkbox" id="select-all" /></th>
               <th>Run ID</th>
               <th>Status</th>
               <th>Started</th>

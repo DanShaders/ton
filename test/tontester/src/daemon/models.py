@@ -53,28 +53,34 @@ class RunMetadata:
     end_time: datetime | None
     status: RunStatus
     metadata: TestMetadata
-    host_port: int  # host port allocated to this run's Prometheus container
 
 
 # --- actor-state view ----------------------------------------------------
 
 
 type RunOwner = Literal["ws", "archive"]
-type RunLifecycle = Literal["dormant", "live"]
 
 
 @dataclass(frozen=True)
-class RunStateSnapshot:
-    """Read-only view of an actor's in-memory state (tests + diagnostics).
+class RunSnapshot:
+    """Frozen view of a run's configuration and runtime state.
 
-    The live ``Dormant | Live`` sum type in :mod:`.run_actor` holds
-    runtime resources; this is its serializable projection.
+    Built on demand by :meth:`RunActor._build_snapshot` from the two
+    primary sources of truth — the persisted storage row (start/end
+    timestamps, metadata, status) and the actor's :class:`Dormant` |
+    :class:`Live` sum type (owner/host_port/pins/last_access when Live).
+    ``host_port`` is runtime-only: ``None`` while the run is Dormant
+    because no container is up to bind one. Consumers never mutate the
+    snapshot — every call builds a fresh instance.
     """
 
     run_id: str
-    status: RunLifecycle
-    owner: RunOwner | None
+    status: RunStatus
+    start_time: datetime
+    end_time: datetime | None
+    metadata: TestMetadata
     host_port: int | None
+    owner: RunOwner | None
     pins: int
     last_access: float
 

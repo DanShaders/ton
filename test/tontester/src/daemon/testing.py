@@ -242,25 +242,19 @@ class HookedStorage(StorageBackend):
         self.fail_next_get_run_metadata: Exception | None = None
 
     @override
-    async def register_run(self, run_id: str, metadata: TestMetadata, host_port: int) -> None:
+    async def register_run(self, run_id: str, metadata: TestMetadata) -> None:
         exc = self.fail_next_register_run
         if exc is not None:
             self.fail_next_register_run = None
             raise exc
-        await self._delegate.register_run(run_id, metadata, host_port)
+        await self._delegate.register_run(run_id, metadata)
 
     @override
-    async def set_run_status(
-        self,
-        run_id: str,
-        status: RunStatus,
-        *,
-        if_port: int | None = None,
-    ) -> None:
+    async def set_run_status(self, run_id: str, status: RunStatus) -> None:
         exc = self.fail_next_set_status.pop(status, None)
         if exc is not None:
             raise exc
-        await self._delegate.set_run_status(run_id, status, if_port=if_port)
+        await self._delegate.set_run_status(run_id, status)
 
     @override
     async def list_runs(self, limit: int = 50) -> list[RunMetadata]:

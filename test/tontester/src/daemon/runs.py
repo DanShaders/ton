@@ -47,21 +47,20 @@ from .models import (
     NoFreePorts,
     RunAlreadyActive,
     RunMetadata,
+    RunSnapshot,
     RunStartFailed,
-    RunStateSnapshot,
     RunStatus,
     TestMetadata,
 )
 from .protocols import ComposeLike, ProvisioningLike, StorageBackend
 from .run_actor import (
     AcquirePinMsg,
-    InspectMsg,
+    ConfigSnapshotMsg,
     MaybeReapMsg,
     PortAllocator,
     RegisterMsg,
     ReleaseMsg,
     ReleasePinMsg,
-    ResolveNodeMsg,
     RunActor,
     ShutdownMsg,
 )
@@ -72,8 +71,8 @@ __all__ = [
     "NoFreePorts",
     "QueryPin",
     "RunAlreadyActive",
+    "RunSnapshot",
     "RunStartFailed",
-    "RunStateSnapshot",
     "RunsSupervisor",
 ]
 
@@ -166,6 +165,7 @@ class RunsSupervisor:
         daemon_base_url: str,
         archive_idle_ttl_seconds: float = 300.0,
         reap_interval_seconds: float = 30.0,
+        on_state_change: Callable[[str], None] | None = None,
     ):
         self.instance_dir = instance_dir
         self.archive_idle_ttl_seconds = archive_idle_ttl_seconds
@@ -177,11 +177,25 @@ class RunsSupervisor:
         self._ports = PortAllocator(port_range)
         self._daemon_port = daemon_port
         self._daemon_base_url = daemon_base_url
+        self._on_state_change = on_state_change
 
         self._actors: dict[str, RunActor] = {}
         self._actor_tasks: dict[str, asyncio.Task[None]] = {}
         self._reaper_task: asyncio.Task[None] | None = None
         self._stopped = False
+
+    def _notify_state_change(self, run_id: str) -> None:
+        """Fire the UI-facing notifier.
+
+        Synchronous by contract: the notifier must not block the actor
+        path. Implementations that need to do async work (DB read,
+        broadcast) should spawn their own task and track its lifetime.
+        """
+        if self._on_state_change is not None:
+            try:
+                self._on_state_change(run_id)
+            except Exception:
+                logger.exception(f"State-change notifier raised for {run_id}")
 
     # ---- public API
 
@@ -191,13 +205,15 @@ class RunsSupervisor:
         actor = self._get_or_spawn(run_id)
         reply: asyncio.Future[RunMetadata] = asyncio.get_running_loop().create_future()
         await actor.send(RegisterMsg(metadata=metadata, reply=reply))
-        return await _compensate_on_cancel(
+        result = await _compensate_on_cancel(
             reply,
             acquires=lambda _: True,  # successful register always holds the run
             compensate=lambda: self.release(run_id),
             run_id=run_id,
             op="register",
         )
+        self._notify_state_change(run_id)
+        return result
 
     async def release(self, run_id: str) -> None:
         actor = self._actors.get(run_id)
@@ -206,6 +222,7 @@ class RunsSupervisor:
         reply: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         await actor.send(ReleaseMsg(reply=reply))
         await reply
+        self._notify_state_change(run_id)
 
     async def acquire_query_pin(self, run_id: str) -> int | None:
         if self._stopped:
@@ -324,26 +341,19 @@ class RunsSupervisor:
 
     # ---- introspection (tests)
 
-    async def inspect(self, run_id: str) -> RunStateSnapshot | None:
-        actor = self._actors.get(run_id)
-        if actor is None:
-            return None
-        reply: asyncio.Future[RunStateSnapshot] = asyncio.get_running_loop().create_future()
-        await actor.send(InspectMsg(reply=reply))
-        return await reply
+    async def snapshot(self, run_id: str) -> RunSnapshot | None:
+        """Full run config + runtime state — one trip to the actor.
 
-    async def resolve_node_address(self, run_id: str, node_name: str) -> str | None:
-        """Return the configured address of a named node in a live run, or
-        ``None`` if the run isn't live or doesn't know the node. Used by
-        the scrape proxy in :mod:`.prom_proxy` — the actor owns the
-        authoritative in-memory metadata, so this avoids a SQLite hit per
-        scrape.
+        Used by the scrape proxy (node lookup), the query proxy
+        (``end_time`` clamp for dormant runs), and tests (diagnostics).
+        Returns ``None`` when the run isn't spawned *and* storage has no
+        row — i.e. the run was never registered.
         """
-        actor = self._actors.get(run_id)
-        if actor is None:
-            return None
-        reply: asyncio.Future[str | None] = asyncio.get_running_loop().create_future()
-        await actor.send(ResolveNodeMsg(node_name=node_name, reply=reply))
+        actor = self._get_or_spawn(run_id)
+        reply: asyncio.Future[RunSnapshot | None] = (
+            asyncio.get_running_loop().create_future()
+        )
+        await actor.send(ConfigSnapshotMsg(reply=reply))
         return await reply
 
     async def run_reaper_pass(self) -> None:

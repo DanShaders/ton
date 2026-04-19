@@ -1,9 +1,9 @@
 """Tests for :class:`daemon.runs.RunsSupervisor` + :class:`RunActor`.
 
-State access is via :meth:`RunsSupervisor.inspect`, which returns an
-immutable :class:`RunStateSnapshot`; the actor's private fields are
-never touched from outside. Time advances via ``VirtualClock``, so
-idling a handle is just ``await asyncio.sleep(...)``.
+State access is via :meth:`RunsSupervisor.snapshot`, which returns an
+immutable :class:`RunSnapshot`; the actor's private fields are never
+touched from outside. Time advances via ``VirtualClock``, so idling a
+handle is just ``await asyncio.sleep(...)``.
 """
 
 import asyncio
@@ -26,7 +26,7 @@ def _md(*nodes: str) -> _TestMetadata:
 
 
 async def _owner(rig: Rig, run_id: str) -> str | None:
-    snap = await rig.manager.inspect(run_id)
+    snap = await rig.manager.snapshot(run_id)
     return None if snap is None else snap.owner
 
 
@@ -39,13 +39,13 @@ async def test_register_fresh_run(rig: Rig):
     row = await rig.storage.get_run_metadata("r1")
     assert row is not None
     assert row.status == RunStatus.LIVE
-    assert 9100 <= row.host_port <= 9199
 
-    snap = await rig.manager.inspect("r1")
+    snap = await rig.manager.snapshot("r1")
     assert snap is not None
     assert snap.owner == "ws"
     assert snap.status == "live"
-    assert snap.host_port == row.host_port
+    assert snap.host_port is not None
+    assert 9100 <= snap.host_port <= 9199
 
     assert rig.compose.is_running(prometheus_container_name("r1"))
     assert rig.provisioning.datasource_file("r1").exists()
@@ -141,9 +141,11 @@ async def test_ensure_queryable_unknown_run_returns_none(rig: Rig):
 
 
 async def test_ensure_queryable_for_live_run_returns_live_port(rig: Rig):
-    row = await rig.manager.register("r1", _md("n0"))
+    _ = await rig.manager.register("r1", _md("n0"))
+    snap = await rig.manager.snapshot("r1")
+    assert snap is not None and snap.host_port is not None
     port = await rig.manager.ensure_queryable("r1")
-    assert port == row.host_port
+    assert port == snap.host_port
 
 
 async def test_ensure_queryable_lazy_boots_dormant_run(rig: Rig):
@@ -176,8 +178,8 @@ async def test_ensure_queryable_retries_after_boot_failure(rig: Rig):
 
 
 async def test_recover_flips_live_rows_to_dormant(rig: Rig):
-    await rig.storage.register_run("r1", _md("n0"), host_port=9150)
-    await rig.storage.register_run("r2", _md("n0"), host_port=9151)
+    await rig.storage.register_run("r1", _md("n0"))
+    await rig.storage.register_run("r2", _md("n0"))
 
     await rig.manager.recover()
 
@@ -194,7 +196,7 @@ async def test_recover_stops_leftover_prom_containers(rig: Rig):
     from daemon.models import Service
     from daemon.testing import FakeContainer
 
-    await rig.storage.register_run("r1", _md("n0"), host_port=9150)
+    await rig.storage.register_run("r1", _md("n0"))
     rig.compose.containers[prometheus_container_name("r1")] = FakeContainer(
         service=Service(name=prometheus_container_name("r1"), image="x")
     )
@@ -267,7 +269,7 @@ async def test_reaper_skips_pinned_handle(rig: Rig):
     await rig.manager.run_reaper_pass()
     await _drain_inbox(rig, "r1")
 
-    snap = await rig.manager.inspect("r1")
+    snap = await rig.manager.snapshot("r1")
     assert snap is not None and snap.owner == "archive" and snap.pins == 1
     assert rig.compose.is_running(prometheus_container_name("r1"))
 
@@ -343,19 +345,28 @@ async def test_shutdown_completes_even_with_in_flight_register(rig: Rig):
 # -------------------------------------------------------------------- port picker
 
 
-async def test_port_picker_prefers_existing_port_for_known_run(rig: Rig):
-    r = await rig.manager.register("r1", _md("n0"))
-    old_port = r.host_port
+async def _host_port(rig: Rig, run_id: str) -> int | None:
+    snap = await rig.manager.snapshot(run_id)
+    return None if snap is None else snap.host_port
+
+
+async def test_port_picker_reuses_lowest_free_port_after_release(rig: Rig):
+    _ = await rig.manager.register("r1", _md("n0"))
+    first = await _host_port(rig, "r1")
+    assert first is not None
     await rig.manager.release("r1")
 
-    r2 = await rig.manager.register("r1", _md("n0"))
-    assert r2.host_port == old_port
+    _ = await rig.manager.register("r1", _md("n0"))
+    # Allocator walks the range in order and picks the lowest free port;
+    # with r1 released, that's the same port it had before.
+    assert await _host_port(rig, "r1") == first
 
 
-async def test_port_picker_gives_fresh_port_when_preferred_is_taken(rig: Rig):
-    r1 = await rig.manager.register("r1", _md("n0"))
-    r2 = await rig.manager.register("r2", _md("n0"))
-    assert r2.host_port != r1.host_port
+async def test_port_picker_gives_distinct_ports_across_runs(rig: Rig):
+    _ = await rig.manager.register("r1", _md("n0"))
+    _ = await rig.manager.register("r2", _md("n0"))
+    p1, p2 = await _host_port(rig, "r1"), await _host_port(rig, "r2")
+    assert p1 is not None and p2 is not None and p1 != p2
 
 
 async def test_failed_register_then_retry_succeeds(rig: Rig):

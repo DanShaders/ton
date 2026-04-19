@@ -87,16 +87,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import final
 
-import httpx
-
 from .models import (
     DaemonStopped,
     NoFreePorts,
     RunAlreadyActive,
     RunMetadata,
     RunOwner,
+    RunSnapshot,
     RunStartFailed,
-    RunStateSnapshot,
     RunStatus,
     TestMetadata,
 )
@@ -178,22 +176,21 @@ class ShutdownMsg:
 
 
 @dataclass(frozen=True)
-class InspectMsg:
-    reply: asyncio.Future[RunStateSnapshot]
+class ConfigSnapshotMsg:
+    """Ask the actor for a frozen :class:`RunSnapshot`.
 
+    The actor is the source of truth for the run's live state; storage
+    owns the persisted config + timestamps. The snapshot handler combines
+    both on demand, so tests (owner, status, pins, last_access), the
+    scrape proxy (node address lookup), and the query proxy (end_time
+    clamp) all flow through this one message instead of each growing
+    their own narrow getter.
 
-@dataclass(frozen=True)
-class ResolveNodeMsg:
-    """Ask the actor for the configured address of a named node.
-
-    Used by the scrape proxy on the hot path (every ~5 s per node). The
-    actor is the source of truth for the run's current metadata; going
-    through it avoids a SQLite hit per scrape and guarantees consistency
-    with the in-memory state the rest of the actor's handlers see.
+    Returns ``None`` when the run is unknown to storage — a fresh actor
+    that has never received a register and has no DB row.
     """
 
-    node_name: str
-    reply: asyncio.Future[str | None]
+    reply: asyncio.Future[RunSnapshot | None]
 
 
 type Msg = (
@@ -203,8 +200,7 @@ type Msg = (
     | ReleasePinMsg
     | MaybeReapMsg
     | ShutdownMsg
-    | InspectMsg
-    | ResolveNodeMsg
+    | ConfigSnapshotMsg
 )
 
 
@@ -224,11 +220,8 @@ class PortAllocator:
         self._range = range_
         self._allocated: dict[str, int] = {}
 
-    def allocate(self, run_id: str, preferred: int | None = None) -> int:
+    def allocate(self, run_id: str) -> int:
         used = set(self._allocated.values())
-        if preferred is not None and preferred not in used:
-            self._allocated[run_id] = preferred
-            return preferred
         for port in range(self._range[0], self._range[1] + 1):
             if port not in used:
                 self._allocated[run_id] = port
@@ -281,6 +274,13 @@ class RunActor:
         self._state: RunState = Dormant()
         self._shutting_down: bool = False
 
+        # Memoized storage row — just a cache of ``get_run_metadata``.
+        # Populated whenever we already have a fresh row in hand (register,
+        # lazy-boot); invalidated on writes so the next snapshot request
+        # re-reads. ``_build_snapshot`` composes this with ``_state`` on
+        # demand; nothing else reads or mutates it.
+        self._row_cache: RunMetadata | None = None
+
         self._inbox: asyncio.Queue[Msg] = asyncio.Queue()
 
     # ---- public plumbing
@@ -304,12 +304,8 @@ class RunActor:
                         reply.set_result(None)
                 case MaybeReapMsg(deadline, reply):
                     await self._dispatch(reply, self._on_maybe_reap(deadline))
-                case InspectMsg(reply):
-                    if not reply.done():
-                        reply.set_result(self._snapshot())
-                case ResolveNodeMsg(node_name, reply):
-                    if not reply.done():
-                        reply.set_result(self._resolve_node(node_name))
+                case ConfigSnapshotMsg(reply):
+                    await self._dispatch(reply, self._on_config_snapshot())
                 case ShutdownMsg(reply):
                     await self._dispatch(reply, self._on_shutdown())
                     return
@@ -367,16 +363,18 @@ class RunActor:
                 logger.exception(f"Grafana reload after register({self.run_id}) raised")
 
             # SQLite.
-            await self._storage.register_run(self.run_id, metadata, host_port)
+            await self._storage.register_run(self.run_id, metadata)
 
             async def _release_set_dormant() -> None:
                 # Wrapped: callbacks on Live.resources must not raise.
                 try:
-                    await self._storage.set_run_status(
-                        self.run_id, RunStatus.DORMANT, if_port=host_port
-                    )
+                    await self._storage.set_run_status(self.run_id, RunStatus.DORMANT)
                 except Exception:
                     logger.exception(f"Release: set_run_status(DORMANT) raised for {self.run_id}")
+                # Invalidate — ``_build_snapshot`` will re-read the row on the
+                # next request. Cheaper and less error-prone than mirroring
+                # the storage-side first-dormant-wins rule in memory.
+                self._row_cache = None
 
             _ = resources.push_async_callback(_release_set_dormant)
 
@@ -426,11 +424,13 @@ class RunActor:
             last_access=asyncio.get_running_loop().time(),
             resources=resources,
         )
+        self._row_cache = row
         return row
 
     async def _on_release(self) -> None:
         match self._state:
             case Live(owner="ws"):
+                await self._drain_scrape_targets()
                 await self._release_live()
                 logger.info(f"Run {self.run_id} -> dormant")
             case _:
@@ -444,6 +444,7 @@ class RunActor:
             row = await self._storage.get_run_metadata(self.run_id)
             if row is None:
                 return None
+            self._row_cache = row
             if not await self._lazy_boot_archive(row):
                 return None
 
@@ -457,7 +458,7 @@ class RunActor:
         ``self._state`` to ``Live`` and returns ``True``. On any failure, fully
         rolls back and returns ``False``."""
         try:
-            host_port = self._ports.allocate(self.run_id, preferred=row.host_port)
+            host_port = self._ports.allocate(self.run_id)
         except NoFreePorts:
             return False
 
@@ -538,6 +539,33 @@ class RunActor:
 
     # ---- internals
 
+    async def _drain_scrape_targets(self) -> None:
+        """Emit Prometheus stale markers for the run's targets before the
+        container is torn down.
+
+        Rewriting ``targets.json`` to ``[]`` and POSTing ``/-/reload`` stops
+        the scrape loops; the stop sequence writes ``StaleNaN`` into the
+        head block for every series the loops were tracking. The subsequent
+        ``compose.down`` gives Prometheus a graceful SIGTERM which flushes
+        the WAL, so markers survive the next lazy-boot.
+
+        Without this step, series end on the last successful sample and
+        Prometheus's 5 min lookback-delta carries that value forward —
+        overlaid runs in Grafana bleed into each other. Best-effort: any
+        write/HTTP failure is logged and swallowed.
+        """
+        config_dir = self._config_dir()
+        try:
+            write_prometheus_config(
+                config_dir,
+                run_id=self.run_id,
+                daemon_port=self._daemon_port,
+                node_names=[],
+            )
+        except Exception:
+            logger.exception(f"Run {self.run_id}: drain write_prometheus_config failed")
+            return
+
     async def _release_live(self) -> None:
         """Close the currently held resources and transition to ``Dormant``.
 
@@ -568,33 +596,48 @@ class RunActor:
     def _data_dir(self) -> Path:
         return self._instance_dir / "runs" / self.run_id / "data"
 
-    def _resolve_node(self, node_name: str) -> str | None:
-        """In-memory name → address lookup for the scrape proxy. Returns
-        ``None`` if the actor isn't Live or has no such node."""
-        if not isinstance(self._state, Live):
+    async def _on_config_snapshot(self) -> RunSnapshot | None:
+        if self._row_cache is None:
+            self._row_cache = await self._storage.get_run_metadata(self.run_id)
+        row = self._row_cache
+        if row is None:
             return None
-        for n in self._state.metadata.nodes:
-            if n.name == node_name:
-                return n.address
-        return None
+        return self._build_snapshot(row)
 
-    def _snapshot(self) -> RunStateSnapshot:
-        match self._state:
-            case Dormant():
-                return RunStateSnapshot(
-                    run_id=self.run_id,
-                    status="dormant",
-                    owner=None,
-                    host_port=None,
-                    pins=0,
-                    last_access=0.0,
-                )
-            case Live() as live:
-                return RunStateSnapshot(
-                    run_id=self.run_id,
-                    status="live",
-                    owner=live.owner,
-                    host_port=live.host_port,
-                    pins=live.pins,
-                    last_access=live.last_access,
-                )
+    def _build_snapshot(self, row: RunMetadata) -> RunSnapshot:
+        """The only place a :class:`RunSnapshot` is constructed.
+
+        Composes the two primary sources — the persisted row and the
+        actor's :attr:`_state`. ``status`` is the run's **lifecycle**
+        status (LIVE = currently scraping, DORMANT = the WS closed and
+        ``end_time`` is pinned), not the actor's resource-state flag.
+        So only :class:`Live` with ``owner="ws"`` overrides ``row.status``
+        to LIVE; archive-owned Live is a read-only lazy-boot — the run
+        itself is still dormant. Runtime fields (host_port, metadata,
+        pins, last_access, owner) come from ``_state`` when present
+        because they're what the in-flight boot is actually using.
+        """
+        live = self._state if isinstance(self._state, Live) else None
+        if live is not None:
+            return RunSnapshot(
+                run_id=self.run_id,
+                status=RunStatus.LIVE if live.owner == "ws" else row.status,
+                start_time=row.start_time,
+                end_time=row.end_time,
+                metadata=live.metadata,
+                host_port=live.host_port,
+                owner=live.owner,
+                pins=live.pins,
+                last_access=live.last_access,
+            )
+        return RunSnapshot(
+            run_id=self.run_id,
+            status=row.status,
+            start_time=row.start_time,
+            end_time=row.end_time,
+            metadata=row.metadata,
+            host_port=None,
+            owner=None,
+            pins=0,
+            last_access=0.0,
+        )

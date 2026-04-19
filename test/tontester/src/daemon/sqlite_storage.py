@@ -19,7 +19,6 @@ class _SelectRow(TypedDict):
     end_time: float | None
     status: str
     metadata: str
-    host_port: int
 
 
 _SCHEMA_VERSION = 1
@@ -52,8 +51,7 @@ class SQLiteStorage(StorageBackend):
                     start_time REAL NOT NULL,
                     end_time REAL,
                     status TEXT NOT NULL,
-                    metadata TEXT NOT NULL,
-                    host_port INTEGER NOT NULL
+                    metadata TEXT NOT NULL
                 )
                 """
             )
@@ -69,56 +67,53 @@ class SQLiteStorage(StorageBackend):
         self.conn.commit()
 
     @override
-    async def register_run(self, run_id: str, metadata: TestMetadata, host_port: int) -> None:
+    async def register_run(self, run_id: str, metadata: TestMetadata) -> None:
         """Insert a fresh run or resume an existing one.
 
         For a fresh run: writes all columns. For a resume (row exists):
-        preserves ``start_time``, overwrites ``metadata`` / ``host_port``
-        (nodes or port may have changed), clears ``end_time``, flips status
-        to ``LIVE``.
+        preserves ``start_time``, overwrites ``metadata`` (nodes may have
+        changed), clears ``end_time``, flips status to ``LIVE``.
         """
         cursor = self.conn.cursor()
         now = datetime.now().timestamp()
         _ = cursor.execute(
             """
-            INSERT INTO runs (run_id, start_time, end_time, status, metadata, host_port)
-                 VALUES (?, ?, NULL, ?, ?, ?)
+            INSERT INTO runs (run_id, start_time, end_time, status, metadata)
+                 VALUES (?, ?, NULL, ?, ?)
             ON CONFLICT(run_id) DO UPDATE SET
                 status    = excluded.status,
                 end_time  = NULL,
-                metadata  = excluded.metadata,
-                host_port = excluded.host_port
+                metadata  = excluded.metadata
             """,
             (
                 run_id,
                 now,
                 RunStatus.LIVE.value,
                 metadata.model_dump_json(),
-                host_port,
             ),
         )
         self.conn.commit()
 
     @override
-    async def set_run_status(
-        self,
-        run_id: str,
-        status: RunStatus,
-        *,
-        if_port: int | None = None,
-    ) -> None:
+    async def set_run_status(self, run_id: str, status: RunStatus) -> None:
         cursor = self.conn.cursor()
-        port_clause = " AND host_port = ?" if if_port is not None else ""
-        port_args: tuple[int, ...] = (if_port,) if if_port is not None else ()
         if status == RunStatus.DORMANT:
+            # First-dormant wins: only stamp ``end_time`` when the row is
+            # transitioning out of LIVE. Subsequent DORMANT→DORMANT writes
+            # (e.g. from the archive reaper) must not overwrite the
+            # authoritative WS-close timestamp with "now".
             _ = cursor.execute(
-                f"UPDATE runs SET status = ?, end_time = ? WHERE run_id = ?{port_clause}",
-                (status.value, datetime.now().timestamp(), run_id, *port_args),
+                (
+                    "UPDATE runs SET status = ?,"
+                    " end_time = COALESCE(end_time, ?)"
+                    " WHERE run_id = ?"
+                ),
+                (status.value, datetime.now().timestamp(), run_id),
             )
         else:
             _ = cursor.execute(
-                f"UPDATE runs SET status = ?, end_time = NULL WHERE run_id = ?{port_clause}",
-                (status.value, run_id, *port_args),
+                "UPDATE runs SET status = ?, end_time = NULL WHERE run_id = ?",
+                (status.value, run_id),
             )
         self.conn.commit()
 
@@ -127,7 +122,7 @@ class SQLiteStorage(StorageBackend):
         cursor = self.conn.cursor()
         _ = cursor.execute(
             """
-            SELECT run_id, start_time, end_time, status, metadata, host_port
+            SELECT run_id, start_time, end_time, status, metadata
             FROM runs
             ORDER BY start_time DESC
             LIMIT ?
@@ -141,7 +136,7 @@ class SQLiteStorage(StorageBackend):
         cursor = self.conn.cursor()
         _ = cursor.execute(
             """
-            SELECT run_id, start_time, end_time, status, metadata, host_port
+            SELECT run_id, start_time, end_time, status, metadata
             FROM runs WHERE run_id = ?
             """,
             (run_id,),
@@ -156,7 +151,7 @@ class SQLiteStorage(StorageBackend):
         cursor = self.conn.cursor()
         _ = cursor.execute(
             """
-            SELECT run_id, start_time, end_time, status, metadata, host_port
+            SELECT run_id, start_time, end_time, status, metadata
             FROM runs WHERE status = ?
             ORDER BY start_time DESC
             """,
@@ -185,7 +180,6 @@ def _row_to_run(row: _SelectRow) -> RunMetadata | None:
         end_time=datetime.fromtimestamp(row["end_time"]) if row["end_time"] else None,
         status=status,
         metadata=metadata,
-        host_port=row["host_port"],
     )
 
 

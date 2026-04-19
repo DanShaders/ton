@@ -56,7 +56,7 @@ import uvicorn
 
 from tl import JSONSerializable
 
-from .api import create_app
+from .api import DaemonUrls, DashboardBus, create_app
 from .compose import Compose
 from .config import DaemonConfig
 from .ipc import RunUrlResolver
@@ -318,6 +318,11 @@ class DashboardDaemon:
             provisioning.write_dashboard_provider()
             provisioning.write_dashboard()
 
+            bus = DashboardBus(
+                storage=storage,
+                info=DaemonUrls(dashboard_url=dashboard_url, grafana_url=grafana_url),
+            )
+            _ = stack.push_async_callback(bus.aclose)
             runs = RunsSupervisor(
                 instance_dir=self.instance_dir,
                 storage=storage,
@@ -326,9 +331,11 @@ class DashboardDaemon:
                 port_range=config.prometheus_port_range,
                 daemon_port=config.dashboard_port,
                 daemon_base_url=dashboard_url,
+                on_state_change=bus.notify,
             )
 
             await runs.recover()
+            await bus.load_initial()
             await stack.enter_async_context(
                 _runs_lifecycle(runs, force=self._shutdown.force, reply_timeout=30.0)
             )
@@ -353,6 +360,7 @@ class DashboardDaemon:
                 url_resolver=url_resolver,
                 frontend_dir=str(self.frontend_dir),
                 on_shutdown_request=self._shutdown.requested.set,
+                bus=bus,
             )
             _ = stack.push_async_callback(proxy.aclose)
 

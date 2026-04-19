@@ -28,26 +28,16 @@ from .models import RunMetadata, RunStatus, Service, TestMetadata
 
 class StorageBackend(ABC):
     @abstractmethod
-    async def register_run(self, run_id: str, metadata: TestMetadata, host_port: int) -> None: ...
+    async def register_run(self, run_id: str, metadata: TestMetadata) -> None: ...
 
     @abstractmethod
-    async def set_run_status(
-        self,
-        run_id: str,
-        status: RunStatus,
-        *,
-        if_port: int | None = None,
-    ) -> None:
-        """Update status, optionally guarded by a ``host_port`` equality.
+    async def set_run_status(self, run_id: str, status: RunStatus) -> None:
+        """Update status.
 
-        Going DORMANT always stamps ``end_time = now`` — "last time the run
-        went dormant" wins over any earlier stamp, so ``/api/runs`` shows
-        the most recent completion.
-
-        When ``if_port`` is set, the update only takes effect if the stored
-        row's ``host_port`` still matches. This lets a failed-registration
-        rollback flip to DORMANT *only* if no concurrent register has since
-        overwritten the row — a compare-and-swap on port.
+        Going DORMANT stamps ``end_time = now`` only if it was NULL (i.e.
+        the first dormant transition after a LIVE period). Later DORMANT
+        writes — notably the archive reaper releasing an already-dormant
+        run — must not overwrite the authoritative WS-close timestamp.
         """
         ...
 
