@@ -1,7 +1,6 @@
 """FastAPI application: dashboard HTTP API, WebSocket IPC, and Prometheus proxy."""
 
 from collections.abc import Callable
-from typing import final
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
@@ -9,9 +8,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .ipc import RunUrlResolver, build_ws_router
+from .models import NodeTarget, RunMetadata
 from .prom_proxy import PromProxy
-from .runs import RunsManager
-from .storage import NodeTarget, RunMetadata, StorageBackend
+from .protocols import StorageBackend
+from .runs import RunsSupervisor
 
 
 class RunInfo(BaseModel):
@@ -45,26 +45,24 @@ def _run_to_info(run: RunMetadata) -> RunInfo:
     )
 
 
-@final
-class AppState:
-    """Lifecycle-managed state held on the FastAPI app for clean shutdown."""
-
-    def __init__(self, proxy: PromProxy):
-        self.proxy = proxy
-
-
 def create_app(
     *,
     storage: StorageBackend,
-    runs: RunsManager,
+    runs: RunsSupervisor,
     url_resolver: RunUrlResolver,
     frontend_dir: str,
     on_shutdown_request: Callable[[], None],
-) -> tuple[FastAPI, AppState]:
+) -> tuple[FastAPI, PromProxy]:
+    """Returns the FastAPI app and the owned :class:`PromProxy`.
+
+    The proxy holds an httpx client that must be closed on daemon shutdown
+    (see ``daemon.py``'s AsyncExitStack) — FastAPI has no built-in resource
+    lifetime hook we want to rely on here, so the caller holds the handle
+    directly.
+    """
     app = FastAPI(title="TON Dashboard Daemon")
 
     proxy = PromProxy(runs)
-    state = AppState(proxy=proxy)
 
     @app.get("/api/info")
     async def _() -> DaemonUrls:
@@ -87,19 +85,23 @@ def create_app(
 
     @app.get("/health")
     async def _() -> dict[str, str]:
-        return {"status": "ok"}
+        return {}
 
     @app.post("/admin/shutdown")
     async def _() -> dict[str, str]:
         on_shutdown_request()
-        return {"status": "shutting-down"}
+        return {}
 
     @app.get("/grafana")
     async def _() -> RedirectResponse:
         return RedirectResponse(f"{url_resolver.grafana_url}/d/ton-overview?refresh=5s")
 
-    # Per-run Prometheus proxy (live + lazy-boot archive).
-    app.include_router(proxy.router())
+    # Grafana → daemon → per-run Prometheus (live + lazy-boot archive).
+    app.include_router(proxy.query_router())
+
+    # Per-run Prometheus → daemon → real scrape targets. Keeps the
+    # prometheus container's egress whitelist down to one port (ours).
+    app.include_router(proxy.scrape_router())
 
     # Test-harness IPC.
     app.include_router(build_ws_router(runs, url_resolver))
@@ -107,4 +109,4 @@ def create_app(
     # Dashboard SPA — mounted last so it doesn't shadow API routes.
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
 
-    return app, state
+    return app, proxy

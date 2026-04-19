@@ -1,3 +1,5 @@
+# pyright: reportPrivateImportUsage=false
+
 import threading
 from datetime import datetime, timezone
 from typing import cast, final

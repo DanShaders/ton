@@ -21,10 +21,9 @@ from daemon.compose import (
     Compose,
     ContainerReadinessTimeout,
     ContainerStartFailed,
-    HttpReadyProbe,
     PodmanTimeout,
-    Service,
 )
+from daemon.models import HttpReadyProbe, Service
 from daemon.testing import ComposeRig, FakeProcessRunner, FakeReadyProbe
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("virtual_clock")]
@@ -33,7 +32,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("virtual_clock")]
 def _compose_with_fakes() -> tuple[Compose, ComposeRig]:
     runner = FakeProcessRunner()
     ready = FakeReadyProbe()
-    compose = Compose(network="test-net", runner=runner, ready_probe=ready)
+    compose = Compose(runner=runner, ready_probe=ready)
     return compose, ComposeRig(runner=runner, ready=ready)
 
 
@@ -84,32 +83,6 @@ async def test_podman_non_zero_ignored_when_check_false():
     out = await compose._podman(["ps"], check=False)
 
     assert out == ""
-
-
-# ----------------------------------------------------------------- ensure_network
-
-
-async def test_ensure_network_is_noop_when_present():
-    compose, rig = _compose_with_fakes()
-    rig.runner.queue_capture(match="network exists", returncode=0)
-
-    await compose.ensure_network()
-
-    # Only the exists check was issued; no create call.
-    cmds = [" ".join(a) for a in rig.runner.capture_log]
-    assert any("network exists test-net" in c for c in cmds)
-    assert not any("network create" in c for c in cmds)
-
-
-async def test_ensure_network_creates_when_missing():
-    compose, rig = _compose_with_fakes()
-    rig.runner.queue_capture(match="network exists", returncode=1)
-    rig.runner.queue_capture(match="network create", returncode=0)
-
-    await compose.ensure_network()
-
-    cmds = [" ".join(a) for a in rig.runner.capture_log]
-    assert any("network create test-net" in c for c in cmds)
 
 
 # --------------------------------------------------------------------- list/is_running
@@ -301,21 +274,3 @@ async def test_down_bounded_even_if_child_ignores_kill():
 async def test_down_is_noop_on_unknown_container():
     compose, _ = _compose_with_fakes()
     await compose.down("nothing-here")  # must not raise
-
-
-# -------------------------------------------------------------------- inspect
-
-
-async def test_inspect_parses_json_array():
-    compose, rig = _compose_with_fakes()
-    rig.runner.queue_capture(match="inspect", stdout=b'[{"Id": "abc"}]')
-
-    out = await compose.inspect("foo")
-
-    assert out == {"Id": "abc"}
-
-
-async def test_inspect_returns_none_on_empty_or_invalid():
-    compose, _ = _compose_with_fakes()
-    # Default capture returns empty stdout.
-    assert await compose.inspect("foo") is None

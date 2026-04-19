@@ -12,11 +12,25 @@ from typing import cast
 
 import httpx
 
-from .client import probe_daemon
 from .config import DaemonConfig
-from .daemon import DaemonAlreadyRunning, DashboardDaemon
 
 logger = logging.getLogger(__name__)
+
+
+# Kept in this leaf module rather than ``client.py`` so the CLI (which
+# calls this from ``daemon start`` / ``daemon status``) doesn't pull in
+# websockets + the full WS ``DashboardClient`` machinery on every invocation.
+async def probe_daemon(socket_path: Path, timeout: float = 2.0) -> bool:
+    """Check whether a daemon is responding on the given UDS socket."""
+    transport = httpx.AsyncHTTPTransport(uds=str(socket_path))
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://daemon", timeout=timeout
+    ) as client:
+        try:
+            response = await client.get("/health")
+            return response.status_code == 200
+        except httpx.HTTPError:
+            return False
 
 
 def get_default_paths() -> tuple[Path, Path, Path]:
@@ -81,6 +95,11 @@ def _invoke_systemd_run(*, detached: bool) -> None:
         unit,
         "--collect",
         "--property=KillMode=control-group",
+        # Default KillSignal is SIGTERM, which our daemon treats as
+        # "force immediately". Override to SIGINT so ``systemctl stop``
+        # (and TimeoutStopSec expiry) goes through the graceful path.
+        # SIGTERM stays available via ``kill -TERM`` for explicit force.
+        "--property=KillSignal=SIGINT",
         "--property=Type=exec",
         "--setenv=PATH",
         "--setenv=HOME",
@@ -127,6 +146,11 @@ async def _internal_run() -> None:
     concurrent daemon on the same instance dir is enforced by the ``flock``
     acquired inside ``DashboardDaemon.run``.
     """
+    # Lazy-imported: ``.daemon`` pulls in fastapi/uvicorn/etc., which the CLI
+    # shouldn't pay for when the user runs ``daemon start``/``status``/``info``
+    # (those only spawn or probe the subprocess that runs this body).
+    from .daemon import DaemonAlreadyRunning, DashboardDaemon
+
     instance_dir, socket_path, frontend_dir = get_default_paths()
     config_path = instance_dir / "config.json"
 

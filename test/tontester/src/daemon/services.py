@@ -1,18 +1,21 @@
 """Service factories — how the daemon composes Grafana/Prometheus."""
 
 import json
+import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import final
+from typing import final, override
 
+import httpx
 import yaml
-from pydantic import BaseModel
 
-from .compose import HttpReadyProbe, Service, VolumeMount
+from tl import JSONSerializable
 
+from .models import HttpReadyProbe, Service, VolumeMount
+from .protocols import ComposeLike, ProvisioningLike
 
-class ScrapeTarget(BaseModel):
-    targets: list[str]
-    labels: dict[str, str] = {}
+logger = logging.getLogger(__name__)
 
 
 def prometheus_container_name(run_id: str) -> str:
@@ -27,14 +30,33 @@ def prometheus_service(
     *,
     run_id: str,
     host_port: int,
+    daemon_port: int,
+    daemon_base_url: str,
+    scraping: bool,
     config_dir: Path,
     data_dir: Path,
 ) -> Service:
-    """Single factory for both live and archive Prometheus instances."""
+    """Single factory for both live and archive Prometheus instances.
+
+    ``scraping=True`` means the container is allowed to reach the daemon's
+    port for scrape proxying. ``scraping=False`` is archive lazy-boot: no
+    live scraping, no egress at all — the container can only serve
+    existing on-disk data back to the Grafana-side proxy.
+
+    ``--web.external-url`` matches the daemon's proxy mount
+    (``/runs/<run_id>/prom/``) so Prometheus's own UI redirects (e.g.
+    ``/`` → ``/query``) resolve under the proxy path rather than the
+    container's root. ``--web.route-prefix=/`` keeps the internal router
+    at ``/`` (the proxy strips the prefix before forwarding), which is
+    what Prometheus requires when external-url has a path but the server
+    itself still handles unprefixed paths.
+    """
+    external_url = f"{daemon_base_url}/runs/{run_id}/prom/"
     return Service(
         name=prometheus_container_name(run_id),
         image="docker.io/prom/prometheus:latest",
         ports={host_port: 9090},
+        host_egress_ports=[daemon_port] if scraping else [],
         volumes=[
             VolumeMount(host_path=config_dir, container_path="/etc/prometheus"),
             VolumeMount(host_path=data_dir, container_path="/prometheus"),
@@ -47,13 +69,28 @@ def prometheus_service(
             "--storage.tsdb.retention.size=0B",
             "--web.enable-lifecycle",
             "--web.enable-admin-api",
+            f"--web.external-url={external_url}",
+            "--web.route-prefix=/",
         ],
         ready_probe=HttpReadyProbe(path="/-/ready", container_port=9090),
     )
 
 
-def write_prometheus_config(config_dir: Path, targets: list[ScrapeTarget]) -> None:
+def write_prometheus_config(
+    config_dir: Path,
+    *,
+    run_id: str,
+    daemon_port: int,
+    node_names: list[str],
+) -> None:
     """Write ``prometheus.yml`` + ``targets.json`` for the given run.
+
+    Targets all point at ``127.0.0.1:<daemon_port>`` (the scrape proxy in
+    the daemon — see :func:`.prom_proxy.build_scrape_router`); the
+    per-node ``__metrics_path__`` label tells Prometheus which scrape
+    route to hit. That way the per-run container's network egress can be
+    pasta-whitelisted down to a single port (the daemon) while still
+    supporting remote scrape targets.
 
     file_sd is used so the daemon can edit targets without touching the
     running container.
@@ -76,14 +113,31 @@ def write_prometheus_config(config_dir: Path, targets: list[ScrapeTarget]) -> No
             }
         ],
     }
+    sd_entries = [
+        {
+            "targets": [f"127.0.0.1:{daemon_port}"],
+            "labels": {
+                "run_id": run_id,
+                "node": node,
+                "__metrics_path__": f"/scrape/{run_id}/{node}/metrics",
+            },
+        }
+        for node in node_names
+    ]
     _atomic_write(
         config_dir / "prometheus.yml",
         yaml.safe_dump(config, default_flow_style=False),
     )
     _atomic_write(
         config_dir / "targets.json",
-        json.dumps([t.model_dump() for t in targets], indent=2),
+        json.dumps(sd_entries, indent=2),
     )
+
+
+def remove_prometheus_config(config_dir: Path) -> None:
+    """Undo of :func:`write_prometheus_config`. Idempotent."""
+    (config_dir / "prometheus.yml").unlink(missing_ok=True)
+    (config_dir / "targets.json").unlink(missing_ok=True)
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -95,13 +149,17 @@ def _atomic_write(path: Path, content: str) -> None:
 def grafana_service(
     *,
     host_port: int,
+    daemon_port: int,
     data_dir: Path,
     provisioning_dir: Path,
 ) -> Service:
+    """Grafana's only permitted host egress is ``daemon_port`` — reaching
+    the Prometheus proxy."""
     return Service(
         name=grafana_container_name(),
         image="docker.io/grafana/grafana:latest",
         ports={host_port: 3000},
+        host_egress_ports=[daemon_port],
         volumes=[
             VolumeMount(host_path=data_dir, container_path="/var/lib/grafana"),
             VolumeMount(host_path=provisioning_dir, container_path="/etc/grafana/provisioning"),
@@ -117,18 +175,59 @@ def grafana_service(
     )
 
 
+@asynccontextmanager
+async def grafana_running(
+    compose: ComposeLike,
+    *,
+    host_port: int,
+    daemon_port: int,
+    data_dir: Path,
+    provisioning_dir: Path,
+) -> AsyncGenerator[None]:
+    """Grafana lifetime scope.
+
+    Brings up the container on entry; brings it down on exit. If startup
+    fails, the body still runs (the daemon is designed to survive Grafana
+    being unavailable — dashboard queries will fail but everything else
+    works) and no teardown is attempted. Teardown errors are logged and
+    swallowed so other shutdown steps aren't blocked.
+    """
+    started = False
+    try:
+        await compose.up(
+            grafana_service(
+                host_port=host_port,
+                daemon_port=daemon_port,
+                data_dir=data_dir,
+                provisioning_dir=provisioning_dir,
+            )
+        )
+        started = True
+    except Exception:
+        logger.warning("Could not start Grafana; dashboard queries will fail", exc_info=True)
+    try:
+        yield
+    finally:
+        if started:
+            try:
+                await compose.down(grafana_container_name())
+            except Exception:
+                logger.exception("Grafana teardown failed")
+
+
 @final
-class GrafanaProvisioning:
+class GrafanaProvisioning(ProvisioningLike):
     """Manages per-run Grafana datasource YAMLs + the dashboard definition.
 
-    One datasource per run (``run-<run_id>.yml``) points at the daemon's
+    One datasource per run (``<run_id>.yml``) points at the daemon's
     proxy URL; Grafana hot-reloads provisioned datasources, so adding/removing
     a file is enough — no restart needed.
     """
 
-    def __init__(self, provisioning_dir: Path, daemon_host_url: str):
+    def __init__(self, provisioning_dir: Path, daemon_host_url: str, *, grafana_admin_url: str):
         self.provisioning_dir = provisioning_dir
         self.daemon_host_url = daemon_host_url
+        self.grafana_admin_url = grafana_admin_url
 
     @property
     def datasources_dir(self) -> Path:
@@ -169,8 +268,9 @@ class GrafanaProvisioning:
         )
 
     def datasource_file(self, run_id: str) -> Path:
-        return self.datasources_dir / f"run-{run_id}.yml"
+        return self.datasources_dir / f"{run_id}.yml"
 
+    @override
     def write_run_datasource(self, run_id: str) -> None:
         self.ensure_dirs()
         datasource_url = f"{self.daemon_host_url}/runs/{run_id}/prom"
@@ -178,8 +278,8 @@ class GrafanaProvisioning:
             "apiVersion": 1,
             "datasources": [
                 {
-                    "name": f"run-{run_id}",
-                    "uid": f"run-{run_id}",
+                    "name": run_id,
+                    "uid": run_id,
                     "type": "prometheus",
                     "access": "proxy",
                     "url": datasource_url,
@@ -190,35 +290,57 @@ class GrafanaProvisioning:
             ],
         }
         # Fixed .tmp suffix is safe only because write_run_datasource is never
-        # called concurrently for the same run_id: RunsManager.register holds
-        # the runs lock, and recover() runs before uvicorn starts accepting
-        # IPC. If either of those invariants changes, use a unique suffix.
+        # called concurrently for the same run_id: only the run's own actor
+        # coroutine touches its YAML, and ``recover()`` runs before uvicorn
+        # starts accepting IPC. If either changes, use a unique suffix.
         tmp = self.datasource_file(run_id).with_suffix(".yml.tmp")
         _ = tmp.write_text(yaml.safe_dump(payload))
         _ = tmp.replace(self.datasource_file(run_id))
 
+    @override
     def remove_run_datasource(self, run_id: str) -> None:
         f = self.datasource_file(run_id)
         if f.exists():
             f.unlink()
 
+    @override
     def list_provisioned_runs(self) -> set[str]:
         out: set[str] = set()
         if not self.datasources_dir.exists():
             return out
         for f in self.datasources_dir.iterdir():
-            if f.name.startswith("run-") and f.suffix == ".yml":
-                out.add(f.stem[len("run-") :])
+            if f.suffix == ".yml":
+                out.add(f.stem)
         return out
 
+    @override
+    async def reload_datasources(self) -> None:
+        # GF_SECURITY_ADMIN_PASSWORD=admin is set in ``grafana_service``;
+        # default admin user is ``admin``.
+        url = f"{self.grafana_admin_url}/api/admin/provisioning/datasources/reload"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(url, auth=("admin", "admin"))
+                if not resp.is_success:
+                    logger.warning(
+                        f"Grafana datasource reload returned {resp.status_code}: {resp.text[:200]}"
+                    )
+        except httpx.HTTPError as e:
+            # Grafana may be starting up, unreachable briefly, etc. The
+            # background poller (~10 s) will pick the change up regardless.
+            logger.info(f"Grafana datasource reload skipped: {e}")
 
-def _default_dashboard() -> dict[str, object]:
+
+def _default_dashboard() -> dict[str, JSONSerializable]:
     """Per-run datasource dashboard.
 
-    Every panel queries ``${datasource}``, which is driven by a datasource
-    template variable that lists ``run-*`` datasources provisioned by the
-    daemon. Selecting a run in the dropdown selects a datasource — the entire
-    per-run Prometheus instance — so there is no ``run_id`` label anywhere.
+    The ``datasource`` template variable is multi-select over the
+    Prometheus datasources the daemon provisions (one per run). Panels
+    use Grafana's built-in ``-- Mixed --`` datasource, and each target's
+    datasource is ``${datasource}`` — Grafana expands that once per
+    selected value, so every target runs against every chosen run and all
+    series land on the same panel. Dormant runs lazy-boot on first select
+    (see ``run_actor._lazy_boot_archive``).
     """
 
     def panel(
@@ -228,14 +350,17 @@ def _default_dashboard() -> dict[str, object]:
         x: int,
         y: int,
         unit: str = "",
-    ) -> dict[str, object]:
+    ) -> dict[str, JSONSerializable]:
         if isinstance(targets, str):
-            targets = [(targets, "{{node}} ({{instance}})")]
-        p: dict[str, object] = {
+            targets = [(targets, "{{run_id}} {{node}}")]
+        p: dict[str, JSONSerializable] = {
             "id": panel_id,
             "title": title,
             "type": "timeseries",
-            "datasource": {"type": "prometheus", "uid": "${datasource}"},
+            # Panel is Mixed so ``${datasource}`` on the targets expands
+            # once per selected run — overlay-on-one-panel instead of
+            # repeat-per-panel.
+            "datasource": {"type": "datasource", "uid": "-- Mixed --"},
             "gridPos": {"h": 8, "w": 12, "x": x, "y": y},
             "targets": [
                 {
@@ -300,9 +425,9 @@ def _default_dashboard() -> dict[str, object]:
             10,
             "QUIC TX bytes/s: app vs ngtcp2 vs UDP",
             [
-                (app_rate("ton_quic_app_send_bytes_total"), "{{node}} app_send"),
-                (rate("ton_quic_summary_tx_bytes_total"), "{{node}} ngtcp2_tx"),
-                (rate("ton_quic_udp_egress_bytes_total"), "{{node}} udp_egress"),
+                (app_rate("ton_quic_app_send_bytes_total"), "{{run_id}} {{node}} app_send"),
+                (rate("ton_quic_summary_tx_bytes_total"), "{{run_id}} {{node}} ngtcp2_tx"),
+                (rate("ton_quic_udp_egress_bytes_total"), "{{run_id}} {{node}} udp_egress"),
             ],
             0,
             24,
@@ -312,9 +437,9 @@ def _default_dashboard() -> dict[str, object]:
             11,
             "QUIC RX bytes/s: app vs stream vs UDP",
             [
-                (app_rate("ton_quic_app_deliver_bytes_total"), "{{node}} app_deliver"),
-                (rate("ton_quic_summary_stream_bytes_received_total"), "{{node}} stream_rx"),
-                (rate("ton_quic_udp_ingress_bytes_total"), "{{node}} udp_ingress"),
+                (app_rate("ton_quic_app_deliver_bytes_total"), "{{run_id}} {{node}} app_deliver"),
+                (rate("ton_quic_summary_stream_bytes_received_total"), "{{run_id}} {{node}} stream_rx"),
+                (rate("ton_quic_udp_ingress_bytes_total"), "{{run_id}} {{node}} udp_ingress"),
             ],
             12,
             24,
@@ -329,21 +454,21 @@ def _default_dashboard() -> dict[str, object]:
                         rate("ton_quic_summary_tx_bytes_total"),
                         app_rate("ton_quic_app_send_bytes_total"),
                     ),
-                    "{{node}} ngtcp2/app",
+                    "{{run_id}} {{node}} ngtcp2/app",
                 ),
                 (
                     div(
                         rate("ton_quic_udp_egress_bytes_total"),
                         rate("ton_quic_summary_tx_bytes_total"),
                     ),
-                    "{{node}} UDP/ngtcp2",
+                    "{{run_id}} {{node}} UDP/ngtcp2",
                 ),
                 (
                     div(
                         rate("ton_quic_udp_egress_bytes_total"),
                         app_rate("ton_quic_app_send_bytes_total"),
                     ),
-                    "{{node}} UDP/app",
+                    "{{run_id}} {{node}} UDP/app",
                 ),
             ],
             0,
@@ -358,21 +483,21 @@ def _default_dashboard() -> dict[str, object]:
                         rate("ton_quic_summary_stream_bytes_received_total"),
                         app_rate("ton_quic_app_deliver_bytes_total"),
                     ),
-                    "{{node}} stream/app",
+                    "{{run_id}} {{node}} stream/app",
                 ),
                 (
                     div(
                         rate("ton_quic_udp_ingress_bytes_total"),
                         rate("ton_quic_summary_stream_bytes_received_total"),
                     ),
-                    "{{node}} UDP/stream",
+                    "{{run_id}} {{node}} UDP/stream",
                 ),
                 (
                     div(
                         rate("ton_quic_udp_ingress_bytes_total"),
                         app_rate("ton_quic_app_deliver_bytes_total"),
                     ),
-                    "{{node}} UDP/app",
+                    "{{run_id}} {{node}} UDP/app",
                 ),
             ],
             12,
@@ -382,8 +507,8 @@ def _default_dashboard() -> dict[str, object]:
             14,
             "UDP packets/s",
             [
-                (rate("ton_quic_udp_egress_packets_total"), "{{node}} egress"),
-                (rate("ton_quic_udp_ingress_packets_total"), "{{node}} ingress"),
+                (rate("ton_quic_udp_egress_packets_total"), "{{run_id}} {{node}} egress"),
+                (rate("ton_quic_udp_ingress_packets_total"), "{{run_id}} {{node}} ingress"),
             ],
             0,
             40,
@@ -398,14 +523,14 @@ def _default_dashboard() -> dict[str, object]:
                         rate("ton_quic_udp_egress_bytes_total"),
                         rate("ton_quic_udp_egress_packets_total"),
                     ),
-                    "{{node}} egress",
+                    "{{run_id}} {{node}} egress",
                 ),
                 (
                     div(
                         rate("ton_quic_udp_ingress_bytes_total"),
                         rate("ton_quic_udp_ingress_packets_total"),
                     ),
-                    "{{node}} ingress",
+                    "{{run_id}} {{node}} ingress",
                 ),
             ],
             12,
@@ -416,9 +541,9 @@ def _default_dashboard() -> dict[str, object]:
             16,
             "ngtcp2 packets/s (sent / recv / lost)",
             [
-                (rate("ton_quic_summary_pkt_sent_total"), "{{node}} sent"),
-                (rate("ton_quic_summary_pkt_recv_total"), "{{node}} recv"),
-                (rate("ton_quic_summary_pkt_lost_total"), "{{node}} lost"),
+                (rate("ton_quic_summary_pkt_sent_total"), "{{run_id}} {{node}} sent"),
+                (rate("ton_quic_summary_pkt_recv_total"), "{{run_id}} {{node}} recv"),
+                (rate("ton_quic_summary_pkt_lost_total"), "{{run_id}} {{node}} lost"),
             ],
             0,
             48,
@@ -433,14 +558,14 @@ def _default_dashboard() -> dict[str, object]:
                         rate("ton_quic_udp_egress_packets_total"),
                         rate("ton_quic_udp_egress_syscalls_total"),
                     ),
-                    "{{node}} egress",
+                    "{{run_id}} {{node}} egress",
                 ),
                 (
                     div(
                         rate("ton_quic_udp_ingress_packets_total"),
                         rate("ton_quic_udp_ingress_syscalls_total"),
                     ),
-                    "{{node}} ingress",
+                    "{{run_id}} {{node}} ingress",
                 ),
             ],
             12,
@@ -450,9 +575,9 @@ def _default_dashboard() -> dict[str, object]:
             18,
             "QUIC RTT",
             [
-                (f"ton_quic_summary_latest_rtt_seconds{node_filter}", "{{node}} latest"),
-                (f"ton_quic_summary_min_rtt_seconds{node_filter}", "{{node}} min"),
-                (f"ton_quic_summary_rttvar_seconds{node_filter}", "{{node}} var"),
+                (f"ton_quic_summary_latest_rtt_seconds{node_filter}", "{{run_id}} {{node}} latest"),
+                (f"ton_quic_summary_min_rtt_seconds{node_filter}", "{{run_id}} {{node}} min"),
+                (f"ton_quic_summary_rttvar_seconds{node_filter}", "{{run_id}} {{node}} var"),
             ],
             0,
             56,
@@ -462,10 +587,10 @@ def _default_dashboard() -> dict[str, object]:
             19,
             "QUIC congestion state",
             [
-                (f"ton_quic_summary_cwnd_bytes{node_filter}", "{{node}} cwnd"),
-                (f"ton_quic_summary_bytes_in_flight{node_filter}", "{{node}} in_flight"),
-                (f"ton_quic_summary_unacked_bytes{node_filter}", "{{node}} unacked"),
-                (f"ton_quic_summary_unsent_bytes{node_filter}", "{{node}} unsent"),
+                (f"ton_quic_summary_cwnd_bytes{node_filter}", "{{run_id}} {{node}} cwnd"),
+                (f"ton_quic_summary_bytes_in_flight{node_filter}", "{{run_id}} {{node}} in_flight"),
+                (f"ton_quic_summary_unacked_bytes{node_filter}", "{{run_id}} {{node}} unacked"),
+                (f"ton_quic_summary_unsent_bytes{node_filter}", "{{run_id}} {{node}} unsent"),
             ],
             12,
             56,
@@ -553,18 +678,17 @@ def _default_dashboard() -> dict[str, object]:
         ),
     ]
 
-    datasource_var: dict[str, object] = {
+    datasource_var: dict[str, JSONSerializable] = {
         "name": "datasource",
         "label": "Run",
         "type": "datasource",
         "query": "prometheus",
-        # Only the per-run datasources; the dashboard itself doesn't need a global Prometheus.
-        "regex": "/^run-/",
         "refresh": 1,
-        "multi": False,
+        "multi": True,
+        "includeAll": False,
         "current": {"text": "", "value": "", "selected": False},
     }
-    node_var: dict[str, object] = {
+    node_var: dict[str, JSONSerializable] = {
         "name": "node",
         "label": "Node",
         "type": "query",
@@ -587,8 +711,12 @@ def _default_dashboard() -> dict[str, object]:
         "tags": ["ton"],
         "timezone": "browser",
         "schemaVersion": 38,
-        "version": 3,
-        "refresh": "5s",
+        "version": 7,
+        # Off by default so dormant-run links don't re-query a frozen
+        # range. The frontend appends ``?refresh=5s`` for live runs.
+        # (``?refresh=off`` on the URL doesn't work due to a long-standing
+        # Grafana bug: grafana/grafana#41329.)
+        "refresh": "",
         "time": {"from": "now-15m", "to": "now"},
         "templating": {"list": [datasource_var, node_var]},
         "panels": panels,

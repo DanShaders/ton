@@ -7,20 +7,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import final, override
 
-from .compose import (
-    ComposeLike,
-    ContainerStartFailed,
-    ProcessHandle,
-    ProcessRunner,
-    Service,
-)
-from .runs import RunsManager
+from .compose import ContainerStartFailed, PodmanTimeout
+from .models import RunMetadata, RunStatus, Service, TestMetadata
+from .protocols import ComposeLike, ProcessHandle, ProcessRunner, ProvisioningLike, StorageBackend
+from .runs import RunsSupervisor
 from .services import GrafanaProvisioning
 from .sqlite_storage import SQLiteStorage
-from .storage import RunMetadata, RunStatus, StorageBackend, TestMetadata
 
 
-@dataclass
+@dataclass(frozen=True)
 class FakeContainer:
     service: Service
 
@@ -32,7 +27,10 @@ class FakeCompose(ComposeLike):
     def __init__(self) -> None:
         self.containers: dict[str, FakeContainer] = {}
         self.pending_up_gate: asyncio.Event | None = None
-        self.up_should_fail = False
+        self.up_should_fail = False  # one-shot: auto-clears after firing
+        self.down_should_fail = (
+            False  # sticky: stays set across calls (shutdown tests fail every down)
+        )
         self.call_log: list[tuple[str, str]] = []
 
     @override
@@ -49,6 +47,8 @@ class FakeCompose(ComposeLike):
     @override
     async def down(self, name: str) -> None:
         self.call_log.append(("down", name))
+        if self.down_should_fail:
+            raise PodmanTimeout([name], 1.0)
         _ = self.containers.pop(name, None)
 
     @override
@@ -104,7 +104,7 @@ class FakeProcessHandle(ProcessHandle):
             self._exit_event.set()
 
 
-@dataclass
+@dataclass(frozen=True)
 class _QueuedCapture:
     returncode: int = 0
     stdout: bytes = b""
@@ -183,7 +183,7 @@ def _name_from_podman_run(argv: list[str]) -> str | None:
     return None
 
 
-@dataclass
+@dataclass(eq=False)
 class WsServer:
     """Handle to a uvicorn instance running the ws IPC router for tests."""
 
@@ -191,7 +191,7 @@ class WsServer:
     rig: "Rig"
 
 
-@dataclass
+@dataclass(eq=False)
 class ComposeRig:
     """Bundle of the fakes behind a :class:`Compose` under test."""
 
@@ -228,24 +228,25 @@ class FakeReadyProbe:
 
 @final
 class HookedStorage(StorageBackend):
-    """Wraps a real ``SQLiteStorage`` and lets tests pause individual writes.
+    """Wraps a real ``SQLiteStorage`` with one-shot fault injection.
 
-    Used by race-condition tests that need to interleave coroutines at a
-    specific storage boundary (e.g. pausing the rollback's DORMANT write so
-    a concurrent ``register`` can observe the window).
+    The ``fail_next_*`` fields, when non-``None``, raise the stored
+    exception on the matching call and then clear themselves. Used by
+    exception-safety tests to verify rollback invariants.
     """
 
     def __init__(self, delegate: SQLiteStorage):
         self._delegate = delegate
-        self._pause_set_status: tuple[RunStatus, asyncio.Event] | None = None
-
-    def pause_next_set_status(self, status: RunStatus) -> asyncio.Event:
-        event = asyncio.Event()
-        self._pause_set_status = (status, event)
-        return event
+        self.fail_next_register_run: Exception | None = None
+        self.fail_next_set_status: dict[RunStatus, Exception] = {}
+        self.fail_next_get_run_metadata: Exception | None = None
 
     @override
     async def register_run(self, run_id: str, metadata: TestMetadata, host_port: int) -> None:
+        exc = self.fail_next_register_run
+        if exc is not None:
+            self.fail_next_register_run = None
+            raise exc
         await self._delegate.register_run(run_id, metadata, host_port)
 
     @override
@@ -256,10 +257,9 @@ class HookedStorage(StorageBackend):
         *,
         if_port: int | None = None,
     ) -> None:
-        pause = self._pause_set_status
-        if pause is not None and pause[0] == status:
-            self._pause_set_status = None
-            _ = await pause[1].wait()
+        exc = self.fail_next_set_status.pop(status, None)
+        if exc is not None:
+            raise exc
         await self._delegate.set_run_status(run_id, status, if_port=if_port)
 
     @override
@@ -268,51 +268,112 @@ class HookedStorage(StorageBackend):
 
     @override
     async def get_run_metadata(self, run_id: str) -> RunMetadata | None:
+        exc = self.fail_next_get_run_metadata
+        if exc is not None:
+            self.fail_next_get_run_metadata = None
+            raise exc
         return await self._delegate.get_run_metadata(run_id)
 
     @override
     async def list_runs_with_status(self, status: RunStatus) -> list[RunMetadata]:
         return await self._delegate.list_runs_with_status(status)
 
+
+# ============================================================ Provisioning test double
+
+
+@final
+class FaultyProvisioning(ProvisioningLike):
+    """Wraps a real ``GrafanaProvisioning`` with one-shot fault injection.
+
+    Forwards ``datasource_file`` for test assertions. Fault flags are
+    one-shot: the exception is raised once, then the flag clears.
+    """
+
+    def __init__(self, delegate: GrafanaProvisioning):
+        self._delegate = delegate
+        self.fail_next_write: Exception | None = None
+        self.fail_next_remove: Exception | None = None
+
     @override
-    async def list_allocated_ports(self) -> set[int]:
-        return await self._delegate.list_allocated_ports()
+    def write_run_datasource(self, run_id: str) -> None:
+        exc = self.fail_next_write
+        if exc is not None:
+            self.fail_next_write = None
+            raise exc
+        self._delegate.write_run_datasource(run_id)
+
+    @override
+    def remove_run_datasource(self, run_id: str) -> None:
+        exc = self.fail_next_remove
+        if exc is not None:
+            self.fail_next_remove = None
+            raise exc
+        self._delegate.remove_run_datasource(run_id)
+
+    @override
+    def list_provisioned_runs(self) -> set[str]:
+        return self._delegate.list_provisioned_runs()
+
+    @override
+    async def reload_datasources(self) -> None:
+        # Tests don't run a real Grafana; treat as a no-op rather than
+        # forwarding (which would attempt a real HTTP call).
+        return None
+
+    def datasource_file(self, run_id: str) -> Path:
+        return self._delegate.datasource_file(run_id)
 
 
-@dataclass
+@dataclass(eq=False)
 class Rig:
-    """Everything a test wants from the manager plus the fakes behind it."""
+    """Everything a test wants from the supervisor plus the fakes behind it."""
 
-    manager: RunsManager
+    manager: RunsSupervisor  # named ``manager`` for legacy test compat
     compose: FakeCompose
     storage: StorageBackend
-    sqlite: SQLiteStorage  # the underlying concrete store, always present
-    hooks: HookedStorage | None  # set iff build_rig(hooked_storage=True)
+    sqlite: SQLiteStorage
+    hooks: HookedStorage | None
     provisioning: GrafanaProvisioning
+    faulty_provisioning: FaultyProvisioning | None
     instance_dir: Path
 
 
-def build_rig(tmp_path: Path, *, hooked_storage: bool = False) -> Rig:
+def build_rig(
+    tmp_path: Path,
+    *,
+    hooked_storage: bool = False,
+    faulty_provisioning: bool = False,
+) -> Rig:
     compose = FakeCompose()
     sqlite = SQLiteStorage(tmp_path / "runs.db")
     hooks = HookedStorage(sqlite) if hooked_storage else None
     storage: StorageBackend = hooks if hooks is not None else sqlite
-    provisioning = GrafanaProvisioning(tmp_path / "grafana" / "provisioning", "http://daemon")
-    manager = RunsManager(
+    provisioning = GrafanaProvisioning(
+        tmp_path / "grafana" / "provisioning",
+        "http://daemon",
+        grafana_admin_url="http://grafana.test",
+    )
+    faulty = FaultyProvisioning(provisioning) if faulty_provisioning else None
+    supervisor_provisioning: ProvisioningLike = faulty if faulty is not None else provisioning
+    supervisor = RunsSupervisor(
         instance_dir=tmp_path,
         storage=storage,
         compose=compose,
-        provisioning=provisioning,
+        provisioning=supervisor_provisioning,
         port_range=(9100, 9199),
+        daemon_port=8080,
+        daemon_base_url="http://127.0.0.1:8080",
         archive_idle_ttl_seconds=60.0,
         reap_interval_seconds=1000.0,  # tests drive ``run_reaper_pass`` directly
     )
     return Rig(
-        manager=manager,
+        manager=supervisor,
         compose=compose,
         storage=storage,
         sqlite=sqlite,
         hooks=hooks,
         provisioning=provisioning,
+        faulty_provisioning=faulty,
         instance_dir=tmp_path,
     )

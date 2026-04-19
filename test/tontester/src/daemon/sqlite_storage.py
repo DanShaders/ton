@@ -7,7 +7,8 @@ from typing import TypedDict, cast, final, override
 
 from tl import JSONSerializable
 
-from .storage import RunMetadata, RunStatus, StorageBackend, TestMetadata
+from .models import RunMetadata, RunStatus, TestMetadata
+from .protocols import StorageBackend
 
 logger = logging.getLogger(__name__)
 
@@ -162,16 +163,6 @@ class SQLiteStorage(StorageBackend):
             (status.value,),
         )
         return _collect(cursor)
-
-    @override
-    async def list_allocated_ports(self) -> set[int]:
-        cursor = self.conn.cursor()
-        _ = cursor.execute(
-            "SELECT host_port FROM runs WHERE status = ?",
-            (RunStatus.LIVE.value,),
-        )
-        rows = cast(list[tuple[int]], cursor.fetchall())
-        return {row[0] for row in rows}
 
     def close(self) -> None:
         self.conn.close()

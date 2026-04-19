@@ -1,6 +1,6 @@
 import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import cast
 
@@ -45,7 +45,18 @@ async def hooked_rig(tmp_path: Path):
 
 
 @pytest_asyncio.fixture
-async def ws_server(rig: Rig) -> AsyncIterator[WsServer]:
+async def fault_rig(tmp_path: Path):
+    """Rig with both storage hooks and provisioning fault injection enabled."""
+    r = build_rig(tmp_path, hooked_storage=True, faulty_provisioning=True)
+    try:
+        yield r
+    finally:
+        await r.manager.shutdown()
+        r.sqlite.close()
+
+
+@pytest_asyncio.fixture
+async def ws_server(rig: Rig) -> AsyncGenerator[WsServer]:
     """Real uvicorn on an ephemeral port, running only the ws IPC router.
 
     Heartbeat is deliberately short (200 ms) so timeout tests are fast

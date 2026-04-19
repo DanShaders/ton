@@ -17,7 +17,7 @@ from typing import Literal, final, override
 
 from daemon.client import DashboardClient
 from daemon.ipc import RegisterOk
-from daemon.storage import NodeTarget, TestMetadata
+from daemon.models import NodeTarget, TestMetadata
 from tonapi import ton_api
 
 from tl import TLObject
@@ -550,11 +550,11 @@ class FullNode(Network.Node):
         self._addr = self._new_network_address()
         self._liteserver_addr = self._new_network_address()
         self._engine_console_addr = self._new_network_address()
-        # Bind exporter on all interfaces so prometheus running in a container can reach it via
-        # host.containers.internal.
-        self._exporter_addr = _IPv4AddressAndPort(
-            IPv4Address("0.0.0.0"), self._new_network_address().port
-        )
+        # Bind exporter on loopback. Prometheus-in-container no longer reaches
+        # this directly: the daemon's scrape proxy on the host connects to the
+        # exporter and forwards into the container. See
+        # :meth:`PromProxy.scrape_router`.
+        self._exporter_addr = self._new_network_address()
 
         self._fullnode_key, _ = self._new_keyring_key()
         self._validator_key, _ = self._new_keyring_key()
@@ -639,8 +639,9 @@ class FullNode(Network.Node):
 
     @property
     def metrics_address_for_scraping(self) -> str:
-        """Reachable from a prometheus container via podman's host-gateway alias."""
-        return f"host.containers.internal:{self._exporter_addr.port}"
+        """Host-loopback address the daemon's scrape proxy connects to when
+        proxying requests from the per-run prometheus container."""
+        return self._exporter_addr.address
 
     @property
     def validator_key(self):

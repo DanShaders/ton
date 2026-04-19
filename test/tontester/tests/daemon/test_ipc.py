@@ -15,8 +15,8 @@ import pytest
 import uvicorn
 from daemon.client import DashboardClient
 from daemon.ipc import RegisterError, RegisterMessage, RegisterOk
-from daemon.storage import NodeTarget
-from daemon.storage import TestMetadata as _TestMetadata
+from daemon.models import NodeTarget
+from daemon.models import TestMetadata as _TestMetadata
 from daemon.testing import WsServer
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from websockets.asyncio.client import connect
@@ -43,7 +43,7 @@ async def test_register_returns_ok_payload(ws_server: WsServer):
         assert isinstance(raw, str)
         ok = RegisterOk.model_validate_json(raw)
         assert ok.run_id == "r1"
-        assert "run-r1" in ok.grafana_url
+        assert "var-datasource=r1" in ok.grafana_url
 
 
 async def test_bad_handshake_is_rejected(ws_server: WsServer):
@@ -164,7 +164,7 @@ async def test_client_retries_transient_run_already_active(tmp_path: Path):
             except WebSocketDisconnect:
                 pass
 
-    _ = _scripted_ws  # silence unused-function warning; registered via decorator
+    _ = _scripted_ws
 
     socket_path = tmp_path / "scripted.sock"
     config = uvicorn.Config(

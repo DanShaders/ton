@@ -6,44 +6,18 @@ so the daemon's view of reality cannot drift from reality itself.
 """
 
 import asyncio
-import json
 import logging
 import os
 import subprocess
-from collections.abc import Awaitable, Callable
-from pathlib import Path
-from typing import Protocol, cast, final, override
+from collections.abc import Callable
+from typing import final, override
 
 import httpx
-from pydantic import BaseModel
 
-from tl import JSONSerializable
+from .models import HttpReadyProbe, Service
+from .protocols import ComposeLike, ProcessHandle, ProcessRunner, ReadyProbeFn
 
 logger = logging.getLogger(__name__)
-
-
-class VolumeMount(BaseModel):
-    host_path: Path
-    container_path: str
-    read_only: bool = False
-
-
-class HttpReadyProbe(BaseModel):
-    path: str
-    container_port: int
-    timeout_seconds: float = 30.0
-    interval_seconds: float = 0.25
-
-
-class Service(BaseModel):
-    name: str
-    image: str
-    command: list[str] = []
-    env: dict[str, str] = {}
-    ports: dict[int, int] = {}  # host_port -> container_port
-    volumes: list[VolumeMount] = []
-    ready_probe: HttpReadyProbe | None = None
-    stop_timeout_seconds: int = 60  # give prometheus room to flush the head block
 
 
 class ContainerStartFailed(RuntimeError):
@@ -64,41 +38,6 @@ class PodmanTimeout(RuntimeError):
 
 _DEFAULT_TIMEOUT = 10.0
 _STOP_TIMEOUT = 90.0
-
-
-class ProcessHandle(Protocol):
-    """Subset of ``asyncio.subprocess.Process`` that :class:`Compose` uses."""
-
-    @property
-    def returncode(self) -> int | None: ...
-
-    async def wait(self) -> int | None: ...
-
-    def terminate(self) -> None: ...
-
-    def kill(self) -> None: ...
-
-
-class ProcessRunner(Protocol):
-    """Abstracts subprocess creation so tests can substitute a fake."""
-
-    async def run_capture(self, argv: list[str], *, timeout: float) -> tuple[int, bytes, bytes]:
-        """Run ``argv`` to completion, return (returncode, stdout, stderr).
-
-        Must raise ``asyncio.TimeoutError`` if the process does not exit
-        within ``timeout``; Compose translates that to :class:`PodmanTimeout`.
-        """
-        ...
-
-    async def run_attached(self, argv: list[str]) -> ProcessHandle:
-        """Spawn an attached process (inherits stdout/stderr) and return a
-        handle to it. Must not wait for exit."""
-        ...
-
-
-type ReadyProbeFn = Callable[[str, float], Awaitable[bool]]
-"""Takes a URL and a timeout, returns True iff the endpoint responded with
-a 2xx within the timeout. Tests substitute this to avoid real HTTP."""
 
 
 @final
@@ -142,26 +81,25 @@ async def _default_ready_probe(url: str, timeout: float) -> bool:
             return False
 
 
-class ComposeLike(Protocol):
-    """Minimal surface consumed by :class:`RunsManager`."""
-
-    async def up(self, service: Service) -> None: ...
-
-    async def down(self, name: str) -> None: ...
-
-    async def list_running(self, prefix: str) -> list[str]: ...
-
-
 @final
-class Compose:
+class Compose(ComposeLike):
+    """podman wrapper.
+
+    Containers run on rootless pasta networking with per-service port
+    whitelists: no default host-to-guest or guest-to-host forwarding, and
+    each :class:`Service` explicitly declares the host loopback ports it
+    needs to reach. With everything disabled by default the daemon can
+    stay bound on ``127.0.0.1`` and containers still can't wander outside
+    the whitelist — no external-interface exposure, and isolation between
+    containers that don't opt into the same ports.
+    """
+
     def __init__(
         self,
-        network: str,
         *,
         runner: ProcessRunner | None = None,
         ready_probe: ReadyProbeFn | None = None,
     ):
-        self.network = network
         self._runner = runner or _RealProcessRunner()
         self._ready_probe = ready_probe or _default_ready_probe
         self._processes: dict[str, ProcessHandle] = {}
@@ -189,17 +127,6 @@ class Compose:
             raise subprocess.CalledProcessError(returncode, ["podman", *args], stdout, stderr)
         return stdout.decode().strip()
 
-    async def ensure_network(self) -> None:
-        # ``network exists`` returns 0 if present, 1 if not; we need the code.
-        argv = ["podman", "network", "exists", self.network]
-        try:
-            returncode, _, _ = await self._runner.run_capture(argv, timeout=_DEFAULT_TIMEOUT)
-        except asyncio.TimeoutError:
-            raise PodmanTimeout(argv[1:], _DEFAULT_TIMEOUT)
-        if returncode != 0:
-            _ = await self._podman(["network", "create", self.network])
-            logger.info(f"Created podman network '{self.network}'")
-
     async def is_running(self, name: str) -> bool:
         out = await self._podman(
             ["ps", "--quiet", "--filter", f"name=^{name}$"],
@@ -207,6 +134,7 @@ class Compose:
         )
         return bool(out)
 
+    @override
     async def list_running(self, prefix: str) -> list[str]:
         out = await self._podman(
             ["ps", "--format", "{{.Names}}", "--filter", f"name=^{prefix}"],
@@ -216,6 +144,7 @@ class Compose:
             return []
         return [line for line in out.splitlines() if line]
 
+    @override
     async def up(self, service: Service) -> None:
         await self._remove_if_exists(service.name)
 
@@ -229,18 +158,13 @@ class Compose:
             "--userns",
             "keep-id",
             "--network",
-            self.network,
-            "--add-host",
-            "host.containers.internal:host-gateway",
+            _build_pasta_network_arg(service),
             "--stop-timeout",
             str(service.stop_timeout_seconds),
         ]
-        for host_port, container_port in service.ports.items():
-            cmd.extend(["-p", f"127.0.0.1:{host_port}:{container_port}"])
         for mount in service.volumes:
             mount.host_path.mkdir(parents=True, exist_ok=True)
-            suffix = ":ro" if mount.read_only else ""
-            cmd.extend(["-v", f"{mount.host_path}:{mount.container_path}:Z{suffix}"])
+            cmd.extend(["-v", f"{mount.host_path}:{mount.container_path}:Z"])
         for key, value in service.env.items():
             cmd.extend(["-e", f"{key}={value}"])
         cmd.append(service.image)
@@ -269,6 +193,7 @@ class Compose:
 
         logger.info(f"Started container {service.name}")
 
+    @override
     async def down(self, name: str) -> None:
         """Stop a container and reap its attached podman process.
 
@@ -286,21 +211,6 @@ class Compose:
         except PodmanTimeout:
             logger.warning(f"podman rm -f {name} hung; leaving for recovery")
         logger.info(f"Stopped container {name}")
-
-    async def inspect(self, name: str) -> dict[str, JSONSerializable] | None:
-        out = await self._podman(["inspect", name], check=False)
-        if not out:
-            return None
-        try:
-            parsed = cast(JSONSerializable, json.loads(out))
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(parsed, list) or not parsed:
-            return None
-        first = parsed[0]
-        if not isinstance(first, dict):
-            return None
-        return first
 
     async def _remove_if_exists(self, name: str) -> None:
         _ = await self._podman(["rm", "-f", name], check=False)
@@ -336,6 +246,51 @@ class Compose:
                     )
                 )
             await asyncio.sleep(probe.interval_seconds)
+
+
+def _build_pasta_network_arg(service: Service) -> str:
+    """Compose ``--network=pasta:...`` with explicit port whitelists.
+
+    Isolation contract:
+
+    * ``-t none`` / ``-u none`` — no default host-to-guest forwarding; only
+      the ports from ``service.ports`` become reachable from outside the
+      container. Pasta syntax ``address/host_port:container_port`` maps
+      host's bound port to the container's listening port.
+    * ``-T`` / ``-U none`` — no default guest-to-host forwarding; the
+      container's loopback ports ``127.0.0.1:<p>`` for ``p`` in
+      ``host_egress_ports`` are spliced to host's ``127.0.0.1:<p>``.
+    * ``-o 127.0.0.1`` — pin pasta's outbound NAT source to loopback. Any
+      container attempt to reach a non-loopback destination (external IPs,
+      LAN) fails because a socket bound to ``127.0.0.1`` can't route to a
+      non-loopback target. Splice-bypass is a separate code path and is
+      NOT affected. Combined with the ``-T`` whitelist this gives the
+      container exactly the access the whitelist names — nothing else.
+    * ``-4`` — disable IPv6 entirely in the namespace so there's no
+      parallel ``::1`` or IPv6-external path that sidesteps ``-o``.
+
+    Lists of multiple ports within one pasta flag use ``","`` as pasta's
+    separator; podman splits options on ``","`` too, so we escape each
+    internal comma as ``",,"`` per podman's documented pasta escaping rule.
+    """
+    parts: list[str] = ["pasta"]
+    if service.ports:
+        specs = [
+            f"127.0.0.1/{h}:{c}" if h != c else f"127.0.0.1/{h}" for h, c in service.ports.items()
+        ]
+        parts.extend(["-t", ",,".join(specs)])
+    else:
+        parts.extend(["-t", "none"])
+    parts.extend(["-u", "none"])
+    if service.host_egress_ports:
+        # pasta -T doesn't accept an address qualifier in practice (it
+        # always listens on the namespace's 127.0.0.1), just the port list.
+        parts.extend(["-T", ",,".join(str(p) for p in service.host_egress_ports)])
+    else:
+        parts.extend(["-T", "none"])
+    parts.extend(["-U", "none"])
+    parts.extend(["-o", "127.0.0.1", "-4"])
+    return parts[0] + ":" + ",".join(parts[1:])
 
 
 def _try_signal(signal_fn: Callable[[], None]) -> None:

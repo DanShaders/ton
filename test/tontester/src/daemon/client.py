@@ -5,7 +5,6 @@ import logging
 from pathlib import Path
 from typing import final
 
-import httpx
 from pydantic import TypeAdapter, ValidationError
 from websockets.asyncio.client import ClientConnection, unix_connect
 from websockets.exceptions import ConnectionClosed
@@ -17,7 +16,7 @@ from .ipc import (
     RegisterMessage,
     RegisterOk,
 )
-from .storage import TestMetadata
+from .models import TestMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -210,16 +209,3 @@ class DashboardClient:
             raise RegisterFailed(response.code, response.message)
 
         return ws, response
-
-
-async def probe_daemon(socket_path: Path, timeout: float = 2.0) -> bool:
-    """Check whether a daemon is responding on the given UDS socket."""
-    transport = httpx.AsyncHTTPTransport(uds=str(socket_path))
-    async with httpx.AsyncClient(
-        transport=transport, base_url="http://daemon", timeout=timeout
-    ) as client:
-        try:
-            response = await client.get("/health")
-            return response.status_code == 200
-        except httpx.HTTPError:
-            return False

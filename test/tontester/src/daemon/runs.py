@@ -1,90 +1,294 @@
-"""Per-run Prometheus lifecycle — a ws/archive state machine.
+"""Routing layer over per-run actors — the public API consumed by
+:mod:`.ipc`, :mod:`.prom_proxy`, :mod:`.daemon`.
 
-Every live container lives in a single :attr:`RunsManager._containers`
-dict; ``owner`` (``ws`` vs ``archive``) distinguishes a WS-held run from
-an opportunistic lazy-boot, and the DB's ``LIVE`` status is a shadow of
-``owner == "ws"``.
+The whole package has exactly one shared mutable structure:
+:attr:`RunsSupervisor._actors` (run_id → :class:`RunActor`), mutated only
+by the supervisor's routing methods below. Everything else lives inside
+each actor's private state; see :mod:`.run_actor` for the actor-side
+invariants (exception safety, noexcept release, FS→SQLite→podman order,
+reply invariant).
+
+Client-cancel compensation
+--------------------------
+
+When a caller of :meth:`RunsSupervisor.register` or
+:meth:`RunsSupervisor.acquire_query_pin` is cancelled after the actor
+has already produced the held resource (LIVE run, pinned container), the
+state would leak to daemon shutdown. :func:`_compensate_on_cancel` guards
+these methods: the reply is wrapped in :func:`asyncio.shield` so the
+actor's completion is never cancelled alongside the caller, and on
+caller cancellation a background task awaits the eventual result and
+sends the paired release message. No handler-level cancellation; actors
+still run to completion. This is why ``_on_release`` and
+``_on_release_pin`` are idempotent.
+
+Escalated shutdown
+------------------
+
+:meth:`RunsSupervisor.shutdown` accepts an optional ``reply_timeout``.
+On timeout, any actor that hasn't acknowledged ``_Shutdown`` is
+force-cancelled. That's the one path where the actor-zone "no external
+cancellation" invariant is deliberately violated: an actor mid-handler
+sees ``CancelledError``, unwinds partially, and :meth:`recover`
+reconciles whatever state was left on the next daemon boot (same
+backstop as any abnormal termination). Drives the 2nd-signal /
+``SIGTERM`` escalation in :mod:`.daemon`.
 """
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from collections.abc import AsyncGenerator, Callable, Coroutine
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal, final
+from typing import final
 
-from .compose import ComposeLike
-from .services import (
-    GrafanaProvisioning,
-    ScrapeTarget,
-    prometheus_container_name,
-    prometheus_service,
-    write_prometheus_config,
+from .models import (
+    DaemonStopped,
+    NoFreePorts,
+    RunAlreadyActive,
+    RunMetadata,
+    RunStartFailed,
+    RunStateSnapshot,
+    RunStatus,
+    TestMetadata,
 )
-from .storage import RunMetadata, RunStatus, StorageBackend, TestMetadata
+from .protocols import ComposeLike, ProvisioningLike, StorageBackend
+from .run_actor import (
+    AcquirePinMsg,
+    InspectMsg,
+    MaybeReapMsg,
+    PortAllocator,
+    RegisterMsg,
+    ReleaseMsg,
+    ReleasePinMsg,
+    ResolveNodeMsg,
+    RunActor,
+    ShutdownMsg,
+)
+
+# Re-export the public types callers in .ipc / .daemon / tests import from here.
+__all__ = [
+    "DaemonStopped",
+    "NoFreePorts",
+    "QueryPin",
+    "RunAlreadyActive",
+    "RunStartFailed",
+    "RunStateSnapshot",
+    "RunsSupervisor",
+]
 
 logger = logging.getLogger(__name__)
 
 
-type ContainerOwner = Literal["ws", "archive"]
+@final
+class QueryPin:
+    """Token yielded by :meth:`RunsSupervisor.query_pin`.
+
+    Exiting the context manager releases the pin automatically. For
+    streaming responses whose body must outlive the HTTP handler, call
+    :meth:`detach` and then :meth:`release` later from the generator's
+    ``finally``; the context manager's exit becomes a no-op.
+    """
+
+    def __init__(self, port: int | None, supervisor: "RunsSupervisor", run_id: str):
+        self.port = port
+        self._supervisor = supervisor
+        self._run_id = run_id
+        self._detached = False
+        self._released = False
+
+    @property
+    def detached(self):
+        return self._detached
+
+    async def release(self) -> None:
+        if self._released:
+            return
+        self._released = True
+        if self.port is not None:
+            await self._supervisor.release_query_pin(self._run_id)
+
+    def detach(self) -> None:
+        self._detached = True
 
 
-@dataclass
-class _ContainerHandle:
-    run_id: str
-    host_port: int
-    owner: ContainerOwner
-    last_access: float
-    starting: asyncio.Event  # set once the container is ready
-    failed: bool = False
-    # Number of in-flight queries currently using this container. The reaper
-    # refuses to stop a handle with ``pins > 0`` so an idle-reap can't race
-    # a proxied request that's still streaming from the container.
-    pins: int = 0
+async def _compensate_on_cancel[T](
+    reply: asyncio.Future[T],
+    *,
+    acquires: Callable[[T], bool],
+    compensate: Callable[[], Coroutine[object, object, None]],
+    run_id: str,
+    op: str,
+) -> T:
+    """Await ``reply``; if the caller is cancelled after the actor produced a
+    held resource, spawn a background task that waits for the actor's result
+    and schedules the paired release.
+
+    ``asyncio.shield`` keeps the actor's reply future alive when the caller
+    is cancelled. Without it, asyncio cancels the awaited future as part of
+    task cancellation, and the actor's later ``reply.set_result`` would hit
+    :class:`asyncio.InvalidStateError` and kill the actor loop.
+    """
+    try:
+        return await asyncio.shield(reply)
+    except asyncio.CancelledError:
+
+        async def _watch() -> None:
+            try:
+                result = await reply
+            except Exception:
+                # Actor raised — no resource was produced; nothing to undo.
+                return
+            if not acquires(result):
+                return
+            try:
+                await compensate()
+            except Exception:
+                logger.exception(f"Compensation after cancelled {op}({run_id}) raised")
+
+        _ = asyncio.create_task(_watch(), name=f"compensate-{op}-{run_id}")
+        raise
 
 
 @final
-class RunsManager:
+class RunsSupervisor:
+    """Routes requests to per-run actors; owns actor lifecycle."""
+
     def __init__(
         self,
         *,
         instance_dir: Path,
         storage: StorageBackend,
         compose: ComposeLike,
-        provisioning: GrafanaProvisioning,
+        provisioning: ProvisioningLike,
         port_range: tuple[int, int],
+        daemon_port: int,
+        daemon_base_url: str,
         archive_idle_ttl_seconds: float = 300.0,
         reap_interval_seconds: float = 30.0,
     ):
         self.instance_dir = instance_dir
-        self.storage = storage
-        self.compose = compose
-        self.provisioning = provisioning
-        self.port_range = port_range
         self.archive_idle_ttl_seconds = archive_idle_ttl_seconds
         self.reap_interval_seconds = reap_interval_seconds
 
-        self._lock = asyncio.Lock()
-        self._containers: dict[str, _ContainerHandle] = {}
+        self._storage = storage
+        self._compose = compose
+        self._provisioning = provisioning
+        self._ports = PortAllocator(port_range)
+        self._daemon_port = daemon_port
+        self._daemon_base_url = daemon_base_url
+
+        self._actors: dict[str, RunActor] = {}
+        self._actor_tasks: dict[str, asyncio.Task[None]] = {}
         self._reaper_task: asyncio.Task[None] | None = None
         self._stopped = False
-        # Strong refs to fire-and-forget archive-boot tasks: asyncio only
-        # holds weak refs, so a lost task can be GC'd mid-flight.
-        self._boot_tasks: set[asyncio.Task[None]] = set()
 
-    def run_dir(self, run_id: str) -> Path:
-        return self.instance_dir / "runs" / run_id
+    # ---- public API
 
-    def data_dir(self, run_id: str) -> Path:
-        return self.run_dir(run_id) / "data"
+    async def register(self, run_id: str, metadata: TestMetadata) -> RunMetadata:
+        if self._stopped:
+            raise DaemonStopped
+        actor = self._get_or_spawn(run_id)
+        reply: asyncio.Future[RunMetadata] = asyncio.get_running_loop().create_future()
+        await actor.send(RegisterMsg(metadata=metadata, reply=reply))
+        return await _compensate_on_cancel(
+            reply,
+            acquires=lambda _: True,  # successful register always holds the run
+            compensate=lambda: self.release(run_id),
+            run_id=run_id,
+            op="register",
+        )
 
-    def config_dir(self, run_id: str) -> Path:
-        return self.run_dir(run_id) / "config"
+    async def release(self, run_id: str) -> None:
+        actor = self._actors.get(run_id)
+        if actor is None:
+            return
+        reply: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        await actor.send(ReleaseMsg(reply=reply))
+        await reply
+
+    async def acquire_query_pin(self, run_id: str) -> int | None:
+        if self._stopped:
+            return None
+        actor = self._get_or_spawn(run_id)
+        reply: asyncio.Future[int | None] = asyncio.get_running_loop().create_future()
+        await actor.send(AcquirePinMsg(reply=reply))
+        return await _compensate_on_cancel(
+            reply,
+            acquires=lambda port: port is not None,
+            compensate=lambda: self.release_query_pin(run_id),
+            run_id=run_id,
+            op="acquire_query_pin",
+        )
+
+    async def release_query_pin(self, run_id: str) -> None:
+        actor = self._actors.get(run_id)
+        if actor is None:
+            return
+        reply: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        await actor.send(ReleasePinMsg(reply=reply))
+        await reply
+
+    @asynccontextmanager
+    async def query_pin(self, run_id: str) -> AsyncGenerator[QueryPin]:
+        """Scoped pin on the run's container.
+
+        Exiting the block releases the pin automatically unless
+        :meth:`QueryPin.detach` was called — that's the hand-off pattern
+        for streaming responses whose body generator must outlive the
+        HTTP handler (see ``prom_proxy``).
+        """
+        pin = QueryPin(await self.acquire_query_pin(run_id), self, run_id)
+        try:
+            yield pin
+        finally:
+            if not pin.detached:
+                await pin.release()
+
+    async def ensure_queryable(self, run_id: str) -> int | None:
+        """Convenience: pin and immediately release. Used by tests that care
+        only about the lazy-boot side effect, not the pin lifecycle."""
+        port = await self.acquire_query_pin(run_id)
+        if port is not None:
+            await self.release_query_pin(run_id)
+        return port
+
+    async def recover(self) -> None:
+        """Hard reset on startup: DORMANT all LIVE rows, stop survivors."""
+        live_runs = await self._storage.list_runs_with_status(RunStatus.LIVE)
+        for run in live_runs:
+            await self._storage.set_run_status(run.run_id, RunStatus.DORMANT)
+
+        for name in await self._compose.list_running(prefix="tontester-prom-"):
+            logger.info(f"Recovery: stopping leftover container {name}")
+            await self._compose.down(name)
+
+        all_runs = await self._storage.list_runs(limit=10_000)
+        db_run_ids = {r.run_id for r in all_runs}
+        for provisioned_run_id in self._provisioning.list_provisioned_runs():
+            if provisioned_run_id not in db_run_ids:
+                logger.warning(f"Removing orphan Grafana datasource for {provisioned_run_id}")
+                self._provisioning.remove_run_datasource(provisioned_run_id)
+
+        for run in all_runs:
+            self._provisioning.write_run_datasource(run.run_id)
 
     async def start_reaper(self) -> None:
         if self._reaper_task is None:
-            self._reaper_task = asyncio.create_task(self._reap_idle_archives())
+            self._reaper_task = asyncio.create_task(self._reaper_loop(), name="runs-reaper")
 
-    async def stop_reaper(self) -> None:
+    async def shutdown(self, *, reply_timeout: float | None = None) -> None:
+        """Shut down all actors. Waits for graceful ``_Shutdown`` processing.
+
+        If ``reply_timeout`` is set and any actor doesn't respond in that
+        time, the remaining actor tasks are force-cancelled. The partial
+        state that leaves behind (possibly half-transitioned runs, stale
+        LIVE rows, orphan containers) is reconciled by :meth:`recover` on
+        next boot — the same backstop as any abnormal termination.
+        """
+        if self._stopped:
+            return
+        self._stopped = True
         if self._reaper_task is not None:
             _ = self._reaper_task.cancel()
             try:
@@ -93,233 +297,106 @@ class RunsManager:
                 pass
             self._reaper_task = None
 
-    async def recover(self) -> None:
-        """Hard reset on startup: DORMANT all LIVE rows, stop survivors."""
-        live_runs = await self.storage.list_runs_with_status(RunStatus.LIVE)
-        for run in live_runs:
-            await self.storage.set_run_status(run.run_id, RunStatus.DORMANT)
-
-        for name in await self.compose.list_running(prefix="tontester-prom-"):
-            logger.info(f"Recovery: stopping leftover container {name}")
-            await self.compose.down(name)
-
-        # Grafana datasource YAMLs that don't correspond to any DB run are
-        # stale (e.g. a purged run) — reap them.
-        all_runs = await self.storage.list_runs(limit=10_000)
-        db_run_ids = {r.run_id for r in all_runs}
-        for provisioned_run_id in self.provisioning.list_provisioned_runs():
-            if provisioned_run_id not in db_run_ids:
-                logger.warning(f"Removing orphan Grafana datasource for run {provisioned_run_id}")
-                self.provisioning.remove_run_datasource(provisioned_run_id)
-
-        # And any run in the DB that lacks a datasource gets one (e.g. the YAML
-        # was hand-deleted, or a prior version of the daemon didn't write it).
-        for run in all_runs:
-            self.provisioning.write_run_datasource(run.run_id)
-
-    async def register(self, run_id: str, metadata: TestMetadata) -> RunMetadata:
-        """Idempotent: ensure ``run_id`` is ``LIVE`` and owned by this caller.
-
-        Handles fresh runs, reconnects after a daemon crash, and reconnects
-        after a WS flap — the same code path for all three.
-        """
-        async with self._lock:
-            if self._stopped:
-                raise DaemonStopped
-            existing = self._containers.get(run_id)
-            if existing is not None and existing.owner == "ws":
-                raise RunAlreadyActive(run_id)
-            if existing is not None and existing.owner == "archive":
-                await self._stop_container(run_id)
-
-            host_port = await self._pick_port(run_id)
-            await self.storage.register_run(run_id, metadata, host_port)
-
-            config_dir = self.config_dir(run_id)
-            data_dir = self.data_dir(run_id)
-            config_dir.mkdir(parents=True, exist_ok=True)
-            data_dir.mkdir(parents=True, exist_ok=True)
-            write_prometheus_config(
-                config_dir,
-                [
-                    ScrapeTarget(targets=[node.address], labels={"node": node.name})
-                    for node in metadata.nodes
-                ],
-            )
-            self.provisioning.write_run_datasource(run_id)
-
-            handle = _ContainerHandle(
-                run_id=run_id,
-                host_port=host_port,
-                owner="ws",
-                last_access=asyncio.get_running_loop().time(),
-                starting=asyncio.Event(),
-            )
-            self._containers[run_id] = handle
-
-        try:
-            await self._start_container(run_id, host_port)
-            handle.starting.set()
-        except Exception:
-            async with self._lock:
-                handle.failed = True
-                handle.starting.set()
-                _ = self._containers.pop(run_id, None)
-            # CAS on port: only flip DB to DORMANT if the row is still the
-            # one we wrote. A concurrent successful register would have
-            # bumped the port, leaving our rollback a no-op — which is
-            # exactly what we want (their LIVE row stays intact).
-            await self.storage.set_run_status(run_id, RunStatus.DORMANT, if_port=host_port)
-            raise RunStartFailed(run_id)
-
-        result = await self.storage.get_run_metadata(run_id)
-        assert result is not None
-        return result
-
-    async def release(self, run_id: str) -> None:
-        """WebSocket closed (clean or dirty): drop to ``DORMANT``."""
-        async with self._lock:
-            handle = self._containers.get(run_id)
-            if handle is None or handle.owner != "ws":
-                return
-            await self._stop_container(run_id)
-        await self.storage.set_run_status(run_id, RunStatus.DORMANT)
-        logger.info(f"Run {run_id} -> dormant")
-
-    async def ensure_queryable(self, run_id: str) -> int | None:
-        """Return the host port currently serving this run.
-
-        - In-memory container already up (ws or archive): return its port.
-        - Run known to the DB but no container: lazy-boot (archive-owned).
-        - Unknown run: ``None``.
-        """
-        async with self._lock:
-            if self._stopped:
-                return None
-            handle = self._containers.get(run_id)
-            if handle is not None:
-                handle.last_access = asyncio.get_running_loop().time()
-                starting = handle.starting
-                port = handle.host_port
+        replies: list[asyncio.Future[None]] = []
+        for actor in list(self._actors.values()):
+            reply: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+            await actor.send(ShutdownMsg(reply=reply))
+            replies.append(reply)
+        if replies:
+            gather = asyncio.gather(*replies, return_exceptions=True)
+            if reply_timeout is None:
+                _ = await gather
             else:
-                run = await self.storage.get_run_metadata(run_id)
-                if run is None:
-                    return None
-                host_port = await self._pick_port(run_id)
-                handle = _ContainerHandle(
-                    run_id=run_id,
-                    host_port=host_port,
-                    owner="archive",
-                    last_access=asyncio.get_running_loop().time(),
-                    starting=asyncio.Event(),
-                )
-                self._containers[run_id] = handle
-                starting = handle.starting
-                port = host_port
-                # Ensure config_dir has at least an empty targets file;
-                # Prometheus refuses to start without prometheus.yml.
-                write_prometheus_config(self.config_dir(run_id), [])
-                task = asyncio.create_task(self._boot_archive(run_id, host_port))
-                self._boot_tasks.add(task)
-                task.add_done_callback(self._boot_tasks.discard)
+                try:
+                    _ = await asyncio.wait_for(gather, timeout=reply_timeout)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        (
+                            f"Actor _Shutdown replies didn't complete in {reply_timeout}s; "
+                            f"cancelling stuck actor tasks"
+                        )
+                    )
+                    for task in self._actor_tasks.values():
+                        if not task.done():
+                            _ = task.cancel()
+        if self._actor_tasks:
+            _ = await asyncio.gather(*self._actor_tasks.values(), return_exceptions=True)
 
-        _ = await starting.wait()
-        current = self._containers.get(run_id)
-        if current is None or current.failed:
+    # ---- introspection (tests)
+
+    async def inspect(self, run_id: str) -> RunStateSnapshot | None:
+        actor = self._actors.get(run_id)
+        if actor is None:
             return None
-        return port
+        reply: asyncio.Future[RunStateSnapshot] = asyncio.get_running_loop().create_future()
+        await actor.send(InspectMsg(reply=reply))
+        return await reply
 
-    async def acquire_query_pin(self, run_id: str) -> int | None:
-        """Ensure the container is up and mark it in-use.
-
-        Callers MUST pair every successful return with ``release_query_pin``
-        once the query is fully drained — otherwise the reaper will never
-        stop the container.
+    async def resolve_node_address(self, run_id: str, node_name: str) -> str | None:
+        """Return the configured address of a named node in a live run, or
+        ``None`` if the run isn't live or doesn't know the node. Used by
+        the scrape proxy in :mod:`.prom_proxy` — the actor owns the
+        authoritative in-memory metadata, so this avoids a SQLite hit per
+        scrape.
         """
-        port = await self.ensure_queryable(run_id)
-        if port is None:
+        actor = self._actors.get(run_id)
+        if actor is None:
             return None
-        async with self._lock:
-            handle = self._containers.get(run_id)
-            if handle is None:
-                return None
-            handle.pins += 1
-        return port
+        reply: asyncio.Future[str | None] = asyncio.get_running_loop().create_future()
+        await actor.send(ResolveNodeMsg(node_name=node_name, reply=reply))
+        return await reply
 
-    async def release_query_pin(self, run_id: str) -> None:
-        async with self._lock:
-            handle = self._containers.get(run_id)
-            if handle is not None and handle.pins > 0:
-                handle.pins -= 1
+    async def run_reaper_pass(self) -> None:
+        """Broadcast ``_MaybeReap`` to every actor. Tests call this directly
+        so they don't have to wait for the reaper loop's real-time sleep.
+        """
+        deadline = asyncio.get_running_loop().time() - self.archive_idle_ttl_seconds
+        replies: list[asyncio.Future[None]] = []
+        for actor in list(self._actors.values()):
+            reply: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+            await actor.send(MaybeReapMsg(deadline=deadline, reply=reply))
+            replies.append(reply)
+        if replies:
+            _ = await asyncio.gather(*replies, return_exceptions=True)
 
-    async def shutdown(self) -> None:
-        async with self._lock:
-            self._stopped = True
-        await self.stop_reaper()
+    # ---- internals
 
-        # Wait for in-flight boots: otherwise our ``podman stop`` can precede
-        # ``compose.up``, orphaning the container until next recovery. On
-        # timeout, drop the handle — the still-running boot becomes an
-        # orphan that ``recover()`` will clean up, but we do NOT issue a
-        # racy ``down`` against a container that doesn't exist yet.
-        for handle in list(self._containers.values()):
-            try:
-                _ = await asyncio.wait_for(handle.starting.wait(), timeout=10.0)
-            except asyncio.TimeoutError:
-                logger.warning(f"Boot of run {handle.run_id} exceeded 10s; leaving for recovery")
-                async with self._lock:
-                    current = self._containers.get(handle.run_id)
-                    if current is handle:
-                        _ = self._containers.pop(handle.run_id, None)
-
-        for run_id in list(self._containers.keys()):
-            handle = self._containers.get(run_id)
-            if handle is None:
-                continue
-            try:
-                async with self._lock:
-                    await self._stop_container(run_id)
-                if handle.owner == "ws":
-                    await self.storage.set_run_status(run_id, RunStatus.DORMANT)
-            except Exception:
-                logger.exception(f"Error stopping container for run {run_id} during shutdown")
-
-    async def _start_container(self, run_id: str, host_port: int) -> None:
-        service = prometheus_service(
-            run_id=run_id,
-            host_port=host_port,
-            config_dir=self.config_dir(run_id),
-            data_dir=self.data_dir(run_id),
+    def _get_or_spawn(self, run_id: str) -> RunActor:
+        existing = self._actors.get(run_id)
+        if existing is not None:
+            return existing
+        actor = RunActor(
+            run_id,
+            instance_dir=self.instance_dir,
+            storage=self._storage,
+            compose=self._compose,
+            provisioning=self._provisioning,
+            ports=self._ports,
+            daemon_port=self._daemon_port,
+            daemon_base_url=self._daemon_base_url,
+            archive_idle_ttl_seconds=self.archive_idle_ttl_seconds,
         )
-        await self.compose.up(service)
+        self._actors[run_id] = actor
+        task = asyncio.create_task(actor.run(), name=f"run-{run_id}")
+        # Defensive net: if the actor loop ever exits outside the _Shutdown
+        # path, drop it from the registry so a subsequent register() spawns
+        # a fresh actor instead of deadlocking on a dead inbox.
+        task.add_done_callback(lambda t: self._on_actor_done(run_id, t))
+        self._actor_tasks[run_id] = task
+        return actor
 
-    async def _boot_archive(self, run_id: str, host_port: int) -> None:
-        handle = self._containers.get(run_id)
-        if handle is None:
-            return
-        try:
-            await self._start_container(run_id, host_port)
-            logger.info(f"Lazy-booted archive container for run {run_id} on port {host_port}")
-        except Exception:
-            logger.exception(f"Failed to lazy-boot archive for run {run_id}")
-            handle.failed = True
-            # Drop the failed handle so a subsequent query re-attempts the
-            # boot instead of getting ``None`` forever.
-            async with self._lock:
-                current = self._containers.get(run_id)
-                if current is handle:
-                    _ = self._containers.pop(run_id, None)
-        finally:
-            handle.starting.set()
+    def _on_actor_done(self, run_id: str, task: asyncio.Task[None]) -> None:
+        if self._stopped:
+            return  # orderly shutdown — supervisor.shutdown owns cleanup
+        exc = task.exception() if not task.cancelled() else None
+        if exc is not None:
+            logger.error(f"Actor for run {run_id} died unexpectedly", exc_info=exc)
+        else:
+            logger.error(f"Actor for run {run_id} exited without _Shutdown")
+        _ = self._actors.pop(run_id, None)
+        _ = self._actor_tasks.pop(run_id, None)
 
-    async def _stop_container(self, run_id: str) -> None:
-        # Callers must hold ``self._lock``.
-        handle = self._containers.pop(run_id, None)
-        if handle is None:
-            return
-        await self.compose.down(prometheus_container_name(run_id))
-
-    async def _reap_idle_archives(self) -> None:
+    async def _reaper_loop(self) -> None:
         while True:
             try:
                 await asyncio.sleep(self.reap_interval_seconds)
@@ -328,77 +405,4 @@ class RunsManager:
             try:
                 await self.run_reaper_pass()
             except Exception:
-                # ``run_reaper_pass`` has its own per-candidate except, but a
-                # bug in the scan loop itself must not kill the reaper task
-                # silently (no one awaits it).
                 logger.exception("Reaper pass raised; continuing")
-
-    async def run_reaper_pass(self) -> None:
-        """Stop any archive-owned container that has been idle past the TTL.
-
-        Factored out of the reaper loop so tests can drive it directly without
-        waiting on real-time sleeps.
-        """
-        now = asyncio.get_running_loop().time()
-        candidates: list[str] = []
-        for run_id, handle in self._containers.items():
-            if handle.owner != "archive":
-                continue
-            if not handle.starting.is_set():
-                continue
-            if now - handle.last_access >= self.archive_idle_ttl_seconds:
-                candidates.append(run_id)
-        for run_id in candidates:
-            # Re-check under the lock: a racing ``register()`` may have
-            # promoted this handle to ``ws``, or a new query may have
-            # pinned it — never reap a live or in-use run.
-            try:
-                async with self._lock:
-                    handle = self._containers.get(run_id)
-                    if handle is None or handle.owner != "archive":
-                        continue
-                    if now - handle.last_access < self.archive_idle_ttl_seconds:
-                        continue
-                    if handle.pins > 0:
-                        continue
-                    logger.info(f"Reaping idle archive container for run {run_id}")
-                    await self._stop_container(run_id)
-            except Exception:
-                logger.exception(f"Error reaping archive container {run_id}")
-
-    async def _pick_port(self, run_id: str) -> int:
-        """Pick a free port, preferring the one previously used by this run."""
-        in_use = {h.host_port for h in self._containers.values()}
-        in_use |= await self.storage.list_allocated_ports()
-
-        existing = await self.storage.get_run_metadata(run_id)
-        if existing is not None and existing.host_port not in in_use:
-            return existing.host_port
-
-        for port in range(self.port_range[0], self.port_range[1] + 1):
-            if port not in in_use:
-                return port
-        raise NoFreePorts(self.port_range)
-
-
-class RunAlreadyActive(RuntimeError):
-    def __init__(self, run_id: str):
-        super().__init__(f"Run {run_id} is already active")
-        self.run_id: str = run_id
-
-
-class RunStartFailed(RuntimeError):
-    def __init__(self, run_id: str):
-        super().__init__(f"Failed to start Prometheus for run {run_id}")
-        self.run_id: str = run_id
-
-
-class NoFreePorts(RuntimeError):
-    def __init__(self, range_: tuple[int, int]):
-        super().__init__(f"No free ports in {range_}")
-        self.range: tuple[int, int] = range_
-
-
-class DaemonStopped(RuntimeError):
-    def __init__(self) -> None:
-        super().__init__("daemon is stopping; new runs are refused")
