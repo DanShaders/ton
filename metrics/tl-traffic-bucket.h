@@ -37,14 +37,12 @@ struct TlTrafficBucket {
   void account_with_magic(td::int32 magic, td::uint64 size);
 };
 
-// Append two MetricFamily entries (`<base>_bytes_by_tl_total`, `<base>_messages_by_tl_total`)
-// to `set`, labeled {<bucket_label_key>=<bucket_label_value>, tl=<schema_name|"unknown">}.
-//
-// `base` is something like "app_send"; the "_bytes_by_tl_total" / "_messages_by_tl_total"
-// suffixes are appended. Use `bucket_label_key` = "kind" for per-layer kinds, or "type" for
-// overlay-type partitioning, etc.
-void render_tl_bucket(MetricSet &set, const std::string &base, const std::string &bucket_label_value,
-                      const TlTrafficBucket &bucket, std::optional<std::string> bytes_help = std::nullopt,
-                      std::optional<std::string> messages_help = std::nullopt, std::string bucket_label_key = "kind");
+// Append rows to `<base>_bytes_by_tl_total` and `<base>_messages_by_tl_total` families in `set`,
+// each row labeled `extra_labels` plus `tl=<schema_name|"unknown">`. If a family with the target
+// name already exists in `set`, rows are appended to it; otherwise the family is created (and
+// `type=counter` + the provided help are set on first creation).
+void render_tl_bucket(MetricSet &set, const std::string &base, const TlTrafficBucket &bucket, LabelSet extra_labels,
+                      std::optional<std::string> bytes_help = std::nullopt,
+                      std::optional<std::string> messages_help = std::nullopt);
 
 }  // namespace ton::metrics

@@ -675,23 +675,51 @@ void AdnlPeerTableImpl::remove_protected_peers(AdnlNodeIdShort local_id, std::ve
 
 void AdnlPeerTableImpl::collect(metrics::MetricsPromise P) {
   metrics::MetricSet set;
-  set.push_labeled_scalar(
-      "app_send_bytes_total", "counter", "kind",
-      {{"custom", m_.app_send_bytes_custom}, {"query", m_.app_send_bytes_query}, {"answer", m_.app_send_bytes_answer}},
-      "Bytes the application asked ADNL to send (raw payload, by message kind).");
-  set.push_labeled_scalar(
-      "app_send_messages_total", "counter", "kind",
-      {{"custom", m_.app_send_msgs_custom}, {"query", m_.app_send_msgs_query}, {"answer", m_.app_send_msgs_answer}},
-      "Messages the application asked ADNL to send (by kind).");
-  set.push_labeled_scalar("app_send_dropped_total", "counter", "reason",
-                          {{"too_big", m_.app_send_drop_too_big}, {"unknown_src", m_.app_send_drop_unknown_src}},
-                          "Outbound application messages ADNL dropped before forwarding.");
-  set.push_labeled_scalar("app_deliver_bytes_total", "counter", "kind",
-                          {{"message", m_.app_deliver_bytes_message}, {"query", m_.app_deliver_bytes_query}},
-                          "Bytes ADNL delivered to the application (by kind).");
-  set.push_labeled_scalar("app_deliver_messages_total", "counter", "kind",
-                          {{"message", m_.app_deliver_msgs_message}, {"query", m_.app_deliver_msgs_query}},
-                          "Messages ADNL delivered to the application (by kind).");
+  {
+    metrics::MetricFamily bytes_fam{.name = "app_bytes_total",
+                                    .type = "counter",
+                                    .help = "Bytes exchanged between the application and ADNL (raw payload).",
+                                    .metrics = {}};
+    metrics::MetricFamily msgs_fam{.name = "app_messages_total",
+                                   .type = "counter",
+                                   .help = "Messages exchanged between the application and ADNL.",
+                                   .metrics = {}};
+    auto add = [&](metrics::MetricFamily &fam, const char *direction, const char *kind, td::uint64 v) {
+      fam.metrics.push_back(metrics::Metric{
+          .suffix = "",
+          .label_set = metrics::LabelSet{.labels = {{"direction", direction}, {"kind", kind}}},
+          .samples = {metrics::Sample{.label_set = {}, .value = static_cast<double>(v)}},
+      });
+    };
+    add(bytes_fam, "out", "message", m_.app_send_bytes_custom);
+    add(bytes_fam, "out", "query", m_.app_send_bytes_query);
+    add(bytes_fam, "out", "answer", m_.app_send_bytes_answer);
+    add(bytes_fam, "in", "message", m_.app_deliver_bytes_message);
+    add(bytes_fam, "in", "query", m_.app_deliver_bytes_query);
+    add(msgs_fam, "out", "message", m_.app_send_msgs_custom);
+    add(msgs_fam, "out", "query", m_.app_send_msgs_query);
+    add(msgs_fam, "out", "answer", m_.app_send_msgs_answer);
+    add(msgs_fam, "in", "message", m_.app_deliver_msgs_message);
+    add(msgs_fam, "in", "query", m_.app_deliver_msgs_query);
+    set.families.push_back(std::move(bytes_fam));
+    set.families.push_back(std::move(msgs_fam));
+  }
+  {
+    metrics::MetricFamily fam{.name = "app_dropped_total",
+                              .type = "counter",
+                              .help = "Application messages ADNL dropped, by direction and reason.",
+                              .metrics = {}};
+    auto add = [&](const char *direction, const char *reason, td::uint64 v) {
+      fam.metrics.push_back(metrics::Metric{
+          .suffix = "",
+          .label_set = metrics::LabelSet{.labels = {{"direction", direction}, {"reason", reason}}},
+          .samples = {metrics::Sample{.label_set = {}, .value = static_cast<double>(v)}},
+      });
+    };
+    add("out", "too_big", m_.app_send_drop_too_big);
+    add("out", "unknown_src", m_.app_send_drop_unknown_src);
+    set.families.push_back(std::move(fam));
+  }
   set.push_scalar("inbound_packets_total", "counter", m_.inbound_packets,
                   "ADNL packets entering the peer table from the network manager.");
   set.push_labeled_scalar("inbound_dropped_total", "counter", "reason",

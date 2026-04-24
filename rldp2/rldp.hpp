@@ -41,9 +41,6 @@ using TransferId = td::Bits256;
 
 struct Rldp2Metrics {
   using KC = metrics::AtomicKindCounter;
-  KC app_send_message, app_send_query, app_send_answer;
-  KC app_deliver_message, app_deliver_query, app_deliver_answer;
-
   KC sent_to_adnl;
   KC received_from_adnl;
 

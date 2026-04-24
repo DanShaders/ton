@@ -74,7 +74,7 @@ class BlockHandleLru : public td::ListNode {
   BlockHandle handle_;
 };
 
-class ValidatorManagerImpl : public ValidatorManager, public virtual metrics::CollectorWrapper {
+class ValidatorManagerImpl : public ValidatorManager, public virtual metrics::AsyncCollector {
  private:
   // WAITERS
   //
@@ -805,7 +805,6 @@ class ValidatorManagerImpl : public ValidatorManager, public virtual metrics::Co
   struct BlockReceiveTotalStats {
     size_t first_received_from[BlockReceiveStats::N_TYPES] = {};
     size_t received_from[BlockReceiveStats::N_TYPES] = {};
-    size_t applied = 0;
   };
   BlockReceiveTotalStats block_receive_total_stats_[2];  // 0 - basechain, 1 - masterchain
 

@@ -44,7 +44,6 @@ class QuicSender : public adnl::AdnlSenderEx, public virtual metrics::AsyncColle
 
       [[nodiscard]] metrics::MetricSet dump() const;
     } summary = {};
-    std::map<AdnlPath, Entry> per_path;
 
     // Server-level UDP wire counters aggregated across all QuicServers.
     UdpCounters udp = {};
@@ -91,19 +90,6 @@ class QuicSender : public adnl::AdnlSenderEx, public virtual metrics::AsyncColle
 
   // Application-level traffic counters (raw payload bytes, before TL wrapping).
   // Accessed from within the QuicSender actor only.
-  struct KindCounter {
-    td::uint64 bytes = 0;
-    td::uint64 msgs = 0;
-    void record(td::uint64 size) {
-      bytes += size;
-      msgs++;
-    }
-  };
-  struct AppMetrics {
-    KindCounter send_message, send_query;
-    KindCounter deliver_message, deliver_query, deliver_answer;
-  };
-  AppMetrics app_metrics_;
   metrics::TlTrafficBucket app_send_by_tl_message_;
   metrics::TlTrafficBucket app_send_by_tl_query_;
   metrics::TlTrafficBucket app_deliver_by_tl_message_;

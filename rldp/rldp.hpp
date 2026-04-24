@@ -42,9 +42,6 @@ using TransferId = td::Bits256;
 
 struct RldpMetrics {
   using KC = metrics::AtomicKindCounter;
-  KC app_send_message, app_send_query, app_send_answer;
-  KC app_deliver_message, app_deliver_query, app_deliver_answer;
-
   std::atomic<td::uint64> transfers_started{0};
   std::atomic<td::uint64> transfers_completed_out{0};
   std::atomic<td::uint64> transfers_completed_in{0};

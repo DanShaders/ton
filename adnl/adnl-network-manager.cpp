@@ -325,37 +325,46 @@ void AdnlNetworkManagerImpl::proxy_register(OutDesc &desc) {
 
 void AdnlNetworkManagerImpl::collect(metrics::MetricsPromise P) {
   metrics::MetricSet set;
-  set.push_scalar("udp_ingress_bytes_total", "counter", m_.udp_ingress_bytes,
-                  "Total UDP bytes received on ADNL sockets (wire-level).");
-  set.push_scalar("udp_ingress_packets_total", "counter", m_.udp_ingress_packets,
-                  "Total UDP packets received on ADNL sockets.");
-  set.push_labeled_scalar("udp_ingress_drops_total", "counter", "reason",
-                          {{"no_callback", m_.udp_ingress_drop_no_callback},
-                           {"error", m_.udp_ingress_drop_error},
-                           {"too_short", m_.udp_ingress_drop_too_short},
-                           {"too_huge", m_.udp_ingress_drop_too_huge},
-                           {"bad_proxy_decrypt", m_.udp_ingress_drop_bad_proxy_decrypt},
-                           {"bad_proxy_seqno", m_.udp_ingress_drop_bad_proxy_seqno},
-                           {"bad_proxy_time", m_.udp_ingress_drop_bad_proxy_time},
-                           {"bad_proxy_outflag", m_.udp_ingress_drop_bad_proxy_outflag},
-                           {"bad_control", m_.udp_ingress_drop_bad_control},
-                           {"no_in_desc", m_.udp_ingress_drop_no_in_desc}},
-                          "UDP ingress packets dropped, by reason.");
+  set.push_labeled_scalar("udp_bytes_total", "counter", "direction",
+                          {{"in", m_.udp_ingress_bytes}, {"out", m_.udp_egress_bytes}},
+                          "UDP wire bytes on ADNL sockets.");
+  set.push_labeled_scalar("udp_packets_total", "counter", "direction",
+                          {{"in", m_.udp_ingress_packets}, {"out", m_.udp_egress_packets}},
+                          "UDP packets on ADNL sockets.");
+  {
+    metrics::MetricFamily fam{.name = "udp_drops_total",
+                              .type = "counter",
+                              .help = "ADNL UDP packets dropped, by direction and reason.",
+                              .metrics = {}};
+    auto add = [&](const char *direction, const char *reason, td::uint64 v) {
+      fam.metrics.push_back(metrics::Metric{
+          .suffix = "",
+          .label_set = metrics::LabelSet{.labels = {{"direction", direction}, {"reason", reason}}},
+          .samples = {metrics::Sample{.label_set = {}, .value = static_cast<double>(v)}},
+      });
+    };
+    add("in", "no_callback", m_.udp_ingress_drop_no_callback);
+    add("in", "error", m_.udp_ingress_drop_error);
+    add("in", "too_short", m_.udp_ingress_drop_too_short);
+    add("in", "too_huge", m_.udp_ingress_drop_too_huge);
+    add("in", "bad_proxy_decrypt", m_.udp_ingress_drop_bad_proxy_decrypt);
+    add("in", "bad_proxy_seqno", m_.udp_ingress_drop_bad_proxy_seqno);
+    add("in", "bad_proxy_time", m_.udp_ingress_drop_bad_proxy_time);
+    add("in", "bad_proxy_outflag", m_.udp_ingress_drop_bad_proxy_outflag);
+    add("in", "bad_control", m_.udp_ingress_drop_bad_control);
+    add("in", "no_in_desc", m_.udp_ingress_drop_no_in_desc);
+    add("out", "unknown_src", m_.udp_egress_drop_unknown_src);
+    add("out", "no_route", m_.udp_egress_drop_no_route);
+    set.families.push_back(std::move(fam));
+  }
   set.push_scalar("udp_ingress_proxy_control_total", "counter", m_.udp_ingress_proxy_control,
                   "ADNL proxy control packets received.");
-  set.push_scalar("udp_proxy_ingress_bytes_total", "counter", m_.udp_proxy_ingress_bytes,
-                  "Total payload bytes received via ADNL proxy (after decrypt).");
-  set.push_scalar("udp_egress_bytes_total", "counter", m_.udp_egress_bytes,
-                  "Total UDP bytes sent on ADNL sockets (wire-level).");
-  set.push_scalar("udp_egress_packets_total", "counter", m_.udp_egress_packets,
-                  "Total UDP packets sent on ADNL sockets.");
-  set.push_labeled_scalar("udp_egress_drops_total", "counter", "reason",
-                          {{"unknown_src", m_.udp_egress_drop_unknown_src}, {"no_route", m_.udp_egress_drop_no_route}},
-                          "ADNL outbound packets dropped, by reason.");
-  set.push_scalar("udp_proxy_egress_bytes_total", "counter", m_.udp_proxy_egress_bytes,
-                  "Total inner payload bytes wrapped through ADNL proxy.");
-  set.push_scalar("udp_proxy_egress_packets_total", "counter", m_.udp_proxy_egress_packets,
-                  "Total packets wrapped through ADNL proxy.");
+  set.push_labeled_scalar("udp_proxy_bytes_total", "counter", "direction",
+                          {{"in", m_.udp_proxy_ingress_bytes}, {"out", m_.udp_proxy_egress_bytes}},
+                          "Inner payload bytes exchanged through ADNL proxy.");
+  set.push_labeled_scalar("udp_proxy_packets_total", "counter", "direction",
+                          {{"out", m_.udp_proxy_egress_packets}},
+                          "Packets wrapped through ADNL proxy.");
   set.push_scalar("listening_sockets", "gauge", udp_sockets_.size(),
                   "Number of UDP sockets owned by the ADNL network manager.");
   P.set_value(std::move(set).wrap("adnl_net"));

@@ -78,16 +78,29 @@ void TlTrafficBucket::account_with_magic(td::int32 magic, td::uint64 size) {
   c.msgs++;
 }
 
-void render_tl_bucket(MetricSet &set, const std::string &base, const std::string &bucket_label_value,
-                      const TlTrafficBucket &bucket, std::optional<std::string> bytes_help,
-                      std::optional<std::string> messages_help, std::string bucket_label_key) {
+void render_tl_bucket(MetricSet &set, const std::string &base, const TlTrafficBucket &bucket, LabelSet extra_labels,
+                      std::optional<std::string> bytes_help, std::optional<std::string> messages_help) {
   auto build = [&](std::string name_suffix, std::optional<std::string> help, auto extract_value,
                    td::uint64 unknown_value) {
-    MetricFamily fam{.name = base + name_suffix, .type = "counter", .help = std::move(help), .metrics = {}};
+    std::string name = base + name_suffix;
+    MetricFamily *fam = nullptr;
+    for (auto &f : set.families) {
+      if (f.name == name) {
+        fam = &f;
+        break;
+      }
+    }
+    if (fam == nullptr) {
+      set.families.push_back(
+          MetricFamily{.name = std::move(name), .type = "counter", .help = std::move(help), .metrics = {}});
+      fam = &set.families.back();
+    }
     auto push = [&](std::string tl_name, td::uint64 value) {
-      fam.metrics.push_back(Metric{
+      LabelSet labels{.labels = extra_labels.labels};
+      labels.labels.push_back({"tl", std::move(tl_name)});
+      fam->metrics.push_back(Metric{
           .suffix = "",
-          .label_set = LabelSet{.labels = {{bucket_label_key, bucket_label_value}, {"tl", std::move(tl_name)}}},
+          .label_set = std::move(labels),
           .samples = {Sample{.label_set = {}, .value = static_cast<double>(value)}},
       });
     };
@@ -95,7 +108,6 @@ void render_tl_bucket(MetricSet &set, const std::string &base, const std::string
       push(ton_api_id_name(magic), extract_value(counter));  // non-null by construction
     }
     push("unknown", unknown_value);
-    set.families.push_back(std::move(fam));
   };
   build(
       "_bytes_by_tl_total", std::move(bytes_help), [](const TlTrafficBucket::Counter &c) { return c.bytes; },

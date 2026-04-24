@@ -945,31 +945,26 @@ void OverlayManager::collect(metrics::MetricsPromise P) {
       labeled("peers", "gauge", "Sum of overlay peer counts.", [](auto &a) { return a.peers; });
       labeled("alive_peers", "gauge", "Sum of alive peer counts.", [](auto &a) { return a.alive_peers; });
       labeled("neighbours", "gauge", "Sum of selected neighbour counts.", [](auto &a) { return a.neighbours; });
-      // Per-(type, tl) breakdown for messages and broadcasts crossing the overlay boundary.
-      // Each call expands into bytes_by_tl_total + messages_by_tl_total families with labels
-      // {kind=type, tl=schema_name}. The label key "kind" here carries the overlay type.
-      auto append_tl = [&](std::string base, auto getter, std::optional<std::string> bytes_help,
-                           std::optional<std::string> messages_help) {
+      // Per-(direction, type, tl) breakdown for messages and broadcasts crossing the overlay boundary.
+      auto append_tl = [&](const std::string &base, const char *direction, auto getter,
+                           std::optional<std::string> bytes_help, std::optional<std::string> messages_help) {
         for (auto &[overlay_type, agg] : by_type_) {
-          metrics::render_tl_bucket(set, base, overlay_type, getter(agg), bytes_help, messages_help, "type");
+          metrics::LabelSet labels{.labels = {{"direction", direction}, {"type", overlay_type}}};
+          metrics::render_tl_bucket(set, base, getter(agg), std::move(labels), bytes_help, messages_help);
         }
       };
       append_tl(
-          "messages_sent", [](auto &a) -> auto & { return a.messages_sent_by_tl; },
-          "Bytes sent via overlay direct messages, by overlay type and inner TL.",
-          "Messages sent via overlay direct messages, by overlay type and inner TL.");
+          "messages", "out", [](auto &a) -> auto & { return a.messages_sent_by_tl; },
+          "Bytes exchanged via overlay direct messages, by direction/type and inner TL.",
+          "Direct overlay messages, by direction/type and inner TL.");
       append_tl(
-          "messages_received", [](auto &a) -> auto & { return a.messages_received_by_tl; },
-          "Bytes received via overlay direct messages, by overlay type and inner TL.",
-          "Messages received via overlay direct messages, by overlay type and inner TL.");
+          "messages", "in", [](auto &a) -> auto & { return a.messages_received_by_tl; }, std::nullopt, std::nullopt);
       append_tl(
-          "broadcasts_sent", [](auto &a) -> auto & { return a.broadcasts_sent_by_tl; },
-          "Bytes sent via overlay broadcasts, by overlay type and inner TL.",
-          "Broadcasts sent, by overlay type and inner TL.");
+          "broadcasts", "out", [](auto &a) -> auto & { return a.broadcasts_sent_by_tl; },
+          "Bytes exchanged via overlay broadcasts, by direction/type and inner TL.",
+          "Overlay broadcasts, by direction/type and inner TL.");
       append_tl(
-          "broadcasts_received", [](auto &a) -> auto & { return a.broadcasts_received_by_tl; },
-          "Bytes received via overlay broadcasts, by overlay type and inner TL.",
-          "Broadcasts received, by overlay type and inner TL.");
+          "broadcasts", "in", [](auto &a) -> auto & { return a.broadcasts_received_by_tl; }, std::nullopt, std::nullopt);
       return set;
     }
   };

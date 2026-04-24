@@ -1629,7 +1629,6 @@ void ValidatorManagerImpl::new_block_cont(BlockHandle handle, td::Ref<ShardState
   if (!receive_stats.applied && started_) {
     receive_stats.applied = true;
     auto &total_stats = block_receive_total_stats_[handle->id().is_masterchain()];
-    ++total_stats.applied;
     ++total_stats.first_received_from[(int)receive_stats.get_earliest_type()];
     for (size_t i = 0; i < BlockReceiveStats::N_TYPES; ++i) {
       if (receive_stats.received_at[i]) {
@@ -3874,10 +3873,6 @@ void ValidatorManagerImpl::collect_metrics(metrics::MetricsPromise P) {
       auto label_set = metrics::LabelSet{.labels = {{"wc", mc ? "-1" : "0"}, {"type", TYPE_NAMES[i]}}};
       whole_set = std::move(whole_set).join(std::move(set).label(label_set));
     }
-    auto set = metrics::MetricSet{
-        .families = {metrics::MetricFamily::make_scalar("blocks_new_total", "counter", total_stats.applied)}};
-    auto label_set = metrics::LabelSet{.labels = {{"wc", mc ? "-1" : "0"}}};
-    whole_set = std::move(whole_set).join(std::move(set).label(label_set));
   }
   P.set_value(std::move(whole_set));
 }
