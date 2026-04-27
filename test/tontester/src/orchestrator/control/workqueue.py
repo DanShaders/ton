@@ -81,12 +81,36 @@ class WorkQueue(Generic[_TRef]):
         self._heap: list[_Scheduled[_TRef]] = []
         self._scheduled_refs: set[_TRef] = set()
         self._in_flight: set[_TRef] = set()
-        # Refs added while in-flight: rescheduled on done() rather than
-        # racing with a parallel processor.
-        self._dirty_in_flight: set[_TRef] = set()
+        # Tracks the worker's reconcile task per in-flight ref so
+        # ``_add_at`` can supersede it: when a new event arrives for
+        # a ref already being reconciled, we cancel the in-flight task
+        # so the worker re-runs against current state instead of
+        # finishing a now-obsolete spec. The supervisor pattern in
+        # SubprocessRuntime makes this cancellation safe — RAII
+        # unwinds any in-progress process spawn.
+        self._in_flight_tasks: dict[_TRef, asyncio.Task[object]] = {}
+        # Refs added while in-flight: rescheduled on done() at the
+        # *earliest* requested deadline. Storing the deadline (not
+        # just a flag) keeps add_after's debounce request alive across
+        # the in-flight window — otherwise a watch event mid-reconcile
+        # would silently collapse a 10s requeue_after_s into
+        # "immediate" (round-5 #6).
+        self._dirty_in_flight: dict[_TRef, float] = {}
+        # Refs whose in-flight reconcile we cancelled (supersede). On
+        # done() we use this to skip failure-backoff increment — the
+        # cancellation was our doing, not the reconciler's failure.
+        self._superseded: set[_TRef] = set()
         self._failure_count: dict[_TRef, int] = {}
 
-        self._not_empty: asyncio.Event = asyncio.Event()
+        # Per-call wakeup futures. Each ``get`` waiter appends; producers
+        # resolve one. A bare ``asyncio.Event`` was the original
+        # implementation but had two bugs: stays-set after add means
+        # ``await wait_for(event, timeout=wait_s)`` returns immediately
+        # in the future-deadline branch (busy-spin); and a single Event
+        # only wakes one consumer at a time deterministically. Per-call
+        # futures fix both at the cost of one Future allocation per get
+        # iteration.
+        self._waiters: list[asyncio.Future[None]] = []
         self._closed: bool = False
         self._seq: int = 0
 
@@ -103,7 +127,21 @@ class WorkQueue(Generic[_TRef]):
         if self._closed:
             return
         if ref in self._in_flight:
-            self._dirty_in_flight.add(ref)
+            # Earliest deadline wins: an urgent ``add()`` (deadline=now)
+            # racing with a debouncing ``add_after(ref, 10s)`` should
+            # fire immediately on done(), not after 10s.
+            existing = self._dirty_in_flight.get(ref)
+            self._dirty_in_flight[ref] = deadline if existing is None else min(existing, deadline)
+            # Supersede: cancel the in-flight reconcile so the worker
+            # re-runs against current state. The worker catches the
+            # cancel, calls done(), and we requeue at the dirty
+            # deadline. If the in-flight task happens to finish before
+            # the cancel takes effect, done()'s dirty path requeues
+            # anyway — same end state.
+            self._superseded.add(ref)
+            task = self._in_flight_tasks.get(ref)
+            if task is not None and not task.done():
+                _ = task.cancel()
             return
         if ref in self._scheduled_refs:
             # Already pending. The earlier scheduled entry will fire;
@@ -112,13 +150,39 @@ class WorkQueue(Generic[_TRef]):
         self._scheduled_refs.add(ref)
         self._seq += 1
         heapq.heappush(self._heap, _Scheduled(deadline=deadline, seq=self._seq, ref=ref))
-        self._not_empty.set()
+        self._wake_one()
+
+    def register_in_flight_task(self, ref: _TRef, task: asyncio.Task[object]) -> None:
+        """Worker registers its current reconcile task so the queue
+        can supersede-cancel it on a fresh add().
+
+        Called by :class:`ControllerRunner` worker right after pulling
+        a ref via :meth:`get` and spawning the reconcile subtask. If
+        the ref isn't in-flight (e.g. caller misuse), this is a no-op.
+        """
+        if ref in self._in_flight:
+            self._in_flight_tasks[ref] = task
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        self._not_empty.set()
+        self._wake_all()
+
+    def _wake_one(self) -> None:
+        """Resolve one waiter's future, if any."""
+        while self._waiters:
+            w = self._waiters.pop(0)
+            if not w.done():
+                w.set_result(None)
+                return
+
+    def _wake_all(self) -> None:
+        """Resolve every waiter's future. Used by :meth:`close`."""
+        for w in self._waiters:
+            if not w.done():
+                w.set_result(None)
+        self._waiters.clear()
 
     # ---- consumer side -------------------------------------------------
 
@@ -131,56 +195,92 @@ class WorkQueue(Generic[_TRef]):
         Raises :class:`QueueClosed` once :meth:`close` has been called —
         regardless of whether the heap still has future-deadline items.
         Honoring future deadlines after close would mean spinning on
-        ``wait_for(_not_empty)`` because close sets the event permanently;
-        instead we treat close as authoritative and drop pending work.
+        a permanently-set wakeup; instead we treat close as
+        authoritative and drop pending work.
         """
         while True:
             if self._closed:
                 raise QueueClosed()
-            if not self._heap:
-                self._not_empty.clear()
-                _ = await self._not_empty.wait()
-                continue
-            head = self._heap[0]
-            now = self._clock.now()
-            if head.deadline <= now:
-                _ = heapq.heappop(self._heap)
-                self._scheduled_refs.discard(head.ref)
-                self._in_flight.add(head.ref)
-                if not self._heap:
-                    self._not_empty.clear()
-                return head.ref
-            # Sleep until the head is due; new arrivals trigger the event
-            # which races with the sleep.
-            wait_s = head.deadline - now
+            head = self._heap[0] if self._heap else None
+            if head is not None:
+                now = self._clock.now()
+                if head.deadline <= now:
+                    _ = heapq.heappop(self._heap)
+                    self._scheduled_refs.discard(head.ref)
+                    self._in_flight.add(head.ref)
+                    return head.ref
+                wait_s: float | None = head.deadline - now
+            else:
+                wait_s = None  # heap empty: wait indefinitely
+
+            # Fresh waiter per iteration. There's no lost-wakeup race
+            # because the loop is single-threaded: the heap snapshot
+            # above and this Future creation happen before any await,
+            # so a subsequent ``_add_at`` will see this Future on
+            # ``self._waiters`` and resolve it.
+            loop = asyncio.get_running_loop()
+            waiter: asyncio.Future[None] = loop.create_future()
+            self._waiters.append(waiter)
             try:
-                _ = await asyncio.wait_for(self._not_empty.wait(), timeout=wait_s)
+                if wait_s is None:
+                    _ = await waiter
+                else:
+                    _ = await asyncio.wait_for(waiter, timeout=wait_s)
             except asyncio.TimeoutError:
                 pass
+            finally:
+                if waiter in self._waiters:
+                    self._waiters.remove(waiter)
 
     def done(self, ref: _TRef, *, success: bool) -> None:
         """Signal that processing of ``ref`` finished.
 
         Failure schedules an exponential-backoff requeue. Success resets
-        the failure count. If ``add(ref)`` was called while processing,
-        it's now scheduled (possibly with backoff if this run failed).
+        the failure count. If ``add(ref)`` / ``add_after(ref, N)`` was
+        called while processing, the earliest requested deadline (saved
+        in ``_dirty_in_flight``) is honored on the requeue.
+
+        If the in-flight reconcile was *superseded* (cancelled by the
+        queue itself because a fresh ``add()`` arrived), the
+        cancellation is not treated as a failure — no backoff
+        increment — and the requeue uses the dirty deadline directly.
         """
         if ref not in self._in_flight:
             return
         self._in_flight.discard(ref)
-        was_dirty = ref in self._dirty_in_flight
-        self._dirty_in_flight.discard(ref)
+        _ = self._in_flight_tasks.pop(ref, None)
+        was_superseded = ref in self._superseded
+        self._superseded.discard(ref)
+        dirty_deadline = self._dirty_in_flight.pop(ref, None)
+
+        if was_superseded:
+            # Our cancel; not the reconciler's failure. Don't penalize
+            # via backoff — just requeue at the dirty deadline (which
+            # was set by the supersede-triggering add).
+            if dirty_deadline is not None:
+                self._add_at(ref, dirty_deadline)
+            return
 
         if success:
             _ = self._failure_count.pop(ref, None)
-            if was_dirty:
-                self._add_at(ref, self._clock.now())
+            if dirty_deadline is not None:
+                self._add_at(ref, dirty_deadline)
             return
 
         attempts = self._failure_count.get(ref, 0) + 1
         self._failure_count[ref] = attempts
-        delay = min(self._max, self._base * (2.0 ** (attempts - 1)))
-        self._add_at(ref, self._clock.now() + delay)
+        backoff_delay = min(self._max, self._base * (2.0 ** (attempts - 1)))
+        backoff_deadline = self._clock.now() + backoff_delay
+        # On failure, both the dirty deadline and the backoff deadline
+        # are "wait at least this long." Pick the later — backoff
+        # protects against hot loops on persistent failure; dirty
+        # deadline protects an explicit add_after's debounce.
+        deadline = (
+            max(backoff_deadline, dirty_deadline)
+            if dirty_deadline is not None
+            else backoff_deadline
+        )
+        self._add_at(ref, deadline)
 
     def forget(self, ref: _TRef) -> None:
         """Drop any failure-count history for ``ref``.

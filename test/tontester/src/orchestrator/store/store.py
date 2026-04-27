@@ -48,9 +48,10 @@ those strings from a class — it dispatches on ``type(resource)`` or
 import asyncio
 import copy
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Generic, TypeVar, final
+from typing import TypeVar, final
 
 from pydantic import BaseModel
 
@@ -62,7 +63,6 @@ from ..resources import (
     ResourceLike,
     matches,
 )
-from .watch import Subscription as BusSubscription
 from .watch import WatchBus, WatchEvent, WatchEventType
 
 # Internal storage erases to the kind-erased Protocol; public API
@@ -77,85 +77,33 @@ _AnyResource = ResourceLike[BaseModel, BaseModel]
 _TRes = TypeVar("_TRes", bound=_AnyResource)
 
 
-@final
-class Subscription(Generic[_TRes]):
-    """Async-context-manager-and-iterable handle to a watch subscription.
+@asynccontextmanager
+async def _typed_subscription(
+    bus: "WatchBus[_AnyResource]",
+    resource_type: type[_TRes],
+) -> "AsyncGenerator[AsyncIterator[WatchEvent[_TRes]]]":
+    """Wrap the kind-erased bus subscription with type narrowing.
 
-    Synchronously registers with the bus on construction (so events
-    published immediately afterward are observed). The two halves —
-    iteration and cleanup — are bound together by ``async with`` so a
-    caller can't forget to close::
-
-        async with store.subscription(Workload) as sub:
-            async for event in sub:
-                ...
-
-    Direct construction is internal — use :meth:`InMemoryStore.subscription`.
-    The bus operates on the kind-erased base; the ``resource_type`` we
-    carry alongside is what narrows events on the way out. _TRes is a
-    phantom parameter — concrete iteration yields ``WatchEvent[_TRes]``
-    even though the underlying bus token is parameterized on the base.
+    Synchronously registers on the underlying bus (the
+    :class:`BroadcastQueue`'s subscribe handles that), then yields an
+    iterator that narrows each ``WatchEvent[_AnyResource]`` to
+    ``WatchEvent[_TRes]`` via runtime ``isinstance`` check.
+    Cleanup is automatic on exit.
     """
+    async with bus.subscribe() as raw_events:
+        yield _narrow_events(raw_events, resource_type)
 
-    def __init__(
-        self,
-        bus: "WatchBus[_AnyResource]",
-        resource_type: type[_TRes],
-    ):
-        self._bus: WatchBus[_AnyResource] = bus
-        self._token: BusSubscription[_AnyResource] = bus.open()
-        self._resource_type: type[_TRes] = resource_type
-        self._closed: bool = False
-        # Subscriptions are single-use. The bus token is consumed by
-        # the first ``async for``; calling ``__aiter__`` a second time
-        # would silently yield zero events because the underlying
-        # token's queue has been drained or closed. Raise instead.
-        self._iterated: bool = False
 
-    @property
-    def resource_type(self) -> type[_TRes]:
-        return self._resource_type
-
-    async def __aenter__(self) -> "Subscription[_TRes]":
-        return self
-
-    async def __aexit__(
-        self,
-        _exc_type: object,
-        _exc: object,
-        _tb: object,
-    ) -> None:
-        self.close()
-
-    async def __aiter__(self) -> AsyncGenerator[WatchEvent[_TRes]]:
-        if self._iterated:
-            raise RuntimeError(
-                (
-                    "Subscription is single-use; open a fresh one via "
-                    "store.subscription(...) instead of iterating twice"
-                )
-            )
-        self._iterated = True
-        async for event in self._bus.stream(self._token):
-            yield WatchEvent(
-                type=event.type,
-                resource=_narrow(event.resource, self._resource_type),
-                resource_version=event.resource_version,
-            )
-
-    def close(self) -> None:
-        """Unregister from the bus + close the token. Idempotent.
-
-        Calls :meth:`WatchBus.unregister` which both closes the per-sub
-        queue and removes the token from the bus's ``_subscriptions``
-        set. Without the discard half, "open via context manager but
-        never iterate" would leak the token until the bus saw a publish
-        whose ``offer`` returned False — which on a quiet bus is never.
-        """
-        if self._closed:
-            return
-        self._closed = True
-        self._bus.unregister(self._token)
+async def _narrow_events(
+    events: "AsyncIterator[WatchEvent[_AnyResource]]",
+    resource_type: type[_TRes],
+) -> "AsyncIterator[WatchEvent[_TRes]]":
+    async for event in events:
+        yield WatchEvent(
+            type=event.type,
+            resource=_narrow(event.resource, resource_type),
+            resource_version=event.resource_version,
+        )
 
 
 def _now() -> datetime:
@@ -448,24 +396,26 @@ class InMemoryStore:
 
     # ---- watch ----------------------------------------------------------
 
-    def subscription(self, resource_type: type[_TRes]) -> Subscription[_TRes]:
+    def subscription(
+        self, resource_type: type[_TRes]
+    ) -> AbstractAsyncContextManager[AsyncIterator[WatchEvent[_TRes]]]:
         """Open a synchronously-registered subscription bound to a kind.
 
-        Returns a :class:`Subscription` that's an async context manager
-        and async iterable::
+        Use as::
 
-            async with store.subscription(Workload) as sub:
-                async for event in sub:
+            async with store.subscription(Workload) as events:
+                async for event in events:
                     ...
 
-        Synchronous registration ensures any ``apply`` issued after this
-        call returns is observed (no async-generator race window).
-        ``async with`` enforces cleanup even if the consumer never gets
-        to the iteration — without it, a partial-init exception would
-        leak the subscription in the bus's set.
+        The returned context manager registers on the kind's bus on
+        ``__aenter__`` (synchronously, so any ``apply`` issued after
+        ``async with`` enters is observed), and unregisters on
+        ``__aexit__``. The yielded iterator is an
+        ``AsyncIterator[WatchEvent[_TRes]]`` — events are narrowed
+        from the kind-erased bus type.
         """
         state = self._state_for(resource_type)
-        return Subscription(bus=state.bus, resource_type=resource_type)
+        return _typed_subscription(state.bus, resource_type)
 
     async def subscribe(
         self,
@@ -473,13 +423,13 @@ class InMemoryStore:
     ) -> AsyncIterator[WatchEvent[_TRes]]:
         """Convenience: register + iterate in one call.
 
-        Equivalent to ``async with store.subscription(...) as sub:
-        async for event in sub: yield event`` but as an async generator.
-        Use only when the caller doesn't need to share the subscription
-        across an outer context.
+        Equivalent to ``async with store.subscription(...) as events:
+        async for event in events: yield event`` but as an async
+        generator. Use only when the caller doesn't need to share the
+        subscription across an outer context.
         """
-        async with self.subscription(resource_type) as sub:
-            async for event in sub:
+        async with self.subscription(resource_type) as events:
+            async for event in events:
                 yield event
 
     def close(self) -> None:

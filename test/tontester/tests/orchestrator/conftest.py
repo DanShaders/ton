@@ -54,37 +54,42 @@ async def manager() -> AsyncGenerator[Manager]:
     m.register_kind(WorkloadSet)
     m.register_kind(NetworkPolicy)
     m.register_kind(PortForward)
-    try:
+    async with m.running():
         yield m
-    finally:
-        await m.shutdown()
 
 
 @pytest_asyncio.fixture
-async def fake_runtime() -> AsyncGenerator[FakeRuntime]:
-    r = FakeRuntime()
-    try:
-        yield r
-    finally:
-        await r.close()
+async def fake_runtime() -> FakeRuntime:
+    """Constructed but not entered. The caller (e.g. ``agent_pair``,
+    or a test that wants to drive it directly) is responsible for
+    ``async with rt.running():``. We don't enter here because the
+    common consumer is ``agent_pair`` which hands ownership to the
+    agent — that would otherwise produce a double-enter of the
+    runtime context."""
+    return FakeRuntime()
 
 
 @pytest_asyncio.fixture
 async def agent_pair(
     tmp_path: Path,
-    manager: Manager,
     fake_runtime: FakeRuntime,
 ) -> AsyncGenerator[tuple[Manager, Agent]]:
-    """Started Manager + in-process Agent backed by FakeRuntime."""
+    """Manager + in-process Agent backed by FakeRuntime, both running.
+
+    The agent owns the runtime — running() enters it internally; we
+    don't enter it here.
+    """
+    m = Manager()
+    m.register_kind(Namespace)
+    m.register_kind(Workload)
+    m.register_kind(WorkloadSet)
+    m.register_kind(NetworkPolicy)
+    m.register_kind(PortForward)
     a = Agent(
         fake_runtime,
-        store=manager.store,
+        store=m.store,
         state_dir=tmp_path / "agent",
         cgroup_root=None,
     )
-    await manager.start()
-    await a.start()
-    try:
-        yield (manager, a)
-    finally:
-        await a.stop()
+    async with m.running(), a.running():
+        yield (m, a)

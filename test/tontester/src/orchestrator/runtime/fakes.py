@@ -9,11 +9,12 @@ the production package so test files can import it without sys.path
 hacks; pyright treats it as part of the typed surface.
 """
 
-import asyncio
-from collections.abc import AsyncIterator
+import contextlib
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
-from typing import final, override
+from typing import Self, final, override
 
+from ..broadcast import BroadcastQueue
 from ..resources import (
     ContainerStatus,
     Workload,
@@ -40,7 +41,7 @@ class FakeRuntime(Runtime):
         self._apply_failure: Exception | None = apply_failure
         self._workloads: dict[tuple[str | None, str], Workload] = {}
         self._statuses: dict[tuple[str | None, str], WorkloadStatus] = {}
-        self._subs: set[asyncio.Queue[RuntimeEvent | None]] = set()
+        self._events: BroadcastQueue[RuntimeEvent] = BroadcastQueue("fake-runtime", queue_size=256)
         self.applies: list[Workload] = []
         self.deletes: list[tuple[str | None, str]] = []
 
@@ -71,7 +72,7 @@ class FakeRuntime(Runtime):
                 conditions=[],
             ),
         )
-        await self._publish(
+        self._events.publish(
             RuntimeEvent(
                 type=RuntimeEventType.STARTED,
                 workload_namespace=workload.metadata.namespace,
@@ -90,7 +91,7 @@ class FakeRuntime(Runtime):
         status = self._statuses.pop(key, None)
         if wl is None:
             return
-        await self._publish(
+        self._events.publish(
             RuntimeEvent(
                 type=RuntimeEventType.EXITED,
                 workload_namespace=namespace,
@@ -116,46 +117,21 @@ class FakeRuntime(Runtime):
         return list(self._statuses.values())
 
     @override
-    def watch(self) -> AsyncIterator[RuntimeEvent | None]:
-        return self._subscribe()
-
-    async def _subscribe(self) -> AsyncIterator[RuntimeEvent | None]:
-        queue: asyncio.Queue[RuntimeEvent | None] = asyncio.Queue(maxsize=256)
-        self._subs.add(queue)
-        # Registration ack — see Runtime.watch contract.
-        yield None
-        try:
-            while True:
-                event = await queue.get()
-                if event is None:
-                    return
-                yield event
-        finally:
-            self._subs.discard(queue)
+    def watch(self):
+        return self._events.subscribe()
 
     # ---- test driver --------------------------------------------------
 
     def set_status(self, *, namespace: str | None, name: str, status: WorkloadStatus) -> None:
         self._statuses[(namespace, name)] = status
 
-    async def emit(self, event: RuntimeEvent) -> None:
-        await self._publish(event)
+    def emit(self, event: RuntimeEvent) -> None:
+        self._events.publish(event)
 
     @override
-    async def close(self) -> None:
-        for sub in list(self._subs):
-            try:
-                sub.put_nowait(None)
-            except asyncio.QueueFull:
-                pass
-        self._subs.clear()
-
-    async def _publish(self, event: RuntimeEvent) -> None:
-        dead: list[asyncio.Queue[RuntimeEvent | None]] = []
-        for sub in self._subs:
-            try:
-                sub.put_nowait(event)
-            except asyncio.QueueFull:
-                dead.append(sub)
-        for sub in dead:
-            self._subs.discard(sub)
+    @contextlib.asynccontextmanager
+    async def running(self) -> AsyncGenerator[Self]:
+        try:
+            yield self
+        finally:
+            self._events.close()

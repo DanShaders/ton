@@ -1,32 +1,22 @@
 """Namespace cascade-delete reconciler.
 
-When a Namespace gets a ``deletion_timestamp``, we must wait for every
-child resource referencing it (by ``namespace`` field, not owner_ref —
-namespaces are cluster-scoped so ownership-by-namespace is implicit)
-to drain before hard-deleting the namespace row.
+When a Namespace gets a ``deletion_timestamp``, the
+:class:`CascadingReconciler` base handles the bookkeeping —
+finalizer install, children enumeration + delete, finalizer drop —
+and this module supplies the namespace-specific bits:
 
-Implementation: a single finalizer ``orchestrator.io/namespace-cascade``
-on every namespace. While the finalizer is present and
-``deletion_timestamp`` is set, the reconciler:
-
-1. Issues ``store.delete()`` for every resource in this namespace
-   (other than the namespace itself).
-2. Re-checks: if any child still exists (with or without deletion_ts),
-   it requeues.
-3. Once all children are gone, drops the finalizer; the store
-   hard-deletes the namespace row on the next patch.
-
-This is roughly what k8s' namespace controller does, minus the third-
-party CRD discovery.
+- which kinds count as namespace children (every namespaced kind),
+- enumeration via ``store.list(kind, namespace=ns.name)``,
+- a status-write hook that flips ``status.phase = "Terminating"``.
 """
 
 import logging
+from collections.abc import Iterable
 from typing import final, override
 
 from pydantic import BaseModel
 
 from ...resources import (
-    Metadata,
     Namespace,
     NetworkPolicy,
     PortForward,
@@ -35,7 +25,8 @@ from ...resources import (
     WorkloadSet,
 )
 from ...store import InMemoryStore, WatchEvent
-from ..controller import Controller, ItemRef, Result, WatchSpec, identity_mapper
+from ..cascading import CascadingReconciler
+from ..controller import ItemRef, WatchSpec, identity_mapper
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +35,16 @@ NAMESPACE_FINALIZER = "orchestrator.io/namespace-cascade"
 # Order matters: tear down sets before their workloads (so the set
 # reconciler doesn't keep recreating kids), then policies, then the
 # leaf workloads themselves.
-_CHILD_KINDS = (WorkloadSet, NetworkPolicy, PortForward, Workload)
+_CHILD_KINDS: tuple[type[ResourceLike[BaseModel, BaseModel]], ...] = (
+    WorkloadSet,
+    NetworkPolicy,
+    PortForward,
+    Workload,
+)
 
 
 @final
-class NamespaceReconciler(Controller[Namespace]):
+class NamespaceReconciler(CascadingReconciler[Namespace]):
     """Cascade-deletes a namespace's children before hard-deleting itself."""
 
     @property
@@ -67,76 +63,36 @@ class NamespaceReconciler(Controller[Namespace]):
             *(WatchSpec(resource_type=k, map_event=_child_to_namespace_ref) for k in _CHILD_KINDS),
         ]
 
+    @property
     @override
-    async def reconcile(self, store: InMemoryStore, ref: ItemRef) -> Result:
-        ns = store.get_or_none(Namespace, namespace=None, name=ref.name)
-        if ns is None:
-            return Result(ok=True, reason="namespace gone")
+    def finalizer_name(self) -> str:
+        return NAMESPACE_FINALIZER
 
-        # Always ensure the cascade finalizer exists — this is the
-        # invariant that lets graceful delete actually wait.
-        if NAMESPACE_FINALIZER not in ns.metadata.finalizers:
-            try:
-                _ = await store.patch_metadata(
-                    Namespace,
-                    namespace=None,
-                    name=ns.metadata.name,
-                    mutator=_add_namespace_finalizer,
-                )
-            except Exception as e:
-                logger.exception(f"failed to add finalizer to ns {ns.metadata.name}")
-                return Result(ok=False, reason=f"finalizer write: {e}")
-            return Result(ok=True, reason="finalizer added; will requeue on next event")
-
-        if ns.metadata.deletion_timestamp is None:
-            # Live namespace; nothing to do until someone deletes it.
-            return Result(ok=True, reason="active")
-
-        # Mark Terminating in status (idempotent).
-        if ns.status.phase != "Terminating":
-            try:
-                _ = await store.patch_status(
-                    Namespace,
-                    namespace=None,
-                    name=ns.metadata.name,
-                    mutator=_mark_terminating,
-                )
-            except Exception:
-                logger.exception(f"namespace {ns.metadata.name} status mark failed")
-
-        # Issue deletes for every child kind. Each ``store.delete`` is
-        # idempotent — already-deleted is a no-op — so we don't bother
-        # tracking which ones we've sent.
-        remaining = 0
+    @override
+    def enumerate_children(
+        self,
+        store: InMemoryStore,
+        parent: Namespace,
+    ) -> Iterable[
+        tuple[type[ResourceLike[BaseModel, BaseModel]], ResourceLike[BaseModel, BaseModel]]
+    ]:
         for kind in _CHILD_KINDS:
-            children = store.list(kind, namespace=ns.metadata.name)
-            for child in children:
-                if child.metadata.deletion_timestamp is None:
-                    await store.delete(
-                        kind,
-                        namespace=child.metadata.namespace,
-                        name=child.metadata.name,
-                    )
-                remaining += 1
+            for child in store.list(kind, namespace=parent.metadata.name):
+                yield (kind, child)
 
-        if remaining > 0:
-            # Pure event-driven: any child change fires a watch event
-            # that wakes this controller via _child_to_namespace_ref.
-            # No requeue_after — we don't need a timer to "check again
-            # later"; the watch tells us when to look.
-            return Result(ok=True, reason=f"awaiting {remaining} children")
-
-        # Children drained — drop the finalizer; store hard-deletes.
+    @override
+    async def on_terminating_entered(self, store: InMemoryStore, parent: Namespace) -> None:
+        if parent.status.phase == "Terminating":
+            return
         try:
-            _ = await store.patch_metadata(
+            _ = await store.patch_status(
                 Namespace,
                 namespace=None,
-                name=ns.metadata.name,
-                mutator=_drop_namespace_finalizer,
+                name=parent.metadata.name,
+                mutator=_mark_terminating,
             )
-        except Exception as e:
-            return Result(ok=False, reason=f"drop finalizer: {e}")
-        return Result(ok=True, reason="cascade complete")
+        except Exception:
+            logger.exception(f"namespace {parent.metadata.name} status mark failed")
 
 
 def _child_to_namespace_ref(
@@ -152,16 +108,6 @@ def _child_to_namespace_ref(
     if ns is None:
         return []
     return [ItemRef(namespace=None, name=ns)]
-
-
-def _add_namespace_finalizer(meta: Metadata) -> None:
-    if NAMESPACE_FINALIZER not in meta.finalizers:
-        meta.finalizers.append(NAMESPACE_FINALIZER)
-
-
-def _drop_namespace_finalizer(meta: Metadata) -> None:
-    if NAMESPACE_FINALIZER in meta.finalizers:
-        meta.finalizers.remove(NAMESPACE_FINALIZER)
 
 
 def _mark_terminating(ns: Namespace) -> None:

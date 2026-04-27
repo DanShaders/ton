@@ -20,10 +20,11 @@ belongs on a separate Protocol so backends can opt in.
 """
 
 from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, Self
 
 from ..resources import Workload, WorkloadStatus
 
@@ -87,27 +88,38 @@ class Runtime(Protocol):
         """
         ...
 
-    def watch(self) -> AsyncIterator[RuntimeEvent | None]:
-        """Push stream of runtime events. Never returns; cancel to stop.
+    def watch(self) -> AbstractAsyncContextManager[AsyncIterator[RuntimeEvent]]:
+        """Async context manager yielding a stream of runtime events.
 
-        **Registration sentinel:** the first yielded value MUST be
-        ``None``, fired synchronously after the runtime has registered
-        the subscriber. Subsequent yields are real :class:`RuntimeEvent`
-        instances. The agent uses the sentinel as a "ready" ack so it
-        knows to block ``start()`` until the runtime side is actually
-        listening — without it, the first ``apply()`` after start could
-        race the watch loop's first scheduling and the corresponding
-        STARTED event would be lost.
+        Use as::
+
+            async with runtime.watch() as events:
+                async for event in events:
+                    ...
+
+        Synchronous registration: by the time ``async with`` enters,
+        the subscriber is on the runtime's broadcast set, so any
+        :meth:`apply` issued after the ``async with`` enters will
+        publish events that this subscription observes. There is no
+        "registration sentinel" — registration is structural via the
+        context manager.
+
+        On overflow (consumer too slow), the iterator raises
+        :exc:`~orchestrator.broadcast.BroadcastOverflow`; the caller
+        should re-list and re-subscribe.
         """
         ...
 
-    async def close(self) -> None:
-        """Tear down: stop every workload, drop subscriptions.
+    def running(self) -> AbstractAsyncContextManager[Self]:
+        """Async context manager — owns the runtime for its lifetime.
 
-        Idempotent. The agent's AsyncExitStack calls this on shutdown.
-        Backends that bind only loop-bound resources (FakeRuntime) can
-        keep this trivial; backends with cgroup/netns ownership clean
-        them up here.
+        ``async with runtime.running():`` enters the runtime; on
+        exit (any path including ``CancelledError``), every workload
+        is stopped and subscriptions are dropped. Backends implement
+        this directly via :func:`contextlib.asynccontextmanager` so
+        cleanup is tied to the resource via ``finally`` rather than
+        a free-floating ``close()`` method whose call site might be
+        forgotten or ordered wrong relative to other cleanup.
         """
         ...
 

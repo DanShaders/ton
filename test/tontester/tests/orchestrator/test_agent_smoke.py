@@ -12,10 +12,11 @@ to know when the agent is done.
 """
 
 import asyncio
-from collections.abc import AsyncIterator
+import contextlib
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import final, override
+from typing import Self, final, override
 
 import pytest
 from orchestrator import (
@@ -34,6 +35,7 @@ from orchestrator import (
     WorkloadSpec,
     WorkloadStatus,
 )
+from orchestrator.broadcast import BroadcastQueue
 from orchestrator.resources import upsert_condition
 from orchestrator.testing import wait_for_asyncio_idle, wait_for_event, wait_for_state
 
@@ -63,20 +65,24 @@ class _HangRuntime(Runtime):
     async def list(self) -> list[WorkloadStatus]:
         return []
 
-    @override
-    def watch(self) -> AsyncIterator[RuntimeEvent | None]:
-        async def _hang() -> AsyncIterator[RuntimeEvent | None]:
-            # Hang forever — never yields the registration sentinel,
-            # so ``Agent._runtime_ready`` stays unset and ``start()``
-            # blocks on it. Perfect setup for a cancellation test.
-            _ = await asyncio.Event().wait()
-            yield None  # unreachable
-
-        return _hang()
+    def __init__(self) -> None:
+        self._silent: BroadcastQueue[RuntimeEvent] = BroadcastQueue("hang-runtime")
 
     @override
-    async def close(self) -> None:
-        return
+    def watch(self):
+        # A real broadcast subscription that never receives anything —
+        # registers immediately (so the agent's runtime-ready event
+        # fires), but the iterator blocks forever in next() since we
+        # never publish.
+        return self._silent.subscribe()
+
+    @override
+    @contextlib.asynccontextmanager
+    async def running(self) -> AsyncGenerator[Self]:
+        try:
+            yield self
+        finally:
+            self._silent.close()
 
 
 def _wl(name: str) -> Workload:
@@ -86,6 +92,233 @@ def _wl(name: str) -> Workload:
             containers=[Container(name="primary", image=HostBinaryImage(path="/bin/true"), env={})],
         ),
     )
+
+
+async def test_burst_of_spec_changes_collapses_to_at_most_two_applies(
+    agent_pair: tuple[Manager, Agent],
+    fake_runtime: FakeRuntime,
+):
+    """Bug round-5 #8 (recast): the agent's reconcile flow should
+    coalesce bursts of spec changes via WorkQueue dedup. Apply v1,
+    v2, v3 in quick succession (synchronously, before the agent
+    reconciles); the runtime should see at most two applies — the
+    one in flight when the burst arrived (if any) plus one for the
+    final spec — and the final spec should be the latest (v3).
+
+    Pre-fix: agent's per-event _desired_loop processes every event
+    serially, so the runtime sees three applies (v1, v2, v3) all in
+    full. Post-fix (Controller pattern): the workqueue dedups, the
+    reconciler reads current state at reconcile time, and v2 never
+    becomes its own apply.
+    """
+    manager, _agent = agent_pair
+
+    # Synchronously fire three applies before yielding so the agent's
+    # workqueue sees all three before it processes any.
+    wl_v1 = _wl("burst")
+    wl_v1.spec.containers[0].env = {"VERSION": "1"}
+    wl_v2 = _wl("burst")
+    wl_v2.spec.containers[0].env = {"VERSION": "2"}
+    wl_v3 = _wl("burst")
+    wl_v3.spec.containers[0].env = {"VERSION": "3"}
+
+    _ = await manager.store.apply(wl_v1)
+    _ = await manager.store.apply(wl_v2)
+    _ = await manager.store.apply(wl_v3)
+
+    # Wait for the agent to reach the v3 reconciled state.
+    _ = await wait_for_event(
+        manager.store,
+        Workload,
+        lambda w: (
+            w.metadata.name == "burst"
+            and w.status.phase == "Running"
+            and any(
+                c.type == "Reconciled" and c.status == "True" and c.observed_generation == 3
+                for c in w.status.conditions
+            )
+        ),
+    )
+
+    burst_applies = [w for w in fake_runtime.applies if w.metadata.name == "burst"]
+    versions_applied = [w.spec.containers[0].env.get("VERSION") for w in burst_applies]
+    assert "3" in versions_applied, (
+        f"runtime never received the final spec; versions applied: {versions_applied}"
+    )
+    # Coalesced: at most 2 applies (initial pre-burst + final). Three
+    # applies means we processed every event without dedup.
+    assert len(burst_applies) <= 2, (
+        f"agent failed to coalesce a burst of spec changes; "
+        f"runtime saw {len(burst_applies)} applies (versions: {versions_applied}) "
+        f"instead of at most 2"
+    )
+
+
+async def test_supersede_cancels_in_flight_apply(
+    agent_pair: tuple[Manager, Agent],
+    fake_runtime: FakeRuntime,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Wires the supervisor pattern's abort-on-cancel capability into
+    the agent's reconcile path: when v2 arrives while v1's
+    ``runtime.apply`` is mid-flight, the workqueue cancels the
+    worker's reconcile, which propagates ``CancelledError`` into
+    ``runtime.apply`` and stops the in-progress v1 spawn — instead
+    of running v1 to completion before kicking off v2.
+
+    Without this wiring the workqueue would just dirty-flag the ref
+    and v2 would have to wait for v1 to finish naturally.
+    """
+    manager, _agent = agent_pair
+
+    apply_in_flight = asyncio.Event()
+    let_apply_finish = asyncio.Event()
+    apply_records: list[tuple[str, str]] = []
+    real_apply = fake_runtime.apply
+
+    async def _slow_apply(workload: Workload) -> WorkloadStatus:
+        version = workload.spec.containers[0].env.get("VERSION", "?")
+        apply_records.append((version, "started"))
+        apply_in_flight.set()
+        try:
+            _ = await let_apply_finish.wait()
+        except asyncio.CancelledError:
+            apply_records.append((version, "cancelled"))
+            raise
+        apply_records.append((version, "finished"))
+        return await real_apply(workload)
+
+    monkeypatch.setattr(fake_runtime, "apply", _slow_apply)
+
+    wl_v1 = _wl("super")
+    wl_v1.spec.containers[0].env = {"VERSION": "1"}
+    _ = await manager.store.apply(wl_v1)
+
+    # Wait for v1's apply to be parked in slow_apply's await.
+    _ = await asyncio.wait_for(apply_in_flight.wait(), timeout=2.0)
+    apply_in_flight.clear()
+
+    # Apply v2 — supersede must cancel v1's in-flight apply so v2
+    # can start without waiting for v1 to complete.
+    wl_v2 = _wl("super")
+    wl_v2.spec.containers[0].env = {"VERSION": "2"}
+    _ = await manager.store.apply(wl_v2)
+
+    # v2's apply must start before we let anything finish — proving
+    # v1 was cancelled mid-flight rather than allowed to complete.
+    _ = await asyncio.wait_for(apply_in_flight.wait(), timeout=2.0)
+
+    # Now v2 is parked. Let it finish.
+    let_apply_finish.set()
+    _ = await wait_for_event(
+        manager.store,
+        Workload,
+        lambda w: (
+            w.metadata.name == "super"
+            and w.status.phase == "Running"
+            and any(
+                c.type == "Reconciled" and c.status == "True" and c.observed_generation == 2
+                for c in w.status.conditions
+            )
+        ),
+    )
+
+    assert ("1", "cancelled") in apply_records, (
+        f"v1's apply was not cancelled mid-flight; records: {apply_records}"
+    )
+    assert ("2", "finished") in apply_records, (
+        f"v2's apply never finished; records: {apply_records}"
+    )
+    # v1 must NOT have finished (we cancelled it before letting it through).
+    assert ("1", "finished") not in apply_records, (
+        f"v1 was allowed to complete despite supersede; records: {apply_records}"
+    )
+
+
+async def test_cascading_supersede_during_unwind(
+    agent_pair: tuple[Manager, Agent],
+    fake_runtime: FakeRuntime,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Cascading supersede: v3 arrives while v2 is still unwinding
+    v1's cancellation. With correct asyncio primitives (TaskGroup +
+    proper Cancel propagation through the supervisor's RAII chain)
+    this should converge cleanly to v3 with no orphan processes,
+    no stuck tasks, no lost cancellation requests.
+
+    Specifically:
+    - v1 applied; mid-spawn (apply blocks).
+    - v2 applied → v1 cancel issued; v1 apply unwinds (raises
+      CancelledError); v2 apply starts; mid-spawn.
+    - v3 applied immediately after, before v2's cancel-of-v1 has
+      finished propagating through the runtime → v2 cancel issued;
+      v2 unwinds; v3 starts.
+    - We let v3 finish.
+
+    Asserts: only v3 finished; v1 and v2 both cancelled; the agent
+    converged to v3's reconciled state without hanging.
+    """
+    manager, _agent = agent_pair
+
+    apply_in_flight = asyncio.Event()
+    let_apply_finish = asyncio.Event()
+    apply_records: list[tuple[str, str]] = []
+    real_apply = fake_runtime.apply
+
+    async def _slow_apply(workload: Workload) -> WorkloadStatus:
+        version = workload.spec.containers[0].env.get("VERSION", "?")
+        apply_records.append((version, "started"))
+        apply_in_flight.set()
+        try:
+            _ = await let_apply_finish.wait()
+        except asyncio.CancelledError:
+            apply_records.append((version, "cancelled"))
+            raise
+        apply_records.append((version, "finished"))
+        return await real_apply(workload)
+
+    monkeypatch.setattr(fake_runtime, "apply", _slow_apply)
+
+    def _versioned(v: str) -> Workload:
+        wl = _wl("cascade")
+        wl.spec.containers[0].env = {"VERSION": v}
+        return wl
+
+    # v1: apply, wait for it to be parked.
+    _ = await manager.store.apply(_versioned("1"))
+    _ = await asyncio.wait_for(apply_in_flight.wait(), timeout=2.0)
+    apply_in_flight.clear()
+
+    # v2: apply, wait for it to take over (v1 must have been cancelled).
+    _ = await manager.store.apply(_versioned("2"))
+    _ = await asyncio.wait_for(apply_in_flight.wait(), timeout=2.0)
+    apply_in_flight.clear()
+
+    # v3: apply, wait for it to take over. This is the cascade — v3
+    # supersedes v2 which is itself still unwinding/just-started.
+    _ = await manager.store.apply(_versioned("3"))
+    _ = await asyncio.wait_for(apply_in_flight.wait(), timeout=2.0)
+
+    # Let v3 finish.
+    let_apply_finish.set()
+    _ = await wait_for_event(
+        manager.store,
+        Workload,
+        lambda w: (
+            w.metadata.name == "cascade"
+            and w.status.phase == "Running"
+            and any(
+                c.type == "Reconciled" and c.status == "True" and c.observed_generation == 3
+                for c in w.status.conditions
+            )
+        ),
+    )
+
+    assert ("1", "cancelled") in apply_records, f"v1 not cancelled; {apply_records}"
+    assert ("2", "cancelled") in apply_records, f"v2 not cancelled; {apply_records}"
+    assert ("3", "finished") in apply_records, f"v3 not finished; {apply_records}"
+    finished = [v for v, e in apply_records if e == "finished"]
+    assert finished == ["3"], f"only v3 should have finished; finished applies: {finished}"
 
 
 async def test_apply_drives_runtime_and_status(
@@ -243,26 +476,31 @@ async def test_runtime_event_loop_does_not_falsely_mark_reconciled(
     assert reconciled[0].reason == "ApplyOk"
 
 
-async def test_agent_stop_cancels_loops_before_closing_runtime(tmp_path: Path):
-    """Bug (audit round 4): ``Agent.start`` pushes ``_cancel_tasks``
-    first and ``_safe_close_runtime`` second onto the bootstrap stack.
-    LIFO unwind on stop() therefore runs ``close()`` BEFORE cancelling
-    the desired/runtime loops — the opposite of what the README
-    documents ("stop runners first, then close the store/runtime").
+async def test_agent_running_cancels_loops_before_closing_runtime(tmp_path: Path):
+    """Bug 5 (audit round 4) — original shape: ``Agent.start`` pushed
+    ``_cancel_tasks`` and ``_safe_close_runtime`` as free-floating
+    callbacks; the wrong push order made LIFO unwind close the
+    runtime *before* cancelling the loops. Spurious "ApplyFailed"
+    conditions then appeared during graceful shutdown.
 
-    Pin the order behaviorally: when ``stop()`` calls ``close()``, the
-    desired/runtime loop tasks must already be done (cancelled). If
-    close runs first, those tasks will still be active when close
-    starts, surfacing as spurious apply-on-closed-runtime errors and
-    "ApplyFailed" status writes in real workloads.
+    The fix is structural: ``Agent.running()`` enters the runtime via
+    AsyncExitStack first, then enters a ``TaskGroup`` for the loops.
+    LIFO of ``async with`` exits guarantees the TaskGroup cancels
+    the loops first, then the runtime closes. Push order can no
+    longer be wrong because there is no push order — the cleanups
+    are nested context managers, not separately-registered callbacks.
+
+    Pin the order behaviorally: when the runtime's close branch
+    runs, the loop tasks must already be done.
     """
-    close_started = asyncio.Event()
-    close_can_finish = asyncio.Event()
-    tasks_done_at_close: list[bool] = []
-    captured_loop_tasks: list[asyncio.Task[None]] = []
+    close_observed_loops_done: list[bool] = []
+    captured_loop_tasks: list[asyncio.Task[object]] = []
 
     @final
-    class _GatedCloseRuntime(Runtime):
+    class _OrderProbingRuntime(Runtime):
+        def __init__(self) -> None:
+            self._silent: BroadcastQueue[RuntimeEvent] = BroadcastQueue("order-probe")
+
         @override
         async def apply(self, workload: Workload) -> WorkloadStatus:
             return WorkloadStatus()
@@ -280,67 +518,61 @@ async def test_agent_stop_cancels_loops_before_closing_runtime(tmp_path: Path):
             return []
 
         @override
-        def watch(self) -> AsyncIterator[RuntimeEvent | None]:
-            async def _gen() -> AsyncIterator[RuntimeEvent | None]:
-                yield None
-                _ = await asyncio.Event().wait()
-
-            return _gen()
+        def watch(self):
+            return self._silent.subscribe()
 
         @override
-        async def close(self) -> None:
-            close_started.set()
-            tasks_done_at_close.append(all(t.done() for t in captured_loop_tasks))
-            _ = await close_can_finish.wait()
+        @contextlib.asynccontextmanager
+        async def running(self) -> AsyncGenerator[Self]:
+            try:
+                yield self
+            finally:
+                close_observed_loops_done.append(all(t.done() for t in captured_loop_tasks))
+                self._silent.close()
 
-    rt = _GatedCloseRuntime()
+    rt = _OrderProbingRuntime()
     store = InMemoryStore()
     store.register_kind(Workload)
     agent = Agent(rt, store=store, state_dir=tmp_path / "agent")
-    await agent.start()
-    captured_loop_tasks.extend(agent._tasks)  # pyright: ignore[reportPrivateUsage]
-    assert captured_loop_tasks, "agent should have spawned its loop tasks"
+    async with agent.running():
+        captured_loop_tasks.extend(
+            t for t in asyncio.all_tasks() if t.get_name().startswith("agent.")
+        )
+        assert captured_loop_tasks, "agent should have spawned its loop tasks"
 
-    stop_task = asyncio.create_task(agent.stop(), name="t.agent.stop")
-    _ = await asyncio.wait_for(close_started.wait(), timeout=2.0)
-    close_can_finish.set()
-    await stop_task
-
-    assert tasks_done_at_close == [True], (
-        f"runtime.close() ran while loop tasks were still active ({tasks_done_at_close=}); "
-        "Agent.start pushed cleanups in wrong order — fix is to push "
-        "_safe_close_runtime first, _cancel_tasks second so LIFO yields "
-        "cancel-then-close per README"
+    assert close_observed_loops_done == [True], (
+        f"runtime.close branch saw active loop tasks ({close_observed_loops_done=}); "
+        "TaskGroup must cancel loops before runtime exits its context"
     )
 
 
-async def test_agent_start_cancellation_cleans_up_tasks(tmp_path: Path):
-    """Round-3 finding: ``Agent.start`` only catches ``Exception``,
-    not ``BaseException`` / ``CancelledError``. A cancellation while
-    awaiting the ready ack would leave the desired loop and runtime
-    event loop tasks running, with the runtime unclosed — Manager's
-    stack-rollback can't reach them because Agent.start hadn't
-    completed and ``_safe_stop`` wasn't pushed.
-
-    Trigger by giving the agent a runtime whose ``watch()`` never
-    yields, so the ready ack waits forever; cancel start mid-flight.
+async def test_agent_running_cancellation_cleans_up_tasks(tmp_path: Path):
+    """Round-3 finding (recast for the new contract): a cancellation
+    during ``async with agent.running():`` (e.g. while awaiting the
+    ready acks) must leave no orphan tasks. With the AsyncExitStack
+    + TaskGroup design the rollback is automatic — TaskGroup is
+    inside the stack and its ``__aexit__`` cancels every spawned
+    task — but pin it as a regression test against future
+    refactors.
     """
     runtime = _HangRuntime()
     store = InMemoryStore()
     store.register_kind(Workload)
     agent = Agent(runtime, store=store, state_dir=tmp_path / "agent")
 
-    start_task = asyncio.create_task(agent.start(), name="t.agent.start")
-    # Let start spawn its bg tasks and reach the ready.wait.
+    async def _enter_then_yield() -> None:
+        async with agent.running():
+            _ = await asyncio.Event().wait()
+
+    enter_task = asyncio.create_task(_enter_then_yield(), name="t.agent.enter")
+    # Let running() spawn its TaskGroup children and reach the ready.wait.
     await wait_for_asyncio_idle()
-    created = list(agent._tasks)  # pyright: ignore[reportPrivateUsage]
-    assert created, "expected start to have spawned bg tasks"
+    spawned_tasks = [t for t in asyncio.all_tasks() if t.get_name().startswith("agent.")]
+    assert spawned_tasks, "agent should have spawned its loop tasks"
 
-    _ = start_task.cancel()
+    _ = enter_task.cancel()
     with pytest.raises((asyncio.CancelledError, Exception)):
-        _ = await start_task
+        await enter_task
 
-    # Every task spawned during start must be done — otherwise it's
-    # an orphan that nobody can stop.
-    for t in created:
+    for t in spawned_tasks:
         assert t.done(), f"agent task {t.get_name()} leaked through cancellation"

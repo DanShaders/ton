@@ -98,9 +98,7 @@ async def wait_for_asyncio_idle(
     stable = 0
     while loop.time() < deadline:
         await asyncio.sleep(0)
-        pending = frozenset(
-            t for t in asyncio.all_tasks() if t is not current and not t.done()
-        )
+        pending = frozenset(t for t in asyncio.all_tasks() if t is not current and not t.done())
         if pending == last:
             stable += 1
             if stable >= stable_iterations:
@@ -109,8 +107,10 @@ async def wait_for_asyncio_idle(
             stable = 0
             last = pending
     raise TimeoutError(
-        f"asyncio loop did not become idle within {timeout}s "
-        f"(last pending: {sorted(t.get_name() for t in last)})"
+        (
+            f"asyncio loop did not become idle within {timeout}s "
+            f"(last pending: {sorted(t.get_name() for t in last)})"
+        )
     )
 
 

@@ -70,9 +70,7 @@ async def test_workloadset_creates_and_scales(tmp_path: Path, fake_runtime: Fake
     manager.register_kind(Workload)
     manager.add_controller(WorkloadSetReconciler())
     agent = Agent(fake_runtime, store=manager.store, state_dir=tmp_path / "agent")
-    await manager.start()
-    await agent.start()
-    try:
+    async with manager.running(), agent.running():
         _ = await manager.store.apply(_set("validators", 3))
         await _wait_for_replicas(manager, "validators", 3)
         names = sorted(w.metadata.name for w in manager.store.list(Workload, namespace="default"))
@@ -85,9 +83,6 @@ async def test_workloadset_creates_and_scales(tmp_path: Path, fake_runtime: Fake
         # Scale down.
         _ = await manager.store.apply(_set("validators", 2))
         await _wait_for_replicas(manager, "validators", 2)
-    finally:
-        await agent.stop()
-        await manager.shutdown()
 
 
 async def test_workloadset_direct_delete_does_not_orphan_children(
@@ -114,9 +109,7 @@ async def test_workloadset_direct_delete_does_not_orphan_children(
     manager.register_kind(Workload)
     manager.add_controller(WorkloadSetReconciler())
     agent = Agent(fake_runtime, store=manager.store, state_dir=tmp_path / "agent")
-    await manager.start()
-    await agent.start()
-    try:
+    async with manager.running(), agent.running():
         # Create with 3 replicas, scale down to 1 (so v-1, v-2 are about
         # to become "stranded" in the reconciler's view), then delete the
         # set before scale-down has a chance to converge.
@@ -131,9 +124,6 @@ async def test_workloadset_direct_delete_does_not_orphan_children(
         # was hard-deleted before the reconciler enumerated them, and
         # subsequent reconciles bail with "set gone".
         await _wait_for_replicas(manager, "v", 0)
-    finally:
-        await agent.stop()
-        await manager.shutdown()
 
 
 async def test_workloadset_owner_refs_cascade(tmp_path: Path, fake_runtime: FakeRuntime):
@@ -142,9 +132,7 @@ async def test_workloadset_owner_refs_cascade(tmp_path: Path, fake_runtime: Fake
     manager.register_kind(Workload)
     manager.add_controller(WorkloadSetReconciler())
     agent = Agent(fake_runtime, store=manager.store, state_dir=tmp_path / "agent")
-    await manager.start()
-    await agent.start()
-    try:
+    async with manager.running(), agent.running():
         _ = await manager.store.apply(_set("v", 2))
         await _wait_for_replicas(manager, "v", 2)
 
@@ -154,6 +142,3 @@ async def test_workloadset_owner_refs_cascade(tmp_path: Path, fake_runtime: Fake
             assert any(
                 ref.kind == "WorkloadSet" and ref.controller for ref in c.metadata.owner_refs
             )
-    finally:
-        await agent.stop()
-        await manager.shutdown()

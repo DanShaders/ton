@@ -23,6 +23,7 @@ from orchestrator import (
     Workload,
     WorkloadSpec,
 )
+from orchestrator.testing import wait_for_asyncio_idle
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("virtual_clock")]
 
@@ -52,7 +53,7 @@ async def test_subscribe_receives_add_modify_delete(store: InMemoryStore):
                 return
 
     task = asyncio.create_task(_consume())
-    await asyncio.sleep(0)  # let subscribe register
+    await wait_for_asyncio_idle()
 
     _ = await store.apply(_wl("a"))
     _ = await store.apply(_wl("a", env="v2"))
@@ -80,7 +81,7 @@ async def test_two_subscribers_each_get_every_event(store: InMemoryStore):
 
     t_a = asyncio.create_task(_watch(a_seen))
     t_b = asyncio.create_task(_watch(b_seen))
-    await asyncio.sleep(0)
+    await wait_for_asyncio_idle()
 
     _ = await store.apply(_wl("x"))
     _ = await store.apply(_wl("x", env="v2"))
@@ -106,28 +107,6 @@ async def test_subscription_close_unregisters_from_bus(store: InMemoryStore):
     assert state.bus.subscriber_count == 0
 
 
-async def test_subscription_double_iteration_raises(store: InMemoryStore):
-    """Calling ``async for`` on the same Subscription twice silently
-    yields nothing on the second call (the bus token is single-use).
-    Surface this as an explicit error so callers can't accidentally
-    drop events."""
-    async with store.subscription(Workload) as sub:
-        # Run one iteration step via anext, advancing the internal
-        # generator past the single-use guard. We need an event to
-        # trigger anext to actually return.
-        _ = await store.apply(_wl("a"))
-        gen1 = sub.__aiter__()
-        _ = await anext(gen1)  # advances past the guard, sets _iterated=True
-        await gen1.aclose()  # release the first iterator cleanly
-
-        # A second async iteration must raise — the first one consumed
-        # the bus token; the second would silently yield nothing.
-        gen2 = sub.__aiter__()
-        with pytest.raises(RuntimeError, match="single-use"):
-            _ = await anext(gen2)
-        await gen2.aclose()
-
-
 async def test_overflow_raises_watch_overflow(store: InMemoryStore):
     """A consumer that can't keep up gets booted with WatchOverflow.
 
@@ -145,7 +124,7 @@ async def test_overflow_raises_watch_overflow(store: InMemoryStore):
             await asyncio.sleep(0)
 
     task = asyncio.create_task(_consume())
-    await asyncio.sleep(0)  # let subscribe register
+    await wait_for_asyncio_idle()
 
     # Synchronously fire enough events to overrun the queue.
     for i in range(10):

@@ -7,6 +7,7 @@ from typing import final, override
 import pytest
 from orchestrator import WorkQueue
 from orchestrator.control.workqueue import Clock, QueueClosed
+from orchestrator.testing import wait_for_asyncio_idle
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("virtual_clock")]
 
@@ -62,6 +63,48 @@ async def test_failure_backoff():
     assert abs(item_due - 0.01) < 0.001
 
 
+async def test_add_after_during_in_flight_preserves_deadline():
+    """Round-5 #6: ``WorkQueue.add_after(ref, delay)`` while ``ref``
+    is in-flight currently sets a flag and forgets the delay; on
+    ``done()`` the dirty re-queue uses ``now()`` regardless. Any
+    controller that returned ``Result(ok=True, requeue_after_s=N)``
+    intending to debounce loses that delay if a watch event arrives
+    mid-flight.
+
+    Pin the contract: the requested deadline is preserved; the heap
+    entry's deadline is at least the requested time.
+    """
+    clock = _ManualClock()
+    q: WorkQueue[str] = WorkQueue(clock=clock)
+    q.add("a")
+    item = await q.get()  # in-flight
+    q.add_after("a", delay_s=10.0)  # request 10s debounce
+    q.done(item, success=True)
+    assert q.pending_count() == 1
+    assert q._heap[0].deadline >= 10.0, (
+        f"add_after's deadline was lost; heap deadline is {q._heap[0].deadline}, expected >= 10.0"
+    )
+
+
+async def test_add_during_in_flight_does_not_overwrite_later_deadline():
+    """If both ``add(ref)`` (deadline=now) and ``add_after(ref, 10s)``
+    arrive while ``ref`` is in-flight, the *earlier* deadline wins
+    — the urgent signal trumps the debounce. Tests that the
+    deadline-tracking dict uses ``min()``.
+    """
+    clock = _ManualClock()
+    q: WorkQueue[str] = WorkQueue(clock=clock)
+    q.add("a")
+    item = await q.get()
+    q.add_after("a", delay_s=10.0)  # debounce
+    q.add("a")  # urgent — should win
+    q.done(item, success=True)
+    assert q.pending_count() == 1
+    assert q._heap[0].deadline <= 0.001, (
+        f"urgent add() didn't trump add_after's deadline; heap deadline is {q._heap[0].deadline}"
+    )
+
+
 async def test_re_add_during_processing_requeues_after_done():
     """Add(ref) while ref is in-flight: requeues after done."""
     q: WorkQueue[str] = WorkQueue()
@@ -82,7 +125,7 @@ async def test_close_wakes_pending_get():
         return await q.get()
 
     task = asyncio.create_task(_consumer())
-    await asyncio.sleep(0)
+    await wait_for_asyncio_idle()
     q.close()
     with pytest.raises(QueueClosed):
         _ = await task
@@ -141,7 +184,10 @@ async def test_get_does_not_busy_spin_on_future_deadline_item():
         return await q.get()
 
     task = asyncio.create_task(_consume())
-    # Give the loop ample chances to schedule the get() task.
+    # Explicit ``sleep(0)`` count rather than ``wait_for_asyncio_idle``
+    # because the bug under test is exactly "loop never goes idle":
+    # the helper would itself hang waiting for stability that never
+    # happens under VirtualClock.
     for _ in range(50):
         await asyncio.sleep(0)
 

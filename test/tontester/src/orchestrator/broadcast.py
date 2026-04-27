@@ -1,0 +1,170 @@
+"""Bounded fan-out broadcast queue.
+
+One implementation of "publish to N independent subscribers, drop the
+slow ones." Used by the store's :class:`WatchBus` and by every
+:class:`Runtime` backend's event stream. Three correct things in one
+place beats three half-correct hand-rolled fan-outs.
+
+**Backpressure rule.** Each subscriber gets a bounded
+:class:`asyncio.Queue`. ``publish`` is synchronous and never waits;
+if a subscriber's queue is full, the subscriber is dropped from the
+broadcast set and its iterator surfaces :exc:`BroadcastOverflow` on
+the next iteration step. Compare k8s' "410 Gone": a slow client
+cannot stall the publisher, but it gets an explicit error so it
+knows to re-list and re-subscribe.
+
+**Subscription is synchronous.** ``async with broadcast.subscribe()
+as events`` registers immediately; events published after the
+``__aenter__`` returns are observed by ``async for event in events``.
+There is no "registration sentinel" needed — the act of being inside
+the ``async with`` block *is* the registration.
+
+**Cleanup is structural.** The async-with's ``__aexit__`` removes the
+subscription from the broadcast set even if iteration was never
+started. There is no ``unregister`` call to forget.
+"""
+
+import asyncio
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Generic, TypeVar, final
+
+
+class BroadcastOverflow(RuntimeError):
+    """A subscriber's queue filled before it caught up.
+
+    The subscriber is detached from the broadcast as soon as
+    overflow is detected; further events will not reach this
+    subscription. The caller should drop the iterator and start a
+    fresh subscription if it still wants to follow the stream.
+    """
+
+    def __init__(self, name: str):
+        super().__init__(f"broadcast overflow on {name}; subscriber dropped")
+        self.name: str = name
+
+
+_T = TypeVar("_T")
+
+
+@final
+class _BroadcastSub(Generic[_T]):
+    """One subscriber's per-instance queue + overflow flag."""
+
+    def __init__(self, *, queue_size: int):
+        self._queue: asyncio.Queue[_T | None] = asyncio.Queue(maxsize=queue_size)
+        self._overflowed: bool = False
+        self._closed: bool = False
+
+    @property
+    def overflowed(self) -> bool:
+        return self._overflowed
+
+    def offer(self, item: _T) -> bool:
+        """Try to enqueue ``item``. Return False if the queue is full
+        (subscriber is now overflowed and should be dropped)."""
+        if self._closed or self._overflowed:
+            return False
+        try:
+            self._queue.put_nowait(item)
+            return True
+        except asyncio.QueueFull:
+            self._overflowed = True
+            # Wake the iterator with a sentinel so it raises promptly.
+            try:
+                self._queue.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
+            return False
+
+    def close(self) -> None:
+        """Push a None sentinel and mark closed. Idempotent."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._queue.put_nowait(None)
+        except asyncio.QueueFull:
+            pass
+
+    async def next(self) -> _T | None:
+        return await self._queue.get()
+
+
+@final
+class BroadcastQueue(Generic[_T]):
+    """Per-publisher fan-out bus.
+
+    Construct one per distinct stream. ``publish`` fans out
+    synchronously to every active subscriber; ``subscribe`` is an
+    async context manager that yields an ``AsyncIterator[_T]``.
+    """
+
+    def __init__(self, name: str, *, queue_size: int = 256):
+        self._name: str = name
+        self._queue_size: int = queue_size
+        self._subs: set[_BroadcastSub[_T]] = set()
+        self._closed: bool = False
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def subscriber_count(self) -> int:
+        return len(self._subs)
+
+    def publish(self, item: _T) -> None:
+        """Fan out to every subscriber. Synchronous, never awaits.
+
+        Subscribers whose queues are full are dropped here — their
+        iterators will raise :exc:`BroadcastOverflow` on the next
+        poll.
+        """
+        dead: list[_BroadcastSub[_T]] = []
+        for sub in self._subs:
+            if not sub.offer(item):
+                dead.append(sub)
+        for sub in dead:
+            self._subs.discard(sub)
+
+    def close(self) -> None:
+        """Tell every subscriber to stop. Idempotent."""
+        if self._closed:
+            return
+        self._closed = True
+        for sub in list(self._subs):
+            sub.close()
+        self._subs.clear()
+
+    @asynccontextmanager
+    async def subscribe(self) -> AsyncGenerator[AsyncIterator[_T]]:
+        """Register a subscriber for the lifetime of the ``async with``.
+
+        Synchronous registration: events published after this returns
+        are observed. The yielded iterator stops cleanly on
+        :meth:`close` and raises :exc:`BroadcastOverflow` if this
+        subscriber falls behind.
+        """
+        sub: _BroadcastSub[_T] = _BroadcastSub(queue_size=self._queue_size)
+        self._subs.add(sub)
+        try:
+            yield self._iter(sub)
+        finally:
+            self._subs.discard(sub)
+            sub.close()
+
+    async def _iter(self, sub: _BroadcastSub[_T]) -> AsyncIterator[_T]:
+        while True:
+            # Overflow at the top of the loop: under sustained pressure
+            # the queue stays full so the bus's None push fails too.
+            # Without this check the consumer blocks in next() forever
+            # even though the subscription is already broken.
+            if sub.overflowed:
+                raise BroadcastOverflow(self._name)
+            item = await sub.next()
+            if item is None:
+                if sub.overflowed:
+                    raise BroadcastOverflow(self._name)
+                return
+            yield item

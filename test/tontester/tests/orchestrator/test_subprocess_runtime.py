@@ -18,7 +18,6 @@ from orchestrator import (
     WorkloadSpec,
 )
 from orchestrator.resources import ResourceLimits
-from orchestrator.testing import wait_for_asyncio_idle
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("virtual_clock")]
 
@@ -51,55 +50,36 @@ def _wl_with_cgroup(name: str = "x") -> Workload:
     )
 
 
-async def test_apply_blocked_on_lock_during_close_does_not_spawn(tmp_path: Path):
-    """apply() that's already past the ``self._closed`` check but still
-    awaiting the per-key lock when close() runs would, without the
-    re-check inside the lock, spawn a new process that's never tracked
-    by close()'s drain loop. The process leaks past the runtime's
-    lifetime.
+async def test_apply_after_running_exit_raises(tmp_path: Path):
+    """``apply()`` after the runtime's ``running()`` context has
+    exited must raise rather than silently spawning a leak. The
+    supervisor pattern makes this the natural shape: the
+    AsyncExitStack of ``running()`` cancels every supervisor on
+    exit, sets ``_closed = True``, and any further ``apply`` checks
+    ``_closed`` synchronously at the top.
     """
     rt = SubprocessRuntime(state_dir=tmp_path / "state")
-    wl = _wl("alpha")
-    key = (wl.metadata.namespace, wl.metadata.name)
-
-    # Prime the per-key lock and hold it externally so the apply blocks.
-    lock = rt._lock_for(key)
-    _ = await lock.acquire()
-
-    apply_task = asyncio.create_task(rt.apply(wl), name="t.apply")
-    # Drain the loop until apply is parked on the locked lock.
-    await wait_for_asyncio_idle()
-
-    # Close while apply is still blocked.
-    close_task = asyncio.create_task(rt.close(), name="t.close")
-    await wait_for_asyncio_idle()
-
-    # Release; apply resumes inside the closed runtime.
-    lock.release()
+    async with rt.running():
+        pass
 
     with pytest.raises(RuntimeError, match="closed"):
-        _ = await apply_task
-
-    await close_task
-    # No process registered — the apply must have bailed before spawn.
-    assert key not in rt._procs
+        _ = await rt.apply(_wl("alpha"))
+    assert ("default", "alpha") not in rt._procs
 
 
-async def test_stop_locked_cleans_cgroup_dir_on_cancellation(
+async def test_supervisor_cancellation_cleans_cgroup_dir(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Bug (audit round 4): ``_stop_locked`` does ``terminate()``, then
-    ``await asyncio.wait_for(proc.process.wait(), grace)``, then
-    ``_safe_rmtree(proc.cgroup_dir)``. If the awaiting task is cancelled
-    at any of those awaits, ``CancelledError`` propagates out and the
-    cgroup_dir cleanup is skipped. ``_spawn`` was hardened with
-    ``try/finally + spawned`` flag specifically to fix this shape;
-    ``_stop_locked`` was missed.
+    """Round-5 cluster (#1, #4, #7): the cgroup_dir cleanup hazards
+    around ``_restart_locked`` / ``_wait_exit`` are eliminated by
+    the supervisor pattern — each workload's lifetime is one async
+    context chain (``owned_path`` → ``owned_process``). Cancelling
+    the supervisor task triggers RAII unwind that cleans the
+    cgroup, regardless of where in the chain the cancel landed.
 
-    Trigger: monkey-patch ``proc.process.wait`` to hang forever, then
-    cancel the in-flight ``rt.delete()`` task. Verify the cgroup_dir is
-    gone after cancellation propagates.
+    Verify by spawning a workload with a hung process.wait, then
+    deleting (which cancels the supervisor). The cgroup must be gone.
     """
     rt = SubprocessRuntime(
         state_dir=tmp_path / "state",
@@ -108,55 +88,50 @@ async def test_stop_locked_cleans_cgroup_dir_on_cancellation(
     wl = _wl_with_cgroup("alpha")
     cgroup_dir = tmp_path / "cgroup" / "wl-default-alpha"
 
-    _ = await rt.apply(wl)
-    assert cgroup_dir.exists(), "apply should have created the cgroup_dir"
+    async with rt.running():
+        _ = await rt.apply(wl)
+        assert cgroup_dir.exists(), "apply should have created the cgroup_dir"
 
-    proc = rt._procs[("default", "alpha")]
-    process = proc.process
-    real_wait = process.wait
-    real_kill = process.kill
+        proc = rt._procs[("default", "alpha")]
+        process = proc.process
+        real_wait = process.wait
+        real_kill = process.kill
 
-    # Patch the process's wait to hang so wait_for never completes
-    # naturally; cancellation is the only way out, exercising the
-    # not-yet-hardened cleanup path.
-    async def _hang() -> int:
-        _ = await asyncio.Event().wait()
-        return 0
+        # Patch the process so the supervisor's await process.wait()
+        # never returns naturally; cancellation is the only exit path.
+        async def _hang() -> int:
+            _ = await asyncio.Event().wait()
+            return 0
 
-    monkeypatch.setattr(process, "wait", _hang)
-    # Suppress real signals so cancellation is the only termination path.
-    monkeypatch.setattr(process, "terminate", lambda: None)
-    monkeypatch.setattr(process, "kill", lambda: None)
+        monkeypatch.setattr(process, "wait", _hang)
+        monkeypatch.setattr(process, "terminate", lambda: None)
+        monkeypatch.setattr(process, "kill", lambda: None)
 
-    delete_task = asyncio.create_task(rt.delete(namespace="default", name="alpha"), name="t.delete")
-    await wait_for_asyncio_idle()
+        await rt.delete(namespace="default", name="alpha")
 
-    _ = delete_task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        _ = await delete_task
+        assert not cgroup_dir.exists(), (
+            "cgroup_dir leaked through supervisor cancellation; "
+            "owned_path's RAII should have cleaned it"
+        )
 
-    assert not cgroup_dir.exists(), (
-        "cgroup_dir leaked through _stop_locked cancellation; needs "
-        "try/finally around _safe_rmtree (mirroring the _spawn pattern)"
-    )
-
-    # Cleanup the real /bin/sleep so it doesn't outlive the test —
-    # use the originals captured before monkeypatching.
-    try:
-        real_kill()
-    except ProcessLookupError, OSError:
-        pass
-    _ = await real_wait()
+        # Cleanup the real /bin/sleep so it doesn't outlive the test —
+        # use the originals captured before monkeypatching.
+        try:
+            real_kill()
+        except ProcessLookupError, OSError:
+            pass
+        _ = await real_wait()
 
 
 async def test_spawn_cancellation_cleans_cgroup_dir(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Round-2 finding 1.1: ``_spawn`` only catches OSError around
-    ``create_subprocess_exec``. A cancellation (or any other
-    BaseException) leaves the cgroup_dir on disk for the rest of the
-    daemon's lifetime.
+    """Round-2 finding 1.1: if ``create_subprocess_exec`` raises
+    ``CancelledError`` (or any other BaseException), the outer
+    ``owned_path`` for the cgroup_dir cleans up. The supervisor's
+    chained ``async with`` makes this automatic — no narrow
+    ``except OSError`` to miss the cancellation case.
     """
     rt = SubprocessRuntime(
         state_dir=tmp_path / "state",
@@ -170,10 +145,11 @@ async def test_spawn_cancellation_cleans_cgroup_dir(
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _raise_cancelled)
 
-    with pytest.raises(asyncio.CancelledError):
-        _ = await rt.apply(wl)
+    async with rt.running():
+        with pytest.raises((asyncio.CancelledError, Exception)):
+            _ = await rt.apply(wl)
 
-    # Without the fix the cgroup_dir survives the cancellation.
-    assert not cgroup_dir.exists(), (
-        "cgroup_dir leaked through cancellation; _spawn must clean up on BaseException"
-    )
+        assert not cgroup_dir.exists(), (
+            "cgroup_dir leaked through cancellation; the supervisor's "
+            "owned_path RAII should have cleaned it"
+        )

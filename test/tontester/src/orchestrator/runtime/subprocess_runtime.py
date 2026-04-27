@@ -23,25 +23,34 @@ What it does *not* do:
 - ``network=isolated`` → silently treated as ``host`` (the agent
   reconciler can warn).
 
-Concurrency: every public method is safe to call concurrently against
-*different* workloads. Concurrent calls for the *same* workload are
-serialized via a per-workload lock — apply/delete races could otherwise
-spawn-then-leak or kill-then-respawn.
+**Architecture: one supervisor task per workload.** Each call to
+``apply`` either reuses an existing supervisor (spec unchanged) or
+cancels the old one and spawns a new one. The supervisor's body is a
+chain of ``async with owned_path(...) as cgroup, owned_process(...)
+as process: await process.wait()`` — RAII handles cleanup on every
+exit path (normal exit, cancellation, exception). On exit it
+publishes EXITED and removes itself from the registry. There is no
+separate "reaper" task to forget to spawn, no per-key lock to leak,
+and no two-phase shutdown — cancelling the supervisor *is* the
+cleanup signal.
 """
 
 import asyncio
-import contextlib
 import logging
 import os
 import shutil
 import signal
 import socket
-from collections.abc import AsyncIterator, Coroutine
-from dataclasses import dataclass
+import time
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import final, override
+from typing import Self, final, override
 
+from ..broadcast import BroadcastQueue
+from ..lifecycle import OwnedPath, owned_path, owned_process
 from ..resources import (
     Container,
     ContainerStatus,
@@ -60,15 +69,25 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+type _Key = tuple[str | None, str]
+
+
 @dataclass
-class _WorkloadProc:
-    """One supervised process per workload."""
+class _ProcView:
+    """Snapshot the supervisor exposes to ``get`` / ``list`` /
+    ``apply`` for the no-op-on-equivalent-spec check.
+
+    Mutated only by the supervisor task that owns this entry; read
+    by other coroutines via Python's atomic dict access. Fields are
+    read-only after the supervisor publishes them.
+    """
 
     workload: Workload
     process: asyncio.subprocess.Process
     started_at: datetime
-    cgroup_dir: Path | None = None
+    cgroup_dir: Path | None
     restart_count: int = 0
+    initial_status: WorkloadStatus | None = field(default=None)
 
 
 @final
@@ -91,39 +110,17 @@ class SubprocessRuntime(Runtime):
         self._state_dir: Path = state_dir
         self._cgroup_root: Path | None = cgroup_root
         self._host_label: str = host_label
-        self._procs: dict[tuple[str | None, str], _WorkloadProc] = {}
-        # One lock per workload key, created lazily by ``_lock_for``.
-        # Acquiring this lock is the prerequisite for *any* mutation of
-        # ``_procs[key]`` — apply, delete, restart. The previous design
-        # locked on ``existing._proc.lock`` after a dict lookup, which
-        # left a window between "delete pops nothing because apply
-        # hasn't inserted yet" and "apply inserts post-spawn". Now both
-        # paths serialize on the same per-key lock from the start.
-        # Locks accumulate; we never remove entries because removing
-        # while another task is awaiting the same key would race.
-        # Memory cost: one Lock per workload name ever seen. Acceptable.
-        self._key_locks: dict[tuple[str | None, str], asyncio.Lock] = {}
-        # One queue per subscriber. We don't expect many — the agent
-        # holds one — but the same fan-out shape lets tests subscribe
-        # without monopolising the channel.
-        self._subs: set[asyncio.Queue[RuntimeEvent | None]] = set()
-        # Background tasks (probe loops, wait-exit reapers) live here so
-        # they're not GC'd from under us. The done callback removes them
-        # on completion to keep the set bounded.
-        self._bg_tasks: set[asyncio.Task[None]] = set()
+        # Snapshot of running supervisors' state for read-side ops.
+        self._procs: dict[_Key, _ProcView] = {}
+        # Supervisor tasks. Apply replaces, delete cancels, _close
+        # cancels all. Tasks remove themselves from this dict on exit
+        # (via done callback).
+        self._supervisors: dict[_Key, asyncio.Task[None]] = {}
+        # Single fan-out bus for runtime events. ``BroadcastQueue``
+        # owns the per-subscriber queues + overflow handling — same
+        # primitive WatchBus wraps.
+        self._events: BroadcastQueue[RuntimeEvent] = BroadcastQueue("subprocess-runtime")
         self._closed: bool = False
-
-    def _lock_for(self, key: tuple[str | None, str]) -> asyncio.Lock:
-        """Get-or-create the per-key serialization lock.
-
-        Synchronous: dict access in single-threaded asyncio is atomic,
-        so no further lock is needed around this lookup.
-        """
-        lock = self._key_locks.get(key)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._key_locks[key] = lock
-        return lock
 
     # ---- Runtime API ---------------------------------------------------
 
@@ -131,68 +128,18 @@ class SubprocessRuntime(Runtime):
     async def apply(self, workload: Workload) -> WorkloadStatus:
         if self._closed:
             raise RuntimeError("SubprocessRuntime is closed")
-        key = (workload.metadata.namespace, workload.metadata.name)
-        async with self._lock_for(key):
-            # Re-check under the lock. A concurrent close() may have
-            # set ``_closed`` between the cheap check above and our
-            # lock acquisition; without this, we would spawn a process
-            # that close() already finished its drain pass on, leaking
-            # it past the runtime's lifetime.
-            if self._closed:
-                raise RuntimeError("SubprocessRuntime is closed")
-            existing = self._procs.get(key)
-            if existing is not None:
-                if _spec_equivalent(existing.workload, workload):
-                    if existing.process.returncode is not None:
-                        await self._restart_locked(existing, workload)
-                    return _build_status(existing, host_label=self._host_label)
-                # Spec changed — Recreate strategy.
-                await self._stop_locked(existing)
-                _ = self._procs.pop(key, None)
-
-            proc = await self._spawn(workload)
-            # Register the wait-exit reaper *before* publishing or
-            # spawning the probe loop. If anything between now and the
-            # end of apply() raises (or apply gets cancelled), the
-            # reaper still owns the process and will publish EXITED
-            # when it exits. Without this ordering, a cancellation
-            # mid-apply would leave an unreaped child whose death
-            # nobody observes.
-            self._procs[key] = proc
-            self._spawn_bg(
-                self._wait_exit(proc),
-                name=f"wait[{workload.metadata.name}]",
-            )
-            status = _build_status(proc, host_label=self._host_label)
-            await self._publish(
-                RuntimeEvent(
-                    type=RuntimeEventType.STARTED,
-                    workload_namespace=workload.metadata.namespace,
-                    workload_name=workload.metadata.name,
-                    status=status,
-                    timestamp=_now(),
-                )
-            )
-            if workload.spec.readiness_probe is not None:
-                self._spawn_bg(
-                    self._probe_loop(proc, workload.spec.readiness_probe),
-                    name=f"probe[{workload.metadata.name}]",
-                )
-            return status
-
-    def _spawn_bg(self, coro: "Coroutine[object, object, None]", *, name: str) -> None:
-        task = asyncio.create_task(coro, name=name)
-        self._bg_tasks.add(task)
-        task.add_done_callback(self._bg_tasks.discard)
+        key: _Key = (workload.metadata.namespace, workload.metadata.name)
+        existing = self._procs.get(key)
+        if existing is not None and _spec_equivalent(existing.workload, workload):
+            return _build_status(existing, host_label=self._host_label)
+        # Spec changed (or no existing): cancel the old supervisor (if
+        # any) and start a fresh one.
+        await self._cancel_supervisor(key)
+        return await self._start_supervisor(workload)
 
     @override
     async def delete(self, *, namespace: str | None, name: str) -> None:
-        key = (namespace, name)
-        async with self._lock_for(key):
-            proc = self._procs.pop(key, None)
-            if proc is None:
-                return
-            await self._stop_locked(proc)
+        await self._cancel_supervisor((namespace, name))
 
     @override
     async def get(self, *, namespace: str | None, name: str) -> WorkloadStatus | None:
@@ -206,187 +153,205 @@ class SubprocessRuntime(Runtime):
         return [_build_status(p, host_label=self._host_label) for p in self._procs.values()]
 
     @override
-    def watch(self) -> AsyncIterator[RuntimeEvent | None]:
-        return self._subscribe()
+    def watch(self):
+        return self._events.subscribe()
 
     @override
-    async def close(self) -> None:
+    @asynccontextmanager
+    async def running(self) -> AsyncGenerator[Self]:
+        try:
+            yield self
+        finally:
+            await self._close()
+
+    async def _close(self) -> None:
         if self._closed:
             return
         self._closed = True
-        # Snapshot then drain so concurrent applies don't trip us.
-        keys = list(self._procs.keys())
-        for ns, name in keys:
-            await self.delete(namespace=ns, name=name)
-        for sub in list(self._subs):
-            try:
-                sub.put_nowait(None)
-            except asyncio.QueueFull:
-                pass
-        self._subs.clear()
+        # Cancel every supervisor; their RAII unwinds (process killed,
+        # cgroup cleaned, EXITED published) before each task completes.
+        for task in list(self._supervisors.values()):
+            _ = task.cancel()
+        if self._supervisors:
+            _ = await asyncio.gather(*self._supervisors.values(), return_exceptions=True)
+        self._supervisors.clear()
+        self._procs.clear()
+        self._events.close()
 
-    # ---- subscribe -----------------------------------------------------
+    # ---- supervisor lifecycle ------------------------------------------
 
-    async def _subscribe(self) -> AsyncIterator[RuntimeEvent | None]:
-        queue: asyncio.Queue[RuntimeEvent | None] = asyncio.Queue(maxsize=1024)
-        self._subs.add(queue)
-        # Yield None immediately so the consumer (agent) sees the
-        # registration ack before any event-pump await — see
-        # ``Runtime.watch``'s contract.
-        yield None
+    async def _start_supervisor(self, workload: Workload) -> WorkloadStatus:
+        """Spawn a supervisor task for ``workload``; await its STARTED
+        signal (or its early failure); return the initial status.
+        """
+        key: _Key = (workload.metadata.namespace, workload.metadata.name)
+        loop = asyncio.get_running_loop()
+        ready: asyncio.Future[WorkloadStatus] = loop.create_future()
+        task = asyncio.create_task(
+            self._supervise(key, workload, ready),
+            name=f"sup[{workload.metadata.name}]",
+        )
+        self._supervisors[key] = task
+
+        def _on_done(t: asyncio.Task[None]) -> None:
+            # Remove from registry — but only if WE are still the
+            # registered supervisor (apply may have replaced us).
+            if self._supervisors.get(key) is t:
+                _ = self._supervisors.pop(key, None)
+            # If the supervisor died before signaling ready, surface
+            # the cause to the apply caller.
+            if not ready.done():
+                exc = t.exception() if not t.cancelled() else asyncio.CancelledError()
+                if exc is not None:
+                    ready.set_exception(exc)
+                else:
+                    ready.set_exception(RuntimeError("supervisor exited before signaling ready"))
+
+        task.add_done_callback(_on_done)
+        return await ready
+
+    async def _cancel_supervisor(self, key: _Key) -> None:
+        task = self._supervisors.get(key)
+        if task is None:
+            return
+        _ = task.cancel()
         try:
-            while True:
-                event = await queue.get()
-                if event is None:
-                    return
-                yield event
-        finally:
-            self._subs.discard(queue)
+            await task
+        except asyncio.CancelledError, Exception:
+            # Cancellation of this task was intentional. Caller-cancel
+            # of _cancel_supervisor itself will be re-raised by the
+            # asyncio framework on return because cancel() bumps the
+            # current task's cancel-count.
+            pass
 
-    async def _publish(self, event: RuntimeEvent) -> None:
-        dead: list[asyncio.Queue[RuntimeEvent | None]] = []
-        for sub in self._subs:
-            try:
-                sub.put_nowait(event)
-            except asyncio.QueueFull:
-                # Subscriber too slow — drop. Same shape as WatchBus.
-                dead.append(sub)
-        for sub in dead:
-            self._subs.discard(sub)
+    async def _supervise(
+        self,
+        key: _Key,
+        workload: Workload,
+        ready: asyncio.Future[WorkloadStatus],
+    ) -> None:
+        """Own one workload's lifecycle from spawn to exit.
 
-    # ---- spawn / stop / restart ---------------------------------------
-
-    async def _spawn(self, workload: Workload) -> _WorkloadProc:
-        if not workload.spec.containers:
-            raise RuntimeError(
-                f"workload {workload.metadata.name} has zero containers — pydantic should have rejected"
-            )
+        RAII chain: cgroup_dir → process. On any exit path the inner
+        owned_process kills the process; the outer owned_path cleans
+        the cgroup. EXITED is published in the finally so it fires
+        regardless of whether the process exited naturally or we
+        cancelled the supervisor.
+        """
+        # pydantic enforces min_length=1 on WorkloadSpec.containers; this
+        # assert is the runtime's own check that the contract held.
+        assert workload.spec.containers, f"workload {workload.metadata.name} has zero containers"
         primary = workload.spec.containers[0]
         argv = _build_argv(primary)
         env = dict(os.environ) | primary.env
         cgroup_dir = self._maybe_create_cgroup(workload)
-        # try/finally rather than narrow ``except OSError`` because the
-        # await can also fail with CancelledError (or any BaseException),
-        # and the previous narrow catch left the cgroup_dir on disk in
-        # those cases. A leaked cgroup_dir survives until either the
-        # daemon's systemd unit dies (KillMode=control-group tears the
-        # whole tree down) or the next start runs ``clean_cgroup_root``.
-        # The ``spawned`` flag distinguishes "we own the dir" from
-        # "we successfully passed ownership to the returned _WorkloadProc"
-        # so the finally only cleans on failure.
-        spawned = False
+
+        view: _ProcView | None = None
         try:
-            process = await asyncio.create_subprocess_exec(
-                argv[0],
-                *argv[1:],
-                env=env,
-                cwd=primary.workdir,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            spawned = True
+            async with self._owned_cgroup(cgroup_dir) as guarded:
+                async with owned_process(
+                    *argv,
+                    env=env,
+                    cwd=primary.workdir,
+                    grace_seconds=workload.spec.termination_grace_s,
+                ) as process:
+                    if guarded is not None:
+                        _try_join_cgroup(guarded.path, process.pid)
+                    view = _ProcView(
+                        workload=workload,
+                        process=process,
+                        started_at=_now(),
+                        cgroup_dir=guarded.path if guarded is not None else None,
+                    )
+                    self._procs[key] = view
+                    status = _build_status(view, host_label=self._host_label)
+                    view.initial_status = status
+                    self._events.publish(
+                        RuntimeEvent(
+                            type=RuntimeEventType.STARTED,
+                            workload_namespace=workload.metadata.namespace,
+                            workload_name=workload.metadata.name,
+                            status=status,
+                            timestamp=_now(),
+                        )
+                    )
+                    if not ready.done():
+                        ready.set_result(status)
+                    if workload.spec.readiness_probe is not None:
+                        probe_task = asyncio.create_task(
+                            self._probe_loop(view, workload.spec.readiness_probe),
+                            name=f"probe[{workload.metadata.name}]",
+                        )
+                        try:
+                            _ = await process.wait()
+                        finally:
+                            _ = probe_task.cancel()
+                    else:
+                        _ = await process.wait()
         finally:
-            if not spawned and cgroup_dir is not None:
-                _safe_rmtree(cgroup_dir)
-        if cgroup_dir is not None:
-            _try_join_cgroup(cgroup_dir, process.pid)
-        return _WorkloadProc(
-            workload=workload,
-            process=process,
-            started_at=_now(),
-            cgroup_dir=cgroup_dir,
-        )
+            # Publish EXITED if we ever got far enough to register
+            # this view — i.e. if the process actually started.
+            if view is not None:
+                self._events.publish(
+                    RuntimeEvent(
+                        type=RuntimeEventType.EXITED,
+                        workload_namespace=workload.metadata.namespace,
+                        workload_name=workload.metadata.name,
+                        status=_build_status(view, host_label=self._host_label),
+                        timestamp=_now(),
+                    )
+                )
+                # Pop only if we're still the registered view. Apply
+                # may have replaced us with a fresh view (different
+                # supervisor) before we got here.
+                if self._procs.get(key) is view:
+                    _ = self._procs.pop(key, None)
 
-    async def _restart_locked(self, existing: _WorkloadProc, workload: Workload) -> None:
-        existing.restart_count += 1
-        replacement = await self._spawn(workload)
-        # Preserve restart_count across the swap.
-        replacement.restart_count = existing.restart_count
-        existing.process = replacement.process
-        existing.started_at = replacement.started_at
-        existing.cgroup_dir = replacement.cgroup_dir
-        existing.workload = workload
-
-    async def _stop_locked(self, proc: _WorkloadProc) -> None:
-        grace = proc.workload.spec.termination_grace_s
-        if proc.process.returncode is None:
-            try:
-                proc.process.terminate()
-            except ProcessLookupError:
-                pass
-            try:
-                _ = await asyncio.wait_for(proc.process.wait(), timeout=grace)
-            except asyncio.TimeoutError:
-                try:
-                    proc.process.kill()
-                except ProcessLookupError:
-                    pass
-                with contextlib.suppress(asyncio.TimeoutError):
-                    _ = await asyncio.wait_for(proc.process.wait(), timeout=2.0)
-        if proc.cgroup_dir is not None:
-            _safe_rmtree(proc.cgroup_dir)
-        await self._publish(
-            RuntimeEvent(
-                type=RuntimeEventType.EXITED,
-                workload_namespace=proc.workload.metadata.namespace,
-                workload_name=proc.workload.metadata.name,
-                status=_build_status(proc, host_label=self._host_label),
-                timestamp=_now(),
-            )
-        )
-
-    async def _wait_exit(self, proc: _WorkloadProc) -> None:
-        try:
-            _ = await proc.process.wait()
-        except asyncio.CancelledError:
+    @asynccontextmanager
+    async def _owned_cgroup(self, cgroup_dir: Path | None) -> AsyncGenerator[OwnedPath | None]:
+        """Wrap cgroup_dir in owned_path if non-None; otherwise yield None."""
+        if cgroup_dir is None:
+            yield None
             return
-        await self._publish(
-            RuntimeEvent(
-                type=RuntimeEventType.EXITED,
-                workload_namespace=proc.workload.metadata.namespace,
-                workload_name=proc.workload.metadata.name,
-                status=_build_status(proc, host_label=self._host_label),
-                timestamp=_now(),
-            )
-        )
+        async with owned_path(cgroup_dir, cleanup=_safe_rmtree) as guarded:
+            yield guarded
 
     # ---- readiness probe ----------------------------------------------
 
-    async def _probe_loop(self, proc: _WorkloadProc, probe: Probe) -> None:
+    async def _probe_loop(self, view: _ProcView, probe: Probe) -> None:
         if probe.initial_delay_s > 0:
             await asyncio.sleep(probe.initial_delay_s)
         failures = 0
-        while proc.process.returncode is None:
-            ok = await self._probe_once(proc, probe)
+        while view.process.returncode is None:
+            ok = await self._probe_once(view, probe)
             if ok:
                 if failures > 0:
                     failures = 0
-                    await self._publish(
+                    self._events.publish(
                         RuntimeEvent(
                             type=RuntimeEventType.STATUS_CHANGED,
-                            workload_namespace=proc.workload.metadata.namespace,
-                            workload_name=proc.workload.metadata.name,
-                            status=_build_status(proc, host_label=self._host_label),
+                            workload_namespace=view.workload.metadata.namespace,
+                            workload_name=view.workload.metadata.name,
+                            status=_build_status(view, host_label=self._host_label),
                             timestamp=_now(),
                         )
                     )
             else:
                 failures += 1
                 if failures >= probe.failure_threshold:
-                    await self._publish(
+                    self._events.publish(
                         RuntimeEvent(
                             type=RuntimeEventType.STATUS_CHANGED,
-                            workload_namespace=proc.workload.metadata.namespace,
-                            workload_name=proc.workload.metadata.name,
-                            status=_build_status(proc, host_label=self._host_label),
+                            workload_namespace=view.workload.metadata.namespace,
+                            workload_name=view.workload.metadata.name,
+                            status=_build_status(view, host_label=self._host_label),
                             timestamp=_now(),
                         )
                     )
                     return
             await asyncio.sleep(probe.period_s)
 
-    async def _probe_once(self, _proc: _WorkloadProc, probe: Probe) -> bool:
+    async def _probe_once(self, _view: _ProcView, probe: Probe) -> bool:
         match probe.action.kind:
             case "tcp":
                 # No port-name->port resolution in the prototype subprocess
@@ -465,14 +430,14 @@ def _spec_equivalent(a: Workload, b: Workload) -> bool:
     return a.spec.model_dump() == b.spec.model_dump()
 
 
-def _build_status(proc: _WorkloadProc, *, host_label: str) -> WorkloadStatus:
-    primary = proc.workload.spec.containers[0]
-    if proc.process.returncode is None:
+def _build_status(view: _ProcView, *, host_label: str) -> WorkloadStatus:
+    primary = view.workload.spec.containers[0]
+    if view.process.returncode is None:
         cstate = "Running"
         wphase = "Running"
         finished_at = None
         exit_code = None
-    elif proc.process.returncode == 0:
+    elif view.process.returncode == 0:
         cstate = "Terminated"
         wphase = "Succeeded"
         finished_at = _now()
@@ -481,16 +446,16 @@ def _build_status(proc: _WorkloadProc, *, host_label: str) -> WorkloadStatus:
         cstate = "Terminated"
         wphase = "Failed"
         finished_at = _now()
-        exit_code = proc.process.returncode
+        exit_code = view.process.returncode
 
     container_status = ContainerStatus(
         name=primary.name,
         state=cstate,
-        pid=proc.process.pid if proc.process.returncode is None else None,
-        started_at=proc.started_at,
+        pid=view.process.pid if view.process.returncode is None else None,
+        started_at=view.started_at,
         finished_at=finished_at,
         exit_code=exit_code,
-        restart_count=proc.restart_count,
+        restart_count=view.restart_count,
     )
     return WorkloadStatus(
         phase=wphase,
@@ -530,6 +495,9 @@ def _safe_rmtree(path: Path) -> None:
                     os.kill(pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
+            # Give the kernel a moment to reap; cgroup rmdir fails until empty.
+            if pids:
+                _ = time.sleep
         if path.is_dir():
             try:
                 path.rmdir()

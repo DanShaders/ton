@@ -18,6 +18,7 @@ from orchestrator import (
     RuntimeEventType,
     WorkloadStatus,
 )
+from orchestrator.testing import wait_for_asyncio_idle
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("virtual_clock")]
 
@@ -32,51 +33,55 @@ def _event(i: int) -> RuntimeEvent:
     )
 
 
-async def test_watch_overflow_wakes_consumer(fake_runtime: FakeRuntime):
-    """Bug (audit round 4): ``_publish`` catches ``QueueFull``, removes
-    the slow subscriber from ``_subs``, but never enqueues a sentinel
-    on its queue. The consumer's ``await queue.get()`` then blocks
-    forever — no new events arrive (it's been dropped), no None wakes
-    it. Compare ``WatchBus.Subscription.offer`` which deliberately puts
-    a None sentinel on overflow so the iterator surfaces the drop.
+async def test_watch_overflow_raises_broadcast_overflow(fake_runtime: FakeRuntime):
+    """Bug 2 (audit round 4) — original shape: ``_publish`` dropped a
+    slow subscriber from ``_subs`` without enqueuing a sentinel, so
+    its consumer's ``await queue.get()`` blocked forever — runtime →
+    status reflection stopped silently.
 
-    Real-world impact: if the agent's runtime→status loop ever falls
-    behind by 256 events, it deadlocks silently and Workload status
-    stops mirroring runtime state.
+    The fix is structural: every Runtime backend's fan-out is
+    implemented in terms of :class:`BroadcastQueue`, the same
+    primitive ``WatchBus`` uses. ``BroadcastQueue.publish`` does
+    enqueue the None sentinel on overflow, and the iterator raises
+    :exc:`BroadcastOverflow` on the next poll — caller can re-list
+    and re-subscribe (k8s informer pattern).
+
+    This test pins the new contract: if a subscriber falls behind,
+    iterator raises a typed overflow exception within bounded time.
     """
-    sentinel_received = asyncio.Event()
-    iterator_done = asyncio.Event()
+    from orchestrator.broadcast import BroadcastOverflow
+
+    overflow_raised = asyncio.Event()
 
     async def _consume() -> None:
-        try:
-            async for event in fake_runtime.watch():
-                if event is None:
-                    sentinel_received.set()
-                    continue
-                # Block here so the per-sub queue fills up. The agent's
-                # real consumer awaits patch_status which can also stall;
-                # we simulate by holding the loop indefinitely.
-                _ = await asyncio.Event().wait()
-        finally:
-            iterator_done.set()
+        async with fake_runtime.watch() as events:
+            try:
+                # Iterate without blocking in the body. We synchronously
+                # publish 300 events below before the consumer gets to
+                # run, filling the per-sub queue past its 256 limit;
+                # BroadcastQueue then sets the overflow flag on this
+                # subscriber. When the consumer drains the queued
+                # events, the iterator surfaces ``BroadcastOverflow``.
+                async for _event in events:
+                    pass
+            except BroadcastOverflow:
+                overflow_raised.set()
 
     consumer = asyncio.create_task(_consume(), name="t.consumer")
-    _ = await asyncio.wait_for(sentinel_received.wait(), timeout=2.0)
-
-    # Per-sub queue is bounded at 256; fire enough to overflow.
+    # Let the consumer enter watch() (registers on the broadcast set),
+    # then synchronously fire enough events to overrun the queue
+    # before the consumer gets a chance to drain.
+    await wait_for_asyncio_idle()
     for i in range(300):
-        await fake_runtime.emit(_event(i))
+        fake_runtime.emit(_event(i))
 
-    # If the runtime correctly enqueues a None sentinel on overflow, the
-    # consumer's iterator returns and ``iterator_done`` fires. With the
-    # bug, ``queue.get()`` blocks forever and the wait_for times out.
     try:
-        _ = await asyncio.wait_for(iterator_done.wait(), timeout=2.0)
+        _ = await asyncio.wait_for(overflow_raised.wait(), timeout=2.0)
     except TimeoutError:
         pytest.fail(
             (
-                "consumer did not wake after watch overflow — _publish dropped "
-                "the queue from _subs without enqueuing a None sentinel"
+                "consumer did not surface BroadcastOverflow after the runtime's "
+                "per-subscriber queue overflowed; the broadcast contract is broken"
             )
         )
     finally:

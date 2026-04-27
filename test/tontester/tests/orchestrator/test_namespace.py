@@ -56,9 +56,7 @@ async def test_namespace_finalizer_added(tmp_path: Path, fake_runtime: FakeRunti
     manager.register_kind(PortForward)
     manager.add_controller(NamespaceReconciler())
     agent = Agent(fake_runtime, store=manager.store, state_dir=tmp_path / "agent")
-    await manager.start()
-    await agent.start()
-    try:
+    async with manager.running(), agent.running():
         _ = await manager.store.apply(_ns("run-1"))
 
         ns = await wait_for_event(
@@ -68,9 +66,6 @@ async def test_namespace_finalizer_added(tmp_path: Path, fake_runtime: FakeRunti
             timeout=3.0,
         )
         assert "orchestrator.io/namespace-cascade" in ns.metadata.finalizers
-    finally:
-        await agent.stop()
-        await manager.shutdown()
 
 
 async def test_namespace_cascade_drains_workloads(tmp_path: Path, fake_runtime: FakeRuntime):
@@ -82,9 +77,7 @@ async def test_namespace_cascade_drains_workloads(tmp_path: Path, fake_runtime: 
     manager.register_kind(PortForward)
     manager.add_controller(NamespaceReconciler())
     agent = Agent(fake_runtime, store=manager.store, state_dir=tmp_path / "agent")
-    await manager.start()
-    await agent.start()
-    try:
+    async with manager.running(), agent.running():
         _ = await manager.store.apply(_ns("run-2"))
         _ = await manager.store.apply(_wl("alpha", "run-2"))
         _ = await manager.store.apply(_wl("beta", "run-2"))
@@ -124,6 +117,3 @@ async def test_namespace_cascade_drains_workloads(tmp_path: Path, fake_runtime: 
         # reconciler must have first drained every child workload,
         # so this is a post-condition check, not a wait.
         assert manager.store.list(Workload, namespace="run-2") == []
-    finally:
-        await agent.stop()
-        await manager.shutdown()

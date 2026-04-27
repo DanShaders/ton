@@ -1,22 +1,29 @@
 """WorkloadSet → child Workloads reconciler.
 
-For each WorkloadSet, ensure exactly ``replicas`` child Workloads exist,
-named ``f"{set.name}-{ordinal}"`` for ordinals ``[0, replicas)``, with
-the set's template baked into their spec and an owner_ref pointing at
-the set.
+For each WorkloadSet, ensure exactly ``replicas`` child Workloads
+exist, named ``f"{set.name}-{ordinal}"`` for ordinals
+``[0, replicas)``, with the set's template baked into their spec
+and an owner_ref pointing at the set.
+
+Cascade-delete + finalizer are handled by
+:class:`CascadingReconciler`. Active reconcile (this file) is
+called only for live (non-terminating) sets — and enumerates
+children via :func:`_is_child_of`, the same predicate the cascade
+branch uses, so a scaled-down ordinal still gets cleaned up on
+delete (Bug 4 — original code iterated ``range(replicas)``, missing
+strays).
 
 Update strategy in this prototype: **Recreate**. When the template's
-spec changes (set.metadata.generation bumps), every child is deleted
-and recreated. Rolling updates are a TODO.
-
-The reconciler also reports ``status.replicas`` and
-``status.ready_replicas`` (from each Workload's ``Available`` condition,
-written by the agent).
+spec changes, every child is deleted and recreated. Rolling updates
+are a TODO.
 """
 
 import logging
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import final, override
+
+from pydantic import BaseModel
 
 from ...errors import AlreadyExists, NotFound
 from ...ids import child_name
@@ -24,6 +31,7 @@ from ...resources import (
     Condition,
     Metadata,
     OwnerRef,
+    ResourceLike,
     Workload,
     WorkloadSet,
     WorkloadSpec,
@@ -31,9 +39,12 @@ from ...resources import (
     upsert_condition,
 )
 from ...store import InMemoryStore
-from ..controller import Controller, ItemRef, Result, WatchSpec, owner_mapper
+from ..cascading import CascadingReconciler
+from ..controller import Result, WatchSpec, owner_mapper
 
 logger = logging.getLogger(__name__)
+
+WORKLOADSET_FINALIZER = "orchestrator.io/workloadset-cascade"
 
 
 def _now() -> datetime:
@@ -41,7 +52,7 @@ def _now() -> datetime:
 
 
 @final
-class WorkloadSetReconciler(Controller[WorkloadSet]):
+class WorkloadSetReconciler(CascadingReconciler[WorkloadSet]):
     """Ensures the set's child Workloads match its template + replica count."""
 
     @property
@@ -56,28 +67,34 @@ class WorkloadSetReconciler(Controller[WorkloadSet]):
             WatchSpec(resource_type=Workload, map_event=owner_mapper("WorkloadSet")),
         ]
 
+    @property
     @override
-    async def reconcile(self, store: InMemoryStore, ref: ItemRef) -> Result:
-        wset = store.get_or_none(WorkloadSet, namespace=ref.namespace, name=ref.name)
-        if wset is None:
-            return Result(ok=True, reason="set gone")
+    def finalizer_name(self) -> str:
+        return WORKLOADSET_FINALIZER
 
-        if wset.metadata.deletion_timestamp is not None:
-            # Cascade: delete every child; the namespace controller
-            # also does this for namespace-scoped tear-downs, but a
-            # WorkloadSet might be deleted independently of its
-            # namespace.
-            for ordinal in range(wset.spec.replicas):
-                await store.delete(
-                    Workload,
-                    namespace=ref.namespace,
-                    name=child_name(ref.name, ordinal),
-                )
-            return Result(ok=True, reason="set terminating")
+    @override
+    def enumerate_children(
+        self,
+        store: InMemoryStore,
+        parent: WorkloadSet,
+    ) -> Iterable[
+        tuple[type[ResourceLike[BaseModel, BaseModel]], ResourceLike[BaseModel, BaseModel]]
+    ]:
+        # Enumerate via owner_ref (uid match), not ``range(replicas)``.
+        # An in-flight scale-down can leave child ordinals beyond the
+        # current replica count; they're still our children and must
+        # be drained before we drop the finalizer. Original Bug 4
+        # iterated ``range(replicas)`` and missed those strays.
+        for child in store.list(Workload, namespace=parent.metadata.namespace):
+            if _is_child_of(child, parent):
+                yield (Workload, child)
 
+    @override
+    async def reconcile_active(self, store: InMemoryStore, parent: WorkloadSet) -> Result:
+        wset = parent
         existing = {
             w.metadata.name: w
-            for w in store.list(Workload, namespace=ref.namespace)
+            for w in store.list(Workload, namespace=wset.metadata.namespace)
             if _is_child_of(w, wset)
         }
 
@@ -85,7 +102,7 @@ class WorkloadSetReconciler(Controller[WorkloadSet]):
         ready = 0
         replicas_observed = 0
         for ordinal in range(wset.spec.replicas):
-            cname = child_name(ref.name, ordinal)
+            cname = child_name(wset.metadata.name, ordinal)
             child = existing.pop(cname, None)
             if child is None:
                 await _create_child(store, wset, ordinal)
@@ -102,7 +119,7 @@ class WorkloadSetReconciler(Controller[WorkloadSet]):
         for stranded in existing.values():
             await store.delete(
                 Workload,
-                namespace=ref.namespace,
+                namespace=wset.metadata.namespace,
                 name=stranded.metadata.name,
             )
 

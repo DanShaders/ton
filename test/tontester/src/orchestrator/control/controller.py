@@ -16,20 +16,21 @@ Reconciler return value is :class:`Result`: ``ok=True`` clears backoff,
 an explicit follow-up regardless. Worker tasks treat raised exceptions
 as ``ok=False`` with a stack-traced log line.
 
-**Cancel safety.** Worker tasks are allowed to be cancelled mid-
-reconcile. The reconciler's own resources must be either trivial
-(usually true: a controller calls ``store.apply``/``store.patch_status``
-which are themselves atomic and cancel-safe at the await boundary) or
-managed by the controller's own ``async with`` blocks. The runner does
-not introduce a cancellation budget — :class:`Manager.shutdown`
-gathers the workers with a deadline and force-cancels stragglers.
+**Lifecycle.** ``ControllerRunner`` is an async context manager —
+``async with runner.running():`` spawns the watch + worker tasks
+inside an :class:`asyncio.TaskGroup` and tears them down on exit.
+There is no ``start()`` / ``stop()`` pair; the TaskGroup *is* the
+cancel-and-drain. External cancellation propagates correctly
+because that's what TaskGroup does.
 """
 
 import asyncio
+import contextlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Generic, Protocol, TypeVar, final
+from typing import Generic, Protocol, Self, TypeVar, final
 
 from pydantic import BaseModel
 
@@ -135,9 +136,18 @@ def owner_mapper(controller_kind: str) -> EventMapper:
 class ControllerRunner(Generic[_TOwned]):
     """Wires one Controller to the store + a workqueue + worker tasks.
 
-    Lifecycle is :meth:`start` / :meth:`stop`; both are idempotent. The
-    Manager calls them under its own AsyncExitStack, so a partial
-    initialization is rolled back cleanly on construction failure.
+    Lifecycle is the :meth:`running` async context manager:
+
+        async with runner.running():
+            ...
+
+    Inside, an :class:`asyncio.TaskGroup` owns every spawned task —
+    watch loops and worker loops. On context exit (normal *or*
+    exception, including ``CancelledError``), the TaskGroup cancels
+    every child and waits; external cancellation propagates without
+    a hand-rolled drain. The workqueue is closed *first* so worker
+    tasks observe :exc:`QueueClosed` and exit cleanly before the
+    TaskGroup escalates to ``Task.cancel()``.
     """
 
     def __init__(
@@ -152,90 +162,96 @@ class ControllerRunner(Generic[_TOwned]):
         self._store: InMemoryStore = store
         self._worker_count: int = worker_count
         self._queue: WorkQueue[ItemRef] = WorkQueue(clock=clock or RealClock())
-        self._tasks: list[asyncio.Task[None]] = []
-        self._started: bool = False
-        self._stopping: bool = False
 
     @property
     def queue(self) -> WorkQueue[ItemRef]:
         return self._queue
 
-    async def start(self) -> None:
-        if self._started:
-            return
-        self._started = True
-        # Auto-subscribe to the owned kind so reconciles happen on direct edits.
+    @asynccontextmanager
+    async def running(self) -> AsyncGenerator[Self]:
+        """Spawn the watch + worker tasks; yield once they're ready.
+
+        Cleanup ordering on exit, top-to-bottom in the stack (LIFO
+        execution from the ``contextlib.ExitStack`` perspective):
+
+        1. Cancel every spawned background task (they're forever-loops
+           that wouldn't terminate on their own).
+        2. ``TaskGroup.__aexit__`` waits for all those tasks to finish.
+        3. ``WorkQueue.close`` — by this point the worker tasks are
+           already gone, so this is just final tidiness.
+
+        External cancellation of the surrounding ``async with``
+        propagates correctly because that's TaskGroup's own contract.
+        """
         watches = list(self._controller.watches)
         owned_kind = self._controller.owned_kind
         if not any(w.resource_type is owned_kind for w in watches):
             watches.insert(0, WatchSpec(resource_type=owned_kind, map_event=identity_mapper))
 
-        # Each watch loop signals via its ready event once it's registered
-        # with the store's bus; start() waits on all of them so that any
-        # apply() the caller does after start() returns is guaranteed to
-        # be observed. Without this, watch loop tasks scheduled by
-        # create_task may not actually run before the caller's first
-        # apply, and the corresponding event would be published into a
-        # bus with zero subscribers and lost.
-        #
-        # The whole task-creation + ready.wait phase is wrapped in a
-        # try/except BaseException so a cancellation (or any other
-        # unexpected exception) during start tears down the tasks we
-        # already created. Without this, Manager's stack-based rollback
-        # can't reach our tasks because Manager.start only registers
-        # _safe_stop after runner.start() returns successfully.
         try:
-            ready_events: list[asyncio.Event] = []
-            for spec in watches:
-                ready = asyncio.Event()
-                ready_events.append(ready)
-                self._tasks.append(
-                    asyncio.create_task(
-                        self._watch_loop(spec, ready),
-                        name=f"watch[{owned_kind.__name__}<-{spec.resource_type.__name__}]",
+            async with contextlib.AsyncExitStack() as stack:
+                # Push queue.close as the last thing to run on LIFO exit.
+                _ = stack.callback(self._queue.close)
+                tg = await stack.enter_async_context(asyncio.TaskGroup())
+                tasks: list[asyncio.Task[None]] = []
+                ready_futures: list[asyncio.Future[None]] = []
+                loop = asyncio.get_running_loop()
+                for spec in watches:
+                    ready: asyncio.Future[None] = loop.create_future()
+                    ready_futures.append(ready)
+                    tasks.append(
+                        tg.create_task(
+                            self._watch_loop(spec, ready),
+                            name=f"watch[{owned_kind.__name__}<-{spec.resource_type.__name__}]",
+                        )
                     )
-                )
-            for i in range(self._worker_count):
-                self._tasks.append(
-                    asyncio.create_task(
-                        self._worker_loop(),
-                        name=f"reconcile[{owned_kind.__name__}#{i}]",
+                for i in range(self._worker_count):
+                    tasks.append(
+                        tg.create_task(
+                            self._worker_loop(),
+                            name=f"reconcile[{owned_kind.__name__}#{i}]",
+                        )
                     )
-                )
-            for ready in ready_events:
-                _ = await ready.wait()
-        except BaseException:
-            await self.stop()
-            raise
+                # Cancel-on-exit pushed *after* TaskGroup so it runs
+                # *before* TaskGroup's __aexit__ in LIFO order — the
+                # group then awaits the cancelled tasks.
+                _ = stack.callback(_cancel_all, tasks)
+                # Block until each watch loop has registered its bus
+                # subscription. Future-based (not Event-based) so a
+                # setup failure inside the loop sets the exception on
+                # the future and surfaces here — instead of leaving
+                # ``running()`` blocked forever on a never-set Event.
+                for ready in ready_futures:
+                    _ = await ready
+                yield self
+        except* WatchOverflow:
+            # WatchOverflow is the watch loop's own exit-on-restart
+            # signal, but if it ever escapes the loop it's not fatal
+            # to the runner's caller.
+            pass
 
-    async def stop(self) -> None:
-        if self._stopping:
-            return
-        self._stopping = True
-        self._queue.close()
-        for task in self._tasks:
-            _ = task.cancel()
-        for task in self._tasks:
-            try:
-                await task
-            except asyncio.CancelledError, Exception:
-                # Each worker logs its own errors; we just want to drain.
-                pass
-        self._tasks.clear()
-
-    async def _watch_loop(self, spec: WatchSpec, ready: asyncio.Event) -> None:
+    async def _watch_loop(self, spec: WatchSpec, ready: asyncio.Future[None]) -> None:
         """Subscribe to one kind; route events via spec.map_event into the queue.
 
-        ``ready`` signals to :meth:`start` that the bus subscription
-        has been registered — start() awaits this so the caller can
-        publish events immediately after start returns.
+        ``ready`` is resolved once the bus subscription is registered.
+        :meth:`running` awaits it so the caller can publish events
+        immediately after the context yields.
 
-        On WatchOverflow we re-list and re-subscribe — same as k8s
-        informers. The list path also drains all current rows into the
-        workqueue so a controller that started against pre-existing
-        data still reconciles it.
+        Failure handling has two regimes, distinguished by whether
+        ``ready`` has been set:
+
+        - **Setup failure (ready not yet set):** the exception is set
+          on the ``ready`` future and re-raised, propagating through
+          the surrounding TaskGroup as a fail-fast configuration error.
+          This catches bugs like "watched a kind that wasn't registered."
+        - **Steady-state failure (ready already set):** the exception
+          is logged and the loop pauses before re-subscribing — same
+          shape as a k8s informer recovery on transient store errors.
+
+        On WatchOverflow we re-list and re-subscribe regardless of
+        regime. Exits when the surrounding TaskGroup cancels this task.
         """
-        while not self._stopping:
+        while True:
             try:
                 # Synchronous registration via async-with: enforces
                 # cleanup on every exit path (WatchOverflow, exception,
@@ -243,7 +259,8 @@ class ControllerRunner(Generic[_TOwned]):
                 # leaked subscriptions if a list/snapshot raise jumped
                 # past the stream call.
                 async with self._store.subscription(spec.resource_type) as sub:
-                    ready.set()
+                    if not ready.done():
+                        ready.set_result(None)
                     # Re-list current rows: covers both "reconciler
                     # started after data exists" and recovery after
                     # WatchOverflow.
@@ -261,23 +278,44 @@ class ControllerRunner(Generic[_TOwned]):
                             self._queue.add(ref)
             except WatchOverflow:
                 logger.warning(f"watch overflow on {spec.resource_type.__name__}; relisting")
-                # Outer loop will re-enter the with block and re-list.
+                # Loop re-enters the with block and re-lists.
                 continue
-            except asyncio.CancelledError:
-                return
-            except Exception:
+            except Exception as e:
+                if not ready.done():
+                    # Setup failure: surface to running() instead of
+                    # silently retrying forever.
+                    ready.set_exception(e)
+                    raise
                 logger.exception(f"watch loop on {spec.resource_type.__name__} crashed; restarting")
-                # Brief pause before reconnecting to avoid a tight loop
-                # if the store is in a degraded state.
+                # Brief pause before reconnecting to avoid a tight
+                # loop if the store is in a degraded state.
                 await asyncio.sleep(1.0)
 
     async def _worker_loop(self) -> None:
         async for ref in self._queue.items():
+            # Spawn the reconcile as a subtask so the workqueue can
+            # cancel *just this reconcile* (supersede) without killing
+            # the worker loop. Without the subtask, the only way to
+            # cancel a stale reconcile would be to cancel the worker
+            # itself — and that would tear down the whole runner.
+            sub: asyncio.Task[Result] = asyncio.create_task(
+                self._controller.reconcile(self._store, ref),
+                name=f"reconcile-call[{self._controller.owned_kind.__name__}/{ref}]",
+            )
+            self._queue.register_in_flight_task(ref, sub)
             try:
-                result = await self._controller.reconcile(self._store, ref)
+                result = await sub
             except asyncio.CancelledError:
                 self._queue.done(ref, success=False)
-                raise
+                # Distinguish: if the worker itself was cancelled
+                # (TaskGroup shutdown), propagate. Otherwise the
+                # cancel hit only the subtask — the workqueue
+                # superseded this reconcile — and we loop to pick
+                # up the requeued ref.
+                current = asyncio.current_task()
+                if current is not None and current.cancelling() > 0:
+                    raise
+                continue
             except Exception:
                 logger.exception(f"reconcile {self._controller.owned_kind.__name__}/{ref} raised")
                 self._queue.done(ref, success=False)
@@ -285,6 +323,11 @@ class ControllerRunner(Generic[_TOwned]):
             self._queue.done(ref, success=result.ok)
             if result.requeue_after_s is not None:
                 self._queue.add_after(ref, result.requeue_after_s)
+
+
+def _cancel_all(tasks: list[asyncio.Task[None]]) -> None:
+    for t in tasks:
+        _ = t.cancel()
 
 
 def collect_refs(events: AsyncIterator[WatchEvent[_AnyResource]]) -> AsyncIterator[ItemRef]:

@@ -135,7 +135,7 @@ async def test_spawn_cleanup_when_cgroup_files_unwritable(
             await rt.delete(namespace="default", name="readonly")
     finally:
         cgroup_root.chmod(0o700)
-        await rt.close()
+        await rt._close()
     # No partial dir left under cgroup_root.
     survivors = list(cgroup_root.iterdir())
     assert survivors == [], f"unexpected cgroup debris: {survivors}"
