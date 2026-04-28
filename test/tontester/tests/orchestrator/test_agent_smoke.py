@@ -66,7 +66,15 @@ class _HangRuntime(Runtime):
         return []
 
     def __init__(self) -> None:
+        from orchestrator.lifecycle import StopToken
+
         self._silent: BroadcastQueue[RuntimeEvent] = BroadcastQueue("hang-runtime")
+        self._stop_token: StopToken = StopToken()
+
+    @property
+    @override
+    def stop_token(self):
+        return self._stop_token
 
     @override
     def watch(self):
@@ -83,6 +91,11 @@ class _HangRuntime(Runtime):
             yield self
         finally:
             self._silent.close()
+            self._stop_token.set()
+
+    @override
+    async def shutdown(self) -> None:
+        self._stop_token.set()
 
 
 def _wl(name: str) -> Workload:
@@ -476,22 +489,22 @@ async def test_runtime_event_loop_does_not_falsely_mark_reconciled(
     assert reconciled[0].reason == "ApplyOk"
 
 
-async def test_agent_running_cancels_loops_before_closing_runtime(tmp_path: Path):
-    """Bug 5 (audit round 4) — original shape: ``Agent.start`` pushed
+async def test_agent_shutdown_drains_loops_before_runtime_closes(tmp_path: Path):
+    """Resource-shape contract: ``await agent.shutdown()`` drains the
+    runner and the runtime-event task before the agent's ``__aexit__``
+    runs. By the time the runtime's close branch fires, every agent-
+    spawned task is done.
+
+    Pre-fix (audit round 4 #5): ``Agent.start`` pushed
     ``_cancel_tasks`` and ``_safe_close_runtime`` as free-floating
-    callbacks; the wrong push order made LIFO unwind close the
-    runtime *before* cancelling the loops. Spurious "ApplyFailed"
-    conditions then appeared during graceful shutdown.
+    callbacks in the wrong order; LIFO unwind closed the runtime
+    *before* cancelling the loops, producing spurious "ApplyFailed"
+    conditions during graceful shutdown.
 
-    The fix is structural: ``Agent.running()`` enters the runtime via
-    AsyncExitStack first, then enters a ``TaskGroup`` for the loops.
-    LIFO of ``async with`` exits guarantees the TaskGroup cancels
-    the loops first, then the runtime closes. Push order can no
-    longer be wrong because there is no push order — the cleanups
-    are nested context managers, not separately-registered callbacks.
-
-    Pin the order behaviorally: when the runtime's close branch
-    runs, the loop tasks must already be done.
+    The Resource Protocol shape eliminates the bug class: ``shutdown``
+    awaits sub-resources in dependency order; ``__aexit__`` only
+    fires sync signals. The forceful (no-shutdown) path no longer
+    awaits anything, so the test pins the GRACEFUL ordering instead.
     """
     close_observed_loops_done: list[bool] = []
     captured_loop_tasks: list[asyncio.Task[object]] = []
@@ -499,7 +512,15 @@ async def test_agent_running_cancels_loops_before_closing_runtime(tmp_path: Path
     @final
     class _OrderProbingRuntime(Runtime):
         def __init__(self) -> None:
+            from orchestrator.lifecycle import StopToken
+
             self._silent: BroadcastQueue[RuntimeEvent] = BroadcastQueue("order-probe")
+            self._stop_token: StopToken = StopToken()
+
+        @property
+        @override
+        def stop_token(self):
+            return self._stop_token
 
         @override
         async def apply(self, workload: Workload) -> WorkloadStatus:
@@ -529,6 +550,11 @@ async def test_agent_running_cancels_loops_before_closing_runtime(tmp_path: Path
             finally:
                 close_observed_loops_done.append(all(t.done() for t in captured_loop_tasks))
                 self._silent.close()
+                self._stop_token.set()
+
+        @override
+        async def shutdown(self) -> None:
+            self._stop_token.set()
 
     rt = _OrderProbingRuntime()
     store = InMemoryStore()
@@ -539,10 +565,16 @@ async def test_agent_running_cancels_loops_before_closing_runtime(tmp_path: Path
             t for t in asyncio.all_tasks() if t.get_name().startswith("agent.")
         )
         assert captured_loop_tasks, "agent should have spawned its loop tasks"
+        # Graceful drain: shutdown awaits the runner + the runtime-
+        # event task before returning. After it returns, every
+        # agent-named task is done.
+        await agent.shutdown()
+        for t in captured_loop_tasks:
+            assert t.done(), f"agent.shutdown() returned but task {t.get_name()} is still running"
 
     assert close_observed_loops_done == [True], (
         f"runtime.close branch saw active loop tasks ({close_observed_loops_done=}); "
-        "TaskGroup must cancel loops before runtime exits its context"
+        "agent.shutdown() must drain loops before sub-resource cleanup"
     )
 
 

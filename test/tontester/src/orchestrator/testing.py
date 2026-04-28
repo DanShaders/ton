@@ -17,11 +17,120 @@ immediately after the call returns are observed without a race window.
 
 import asyncio
 from collections.abc import Callable
+from typing import Protocol, final
 
 from pydantic import BaseModel
 
 from .resources import ResourceLike
 from .store import InMemoryStore
+
+# ---- subprocess mocking -----------------------------------------------
+
+
+@final
+class MockProcess:
+    """``asyncio.subprocess.Process``-shaped mock for deterministic tests.
+
+    Mixing real ``asyncio.subprocess`` with ``virtual_clock`` is racy:
+    the virtual loop advances time independently of real SIGCHLD
+    delivery, so a reap task that ``await``s ``process.wait()`` may
+    park indefinitely even though the real kernel has long since
+    reaped. Tests that exercise supervisor / runtime lifecycle should
+    use this mock instead of forking real children.
+
+    ``MockProcess`` exposes the surface the supervisor uses:
+    ``pid``, ``returncode``, sync ``terminate()`` / ``kill()``, async
+    ``wait()``. Test driver calls :meth:`mock_exit` (or
+    :meth:`auto_exit_on_signal`) to deterministically resolve the
+    wait. No fork; no real signals; no virtual-time interaction with
+    real SIGCHLD.
+    """
+
+    def __init__(self, *, pid: int = 9999):
+        self._pid: int = pid
+        self._returncode: int | None = None
+        self._exited: asyncio.Event = asyncio.Event()
+        self.terminate_called: int = 0
+        self.kill_called: int = 0
+        # If True, terminate() / kill() implicitly mock_exit themselves.
+        # Off by default so tests can observe a stuck process.
+        self._auto_exit: bool = False
+
+    @property
+    def pid(self) -> int:
+        return self._pid
+
+    @property
+    def returncode(self) -> int | None:
+        return self._returncode
+
+    def terminate(self) -> None:
+        self.terminate_called += 1
+        if self._auto_exit and self._returncode is None:
+            self.mock_exit(returncode=-15)  # SIGTERM
+
+    def kill(self) -> None:
+        self.kill_called += 1
+        if self._auto_exit and self._returncode is None:
+            self.mock_exit(returncode=-9)  # SIGKILL
+
+    async def wait(self) -> int:
+        _ = await self._exited.wait()
+        assert self._returncode is not None
+        return self._returncode
+
+    def mock_exit(self, *, returncode: int = 0) -> None:
+        """Test driver: resolve ``wait()`` with the given exit code.
+        Idempotent — second call is a no-op (matches real behavior of
+        an already-exited process).
+        """
+        if self._returncode is not None:
+            return
+        self._returncode = returncode
+        self._exited.set()
+
+    def auto_exit_on_signal(self) -> None:
+        """Test driver: have ``terminate()`` / ``kill()`` immediately
+        resolve ``wait()``. Mirrors a well-behaved process that
+        responds to signals."""
+        self._auto_exit = True
+
+
+class _SetattrCallable(Protocol):
+    def __call__(self, target: object, name: str, value: object, /) -> None: ...
+
+
+class _MonkeyPatchLike(Protocol):
+    setattr: _SetattrCallable
+
+
+def mock_subprocess_exec(
+    monkeypatch: _MonkeyPatchLike,
+    *,
+    pid: int = 9999,
+    auto_exit: bool = True,
+) -> MockProcess:
+    """Patch ``asyncio.create_subprocess_exec`` to return a fresh
+    :class:`MockProcess`. Returns the mock so the test can drive its
+    lifecycle.
+
+    ``monkeypatch`` is the pytest fixture, typed structurally to keep
+    this module pytest-import-free.
+
+    With ``auto_exit=True`` (default), ``terminate``/``kill`` resolve
+    ``wait()`` automatically — the well-behaved-process case. Tests
+    that simulate stuck processes pass ``auto_exit=False`` and call
+    :meth:`MockProcess.mock_exit` explicitly.
+    """
+    process = MockProcess(pid=pid)
+    if auto_exit:
+        process.auto_exit_on_signal()
+
+    async def _create(*_args: object, **_kwargs: object) -> MockProcess:
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _create)
+    return process
 
 
 async def wait_for_event[T: ResourceLike[BaseModel, BaseModel]](

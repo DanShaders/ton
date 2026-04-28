@@ -24,8 +24,9 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Protocol, Self
+from typing import Protocol
 
+from ..lifecycle import Resource
 from ..resources import Workload, WorkloadStatus
 
 
@@ -51,8 +52,14 @@ class RuntimeEvent:
     timestamp: datetime
 
 
-class Runtime(Protocol):
-    """Backend that owns processes for one host."""
+class Runtime(Resource, Protocol):
+    """Backend that owns processes for one host.
+
+    Extends :class:`~orchestrator.lifecycle.Resource`: ``running()`` /
+    ``shutdown()`` / ``stop_token`` come from there. The Runtime-
+    specific surface is the apply / delete / get / list / watch
+    operations below.
+    """
 
     async def apply(self, workload: Workload) -> WorkloadStatus:
         """Idempotent: ensure the workload is running per its current spec.
@@ -110,18 +117,11 @@ class Runtime(Protocol):
         """
         ...
 
-    def running(self) -> AbstractAsyncContextManager[Self]:
-        """Async context manager — owns the runtime for its lifetime.
-
-        ``async with runtime.running():`` enters the runtime; on
-        exit (any path including ``CancelledError``), every workload
-        is stopped and subscriptions are dropped. Backends implement
-        this directly via :func:`contextlib.asynccontextmanager` so
-        cleanup is tied to the resource via ``finally`` rather than
-        a free-floating ``close()`` method whose call site might be
-        forgotten or ordered wrong relative to other cleanup.
-        """
-        ...
+    # ``running()`` / ``shutdown()`` / ``stop_token`` are inherited
+    # from :class:`~orchestrator.lifecycle.Resource`. The runtime adds
+    # the apply / delete / get / list / watch surface above; the
+    # lifecycle shape is identical to every other Resource in the
+    # codebase.
 
 
 class ProcessSupervisor(Protocol):

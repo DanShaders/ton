@@ -27,6 +27,7 @@ started. There is no ``unregister`` call to forget.
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
+from enum import StrEnum
 from typing import Generic, TypeVar, final
 
 
@@ -41,6 +42,21 @@ class BroadcastOverflow(RuntimeError):
 
     def __init__(self, name: str):
         super().__init__(f"broadcast overflow on {name}; subscriber dropped")
+        self.name: str = name
+
+
+class BroadcastClosed(RuntimeError):
+    """``subscribe()`` was called after ``close()``.
+
+    Subscribing to a closed bus would silently hang the consumer:
+    no None sentinel is delivered (close already cleared
+    ``_subs``), and ``next()`` blocks forever. Surfacing the misuse
+    as a typed exception forces callers to recognize the broken
+    invariant rather than diagnose a hang.
+    """
+
+    def __init__(self, name: str):
+        super().__init__(f"broadcast {name} is closed; cannot subscribe")
         self.name: str = name
 
 
@@ -91,6 +107,11 @@ class _BroadcastSub(Generic[_T]):
         return await self._queue.get()
 
 
+class _State(StrEnum):
+    OPEN = "open"
+    CLOSED = "closed"
+
+
 @final
 class BroadcastQueue(Generic[_T]):
     """Per-publisher fan-out bus.
@@ -98,13 +119,18 @@ class BroadcastQueue(Generic[_T]):
     Construct one per distinct stream. ``publish`` fans out
     synchronously to every active subscriber; ``subscribe`` is an
     async context manager that yields an ``AsyncIterator[_T]``.
+
+    State machine: ``OPEN`` → ``CLOSED`` (one-way). All methods
+    document and enforce which states they accept. ``subscribe``
+    on a CLOSED bus raises :exc:`BroadcastClosed` rather than
+    silently handing back a hanging iterator.
     """
 
     def __init__(self, name: str, *, queue_size: int = 256):
         self._name: str = name
         self._queue_size: int = queue_size
         self._subs: set[_BroadcastSub[_T]] = set()
-        self._closed: bool = False
+        self._state: _State = _State.OPEN
 
     @property
     def name(self) -> str:
@@ -114,13 +140,25 @@ class BroadcastQueue(Generic[_T]):
     def subscriber_count(self) -> int:
         return len(self._subs)
 
+    @property
+    def is_closed(self) -> bool:
+        return self._state is _State.CLOSED
+
     def publish(self, item: _T) -> None:
         """Fan out to every subscriber. Synchronous, never awaits.
+
+        Allowed in any state — publishing on a closed bus is a no-op.
+        Permitting publish-after-close is intentional: in tear-down,
+        a sync stack callback may publish into a bus the runtime
+        already closed, and we'd rather drop the event than crash
+        the unwind.
 
         Subscribers whose queues are full are dropped here — their
         iterators will raise :exc:`BroadcastOverflow` on the next
         poll.
         """
+        if self._state is _State.CLOSED:
+            return
         dead: list[_BroadcastSub[_T]] = []
         for sub in self._subs:
             if not sub.offer(item):
@@ -129,10 +167,15 @@ class BroadcastQueue(Generic[_T]):
             self._subs.discard(sub)
 
     def close(self) -> None:
-        """Tell every subscriber to stop. Idempotent."""
-        if self._closed:
+        """Tell every subscriber to stop. Idempotent.
+
+        Transitions ``OPEN → CLOSED``. After this returns, every
+        active iterator gets a clean None-sentinel exit, and any
+        subsequent :meth:`subscribe` raises :exc:`BroadcastClosed`.
+        """
+        if self._state is _State.CLOSED:
             return
-        self._closed = True
+        self._state = _State.CLOSED
         for sub in list(self._subs):
             sub.close()
         self._subs.clear()
@@ -145,7 +188,13 @@ class BroadcastQueue(Generic[_T]):
         are observed. The yielded iterator stops cleanly on
         :meth:`close` and raises :exc:`BroadcastOverflow` if this
         subscriber falls behind.
+
+        Raises :exc:`BroadcastClosed` if the bus is already closed —
+        otherwise the new subscriber would never receive a sentinel
+        (close already happened) and ``next()`` would block forever.
         """
+        if self._state is _State.CLOSED:
+            raise BroadcastClosed(self._name)
         sub: _BroadcastSub[_T] = _BroadcastSub(queue_size=self._queue_size)
         self._subs.add(sub)
         try:

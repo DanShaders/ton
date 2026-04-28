@@ -81,3 +81,19 @@ class ValidationError(OrchestratorError):
 class ManagerStopped(OrchestratorError):
     def __init__(self) -> None:
         super().__init__("orchestrator manager is stopping; new operations are refused")
+
+
+class NamespaceTerminating(OrchestratorError):
+    """Write rejected because the target namespace is terminating.
+
+    Once a namespace has a ``deletion_timestamp``, the store rejects
+    new resource creations / updates inside it. This eliminates the
+    cascade-orphan race: a child can't slip in between the cascade
+    reconciler's enumerate and the finalizer drop. Cleanup-style
+    operations (``delete``, ``patch_status``, ``patch_metadata`` for
+    finalizer maintenance) remain allowed.
+    """
+
+    def __init__(self, namespace: str):
+        super().__init__(f"namespace {namespace!r} is terminating; new writes are refused")
+        self.namespace: str = namespace

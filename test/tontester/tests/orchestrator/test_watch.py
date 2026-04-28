@@ -139,3 +139,44 @@ async def test_overflow_raises_watch_overflow(store: InMemoryStore):
     # Subscriber should fail with WatchOverflow once the queue fills.
     with pytest.raises(WatchOverflow):
         await asyncio.wait_for(task, timeout=2.0)
+
+
+async def test_broadcast_subscribe_after_close_raises():
+    """Round-7 M6 (originally Round-6 deferred): ``BroadcastQueue.subscribe``
+    after ``close()`` adds the subscriber to ``_subs`` (which ``close``
+    already cleared) and never delivers a None sentinel — the
+    consumer's ``next()`` blocks forever.
+
+    Contract: subscribing to a closed bus is a usage error and must
+    raise rather than silently hang the consumer.
+    """
+    from orchestrator.broadcast import BroadcastClosed, BroadcastQueue
+
+    bus: BroadcastQueue[int] = BroadcastQueue("test")
+    bus.close()
+    with pytest.raises(BroadcastClosed):
+        async with bus.subscribe():
+            pytest.fail("subscribe should have raised BroadcastClosed")
+
+
+async def test_broadcast_subscribe_during_publish_then_close_drains():
+    """Sanity: subscribers added *before* close still receive any
+    queued events plus the close sentinel; close is what they signal,
+    not what they're rejected by."""
+    from orchestrator.broadcast import BroadcastQueue
+
+    bus: BroadcastQueue[int] = BroadcastQueue("test")
+    received: list[int] = []
+
+    async def _consume() -> None:
+        async with bus.subscribe() as items:
+            async for x in items:
+                received.append(x)
+
+    task = asyncio.create_task(_consume(), name="t.consume")
+    await wait_for_asyncio_idle()
+    bus.publish(1)
+    bus.publish(2)
+    bus.close()
+    await task
+    assert received == [1, 2]

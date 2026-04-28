@@ -22,6 +22,7 @@ from orchestrator import (
     Workload,
     WorkloadSpec,
 )
+from orchestrator.lifecycle import Reaper
 from orchestrator.resources import ResourceLimits
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("virtual_clock")]
@@ -53,6 +54,7 @@ def _wl_with_cgroup(name: str = "x", *, memory_bytes: int = 100 * 1024 * 1024) -
 )
 async def test_spawn_cleanup_on_various_subprocess_exceptions(
     tmp_path: Path,
+    reaper: Reaper,
     monkeypatch: pytest.MonkeyPatch,
     exc: BaseException,
 ):
@@ -64,6 +66,7 @@ async def test_spawn_cleanup_on_various_subprocess_exceptions(
     rt = SubprocessRuntime(
         state_dir=tmp_path / "state",
         cgroup_root=tmp_path / "cgroup",
+        reaper=reaper,
     )
 
     async def _raise(*_args: object, **_kwargs: object) -> None:
@@ -82,6 +85,7 @@ async def test_spawn_cleanup_on_various_subprocess_exceptions(
 
 async def test_spawn_cleanup_on_cancellation(
     tmp_path: Path,
+    reaper: Reaper,
     monkeypatch: pytest.MonkeyPatch,
 ):
     """CancelledError is a BaseException, not Exception. Past code that
@@ -90,6 +94,7 @@ async def test_spawn_cleanup_on_cancellation(
     rt = SubprocessRuntime(
         state_dir=tmp_path / "state",
         cgroup_root=tmp_path / "cgroup",
+        reaper=reaper,
     )
 
     async def _cancel(*_args: object, **_kwargs: object) -> None:
@@ -106,6 +111,7 @@ async def test_spawn_cleanup_on_cancellation(
 
 async def test_spawn_cleanup_when_cgroup_files_unwritable(
     tmp_path: Path,
+    reaper: Reaper,
 ):
     """If a cgroup limit-file write fails (permission, ENOSPC, etc.),
     ``_maybe_create_cgroup`` already swallows the OSError, removes the
@@ -115,27 +121,29 @@ async def test_spawn_cleanup_when_cgroup_files_unwritable(
     rt = SubprocessRuntime(
         state_dir=tmp_path / "state",
         cgroup_root=tmp_path / "cgroup",
+        reaper=reaper,
     )
     # Make cgroup_root read-only so mkdir under it fails with PermissionError.
     cgroup_root = tmp_path / "cgroup"
     cgroup_root.mkdir()
     cgroup_root.chmod(0o500)
     try:
-        # Should still succeed — cgroup placement is best-effort.
-        wl = _wl_with_cgroup("readonly")
-        try:
-            status = await rt.apply(wl)
-        except PermissionError:
-            # Some kernels surface mkdir failure differently — that's
-            # acceptable too as long as no debris is left.
-            pass
-        else:
-            # Apply succeeded: the workload is running without a cgroup.
-            assert status.phase in {"Running", "Pending"}
-            await rt.delete(namespace="default", name="readonly")
+        async with rt.running():
+            # Should still succeed — cgroup placement is best-effort.
+            wl = _wl_with_cgroup("readonly")
+            try:
+                status = await rt.apply(wl)
+            except PermissionError:
+                # Some kernels surface mkdir failure differently — that's
+                # acceptable too as long as no debris is left.
+                pass
+            else:
+                # Apply succeeded: the workload is running without a cgroup.
+                assert status.phase in {"Running", "Pending"}
+                await rt.delete(namespace="default", name="readonly")
+            await rt.shutdown()
     finally:
         cgroup_root.chmod(0o700)
-        await rt._close()
     # No partial dir left under cgroup_root.
     survivors = list(cgroup_root.iterdir())
     assert survivors == [], f"unexpected cgroup debris: {survivors}"

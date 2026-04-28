@@ -55,11 +55,12 @@ from typing import TypeVar, final
 
 from pydantic import BaseModel
 
-from ..errors import AlreadyExists, Conflict, NotFound, ValidationError
+from ..errors import AlreadyExists, Conflict, NamespaceTerminating, NotFound, ValidationError
 from ..ids import new_uid
 from ..resources import (
     LabelSelector,
     Metadata,
+    Namespace,
     ResourceLike,
     matches,
 )
@@ -199,10 +200,22 @@ class InMemoryStore:
         Status is preserved across applies — it's owned by the
         controller side and the only path to write it is
         :meth:`patch_status`.
+
+        Writes into a terminating namespace (deletion_timestamp set)
+        are refused with :exc:`NamespaceTerminating`. This closes
+        the cascade orphan window: a child can't slip in between
+        the cascade reconciler's enumerate and finalizer-drop.
         """
         kind_type = type(desired)
         state = self._state_for(kind_type)
         async with state.lock:
+            # Cross-kind read of namespace state, *inside* our lock.
+            # Outside-the-lock would race: ``async with state.lock``
+            # yields if contended, and during the yield another task
+            # can mark the namespace terminating — recreating the
+            # orphan-child window the barrier exists to close.
+            if not isinstance(desired, Namespace):
+                self._reject_if_namespace_terminating(desired.metadata.namespace)
             key = (desired.metadata.namespace, desired.metadata.name)
             existing = state.rows.get(key)
             if existing is None:
@@ -244,6 +257,9 @@ class InMemoryStore:
         kind_type = type(desired)
         state = self._state_for(kind_type)
         async with state.lock:
+            # Same lock-relative check as ``apply`` — see its comment.
+            if not isinstance(desired, Namespace):
+                self._reject_if_namespace_terminating(desired.metadata.namespace)
             key = (desired.metadata.namespace, desired.metadata.name)
             if key in state.rows:
                 raise AlreadyExists(
@@ -443,6 +459,32 @@ class InMemoryStore:
         if state is None:
             raise ValidationError(f"kind {resource_type.__name__} not registered")
         return state
+
+    def _reject_if_namespace_terminating(self, namespace: str | None) -> None:
+        """Refuse the write if the target namespace is terminating.
+
+        Cluster-scoped writes (namespace=None) are always allowed.
+        Apply / create on the Namespace kind itself are exempt at the
+        callsite — this helper is only invoked for non-Namespace
+        resources whose ``metadata.namespace`` points at a row that
+        may be in the terminating state.
+
+        Read of the namespace row is unsynchronized: we don't take
+        the namespace's per-kind lock. Single-threaded asyncio makes
+        the read atomic against any concurrent mutation, since neither
+        side yields between read and the surrounding write that holds
+        the requesting kind's lock.
+        """
+        if namespace is None:
+            return
+        ns_state = self._kinds.get(Namespace)
+        if ns_state is None:
+            return
+        ns_row = ns_state.rows.get((None, namespace))
+        if ns_row is None:
+            return
+        if ns_row.metadata.deletion_timestamp is not None:
+            raise NamespaceTerminating(namespace)
 
     def _create(self, state: _KindState, desired: _AnyResource) -> _AnyResource:
         new_meta = desired.metadata.model_copy(deep=True)

@@ -47,6 +47,108 @@ def _wl(name: str, namespace: str) -> Workload:
     )
 
 
+async def test_apply_into_namespace_marked_terminating_during_lock_wait_rejected():
+    """Round-7 H2: ``_reject_if_namespace_terminating`` runs *outside*
+    the workload kind's lock. The subsequent ``async with state.lock``
+    yields if the lock is contended; during that yield, another task
+    can mark the namespace terminating. When the apply resumes inside
+    the lock, the check has already passed — the orphan child is
+    written into a now-terminating namespace.
+
+    Test setup: hold the workload lock from a sibling task; while
+    held, mark the namespace terminating; release the lock. The
+    pending apply must fail-the-check INSIDE the lock and raise
+    ``NamespaceTerminating`` rather than silently accepting the write.
+
+    Pre-fix: the check was outside the lock; the test apply succeeds
+    and creates an orphan workload.
+    """
+    from orchestrator import InMemoryStore
+    from orchestrator.errors import NamespaceTerminating
+
+    store = InMemoryStore()
+    store.register_kind(Namespace)
+    store.register_kind(Workload)
+
+    _ = await store.apply(_ns("dying"))
+    _ = await store.patch_metadata(
+        Namespace,
+        namespace=None,
+        name="dying",
+        mutator=lambda m: m.finalizers.append("test/keep"),
+    )
+    # Namespace is registered but not yet terminating.
+
+    # Hold the Workload kind's lock from a sibling task so the
+    # apply below has to wait for it.
+    workload_state = store._kinds[Workload]  # pyright: ignore[reportPrivateUsage]
+    _ = await workload_state.lock.acquire()
+
+    apply_task = asyncio.create_task(
+        store.apply(_wl("late-arrival", "dying")),
+        name="t.apply",
+    )
+    # Let apply progress through the (now-passing) namespace check
+    # and park on the workload lock.
+    await asyncio.sleep(0)
+
+    # Race: mark namespace terminating *while* apply is parked
+    # waiting for the workload lock. The store's namespace lock is
+    # independent; this delete proceeds.
+    await store.delete(Namespace, namespace=None, name="dying")
+
+    # Confirm the namespace is now terminating.
+    ns_now = store.get(Namespace, namespace=None, name="dying")
+    assert ns_now.metadata.deletion_timestamp is not None
+
+    # Release the workload lock. The apply re-acquires and must
+    # re-check (inside the lock) that the namespace is still writable.
+    workload_state.lock.release()
+
+    # Apply must fail with NamespaceTerminating now.
+    with pytest.raises(NamespaceTerminating, match="dying"):
+        _ = await apply_task
+
+
+async def test_apply_into_terminating_namespace_rejected():
+    """Store invariant: once a namespace has a deletion_timestamp,
+    new ``apply`` calls for resources inside it must be rejected.
+
+    This eliminates the cascade orphan window: the cascade reconciler
+    enumerates children, drops the namespace finalizer, and the row
+    is hard-deleted. Without this guard, a late ``apply`` between
+    enumerate and finalizer-drop would create an orphan child whose
+    namespace was already gone. With the guard, that race is
+    structurally impossible — the late apply just raises.
+    """
+    from orchestrator import InMemoryStore
+    from orchestrator.errors import NamespaceTerminating
+
+    store = InMemoryStore()
+    store.register_kind(Namespace)
+    store.register_kind(Workload)
+
+    # Bring up a namespace, install a finalizer so delete() leaves
+    # it in terminating state instead of hard-deleting.
+    _ = await store.apply(_ns("dying"))
+    _ = await store.patch_metadata(
+        Namespace,
+        namespace=None,
+        name="dying",
+        mutator=lambda m: m.finalizers.append("test/keep"),
+    )
+    await store.delete(Namespace, namespace=None, name="dying")
+
+    ns_now = store.get(Namespace, namespace=None, name="dying")
+    assert ns_now.metadata.deletion_timestamp is not None, (
+        "namespace must be terminating, not hard-deleted, for this test"
+    )
+
+    # Now: apply a Workload into the dying namespace must fail.
+    with pytest.raises(NamespaceTerminating, match="dying"):
+        _ = await store.apply(_wl("late-arrival", "dying"))
+
+
 async def test_namespace_finalizer_added(tmp_path: Path, fake_runtime: FakeRuntime):
     manager = Manager()
     manager.register_kind(Namespace)

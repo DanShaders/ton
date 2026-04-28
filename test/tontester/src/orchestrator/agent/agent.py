@@ -24,6 +24,15 @@ separate hosts, each filtering by ``host_selector`` against its own
 labels. Cross-host transport is out of scope for this prototype — the
 class is the same, the transport plugs in front of the store
 subscribe + patch_status calls.
+
+**Resource shape.** Agent implements the
+:class:`~orchestrator.lifecycle.Resource` Protocol:
+``running()`` is the lifecycle context manager (sync ``__aexit__``
+sets stop_token and cancels owned tasks); ``shutdown()`` is the
+explicit graceful drain that awaits the runner, the runtime, and
+the runtime-event task. All sub-resources (runtime, runner) follow
+the same Resource shape, so the Agent's ``__aexit__`` is fully
+sync — no papered seam.
 """
 
 import asyncio
@@ -36,6 +45,14 @@ from typing import Literal, Self, final, override
 
 from ..control import Controller, ControllerRunner, ItemRef, Result, WatchSpec
 from ..errors import NotFound
+from ..lifecycle import (
+    CheckedExitStack,
+    GracefulAbort,
+    Resource,
+    ResourceNotRunning,
+    StopToken,
+    cancel_and_collect,
+)
 from ..resources import (
     Condition,
     Metadata,
@@ -94,26 +111,19 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _cancel_all(tasks: list[asyncio.Task[None]]) -> None:
-    """Sync callback usable with ``AsyncExitStack.callback`` — cancels
-    every task. The surrounding TaskGroup awaits them on its own
-    ``__aexit__``; we just need to request the cancellation here.
-    """
-    for t in tasks:
-        _ = t.cancel()
-
-
 @final
-class Agent:
+class Agent(Resource):
     """Owns the runtime; reflects spec ↔ status against the store.
 
     Construction is inert. The :meth:`running` async context manager
     cleans the state dir, opens the runtime, spawns the runtime
     event loop, and runs a :class:`WorkloadAgentReconciler` via
-    :class:`ControllerRunner`. On exit (any path, including
-    ``CancelledError``), the AsyncExitStack tears everything down in
-    LIFO order: reconciler stops, event loop is cancelled, runtime
-    closes.
+    :class:`ControllerRunner`.
+
+    Implements :class:`~orchestrator.lifecycle.Resource`: sync
+    ``__aexit__`` only signals stop (no awaits); ``shutdown()`` is
+    the explicit graceful drain that awaits the runtime's shutdown,
+    the runner's shutdown, and the runtime-event task.
 
     ``host_labels`` must include whatever a workload's ``host_selector``
     can match — this is how we partition workloads across hosts in the
@@ -128,74 +138,164 @@ class Agent:
         state_dir: Path,
         cgroup_root: Path | None = None,
         host_labels: dict[str, str] | None = None,
+        parent_token: StopToken | None = None,
     ):
         self._runtime: Runtime = runtime
         self._store: InMemoryStore = store
         self._state_dir: Path = state_dir
         self._cgroup_root: Path | None = cgroup_root
         self._host_labels: dict[str, str] = host_labels or {"host": "local"}
+        self._stop_token: StopToken = (
+            parent_token.child() if parent_token is not None else StopToken()
+        )
+        self._is_running: bool = False
+        # Body task and sub-resources held during running() so
+        # shutdown() can drain them.
+        self._runtime_event_task: asyncio.Task[None] | None = None
+        self._runner: ControllerRunner[Workload] | None = None
 
+    @property
+    @override
+    def stop_token(self) -> StopToken:
+        return self._stop_token
+
+    @override
     @contextlib.asynccontextmanager
     async def running(self) -> AsyncGenerator[Self]:
-        """Open the runtime, spawn the reconciler + runtime event loop,
-        and wait for the runtime subscription to register before yielding.
+        """Open runtime, spawn reflection loops, run reconciler.
 
-        Cleanup ordering on exit (LIFO of AsyncExitStack):
+        Setup uses :class:`CheckedExitStack` so a stop_token fired
+        mid-init aborts gracefully via :exc:`GracefulAbort`. Sub-
+        resources (runtime, runner) are entered via the stack so
+        their sync ``__aexit__``s run in LIFO on body exit.
 
-        1. Cancel the runtime event loop task (TaskGroup awaits it).
-        2. ControllerRunner exits — its TaskGroup cancels watch +
-           worker tasks, drains the workqueue.
-        3. Runtime ``running()`` exits — drains workloads.
-
-        External cancellation of the surrounding ``async with``
-        propagates through every level because that's the contract
-        of TaskGroup and AsyncExitStack.
+        ``__aexit__`` (sync) sets stop_token, marks not running, and
+        requests cancellation of the runtime-event task. No awaits.
+        Caller should ``await agent.shutdown()`` inside the with-
+        block for graceful drain (wrap with
+        ``asyncio.wait_for(...)`` for a budget).
         """
+        if self._is_running:
+            raise ResourceNotRunning("Agent.running re-entered while already running")
         clean_state_dir(self._state_dir)
         clean_cgroup_root(self._cgroup_root)
 
-        runtime_ready = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        # Future, not Event: ``_runtime_event_loop`` can ``set_exception``
+        # on the first-time setup failure, which surfaces here as a
+        # raise from ``await runtime_ready`` instead of an indefinite
+        # block. Mirrors ControllerRunner._watch_loop's pattern.
+        runtime_ready: asyncio.Future[None] = loop.create_future()
         reconciler = WorkloadAgentReconciler(
             runtime=self._runtime,
             host_labels=self._host_labels,
         )
-        runner: ControllerRunner[Workload] = ControllerRunner(reconciler, store=self._store)
+        self._runner = ControllerRunner(
+            reconciler, store=self._store, parent_token=self._stop_token
+        )
 
-        async with contextlib.AsyncExitStack() as stack:
-            _ = await stack.enter_async_context(self._runtime.running())
-            tg = await stack.enter_async_context(asyncio.TaskGroup())
-            runtime_task = tg.create_task(
-                self._runtime_event_loop(runtime_ready),
-                name="agent.runtime",
-            )
-            _ = stack.callback(_cancel_all, [runtime_task])
-            _ = await stack.enter_async_context(runner.running())
-            _ = await runtime_ready.wait()
-            yield self
+        try:
+            async with CheckedExitStack(self._stop_token) as stack:
+                _ = await stack.enter_async_context(self._runtime.running())
+                _ = await stack.enter_async_context(self._runner.running())
+                self._runtime_event_task = asyncio.create_task(
+                    self._runtime_event_loop(runtime_ready),
+                    name="agent.runtime",
+                )
+                try:
+                    _ = await runtime_ready
+                    self._is_running = True
+                    yield self
+                finally:
+                    # SYNC: signal stop, mark not running, request
+                    # cancel on the runtime event task. Sub-resource
+                    # ``__aexit__``s (sync) fire as the stack
+                    # unwinds. Resource discipline.
+                    self._is_running = False
+                    self._stop_token.set()
+                    if not self._runtime_event_task.done():
+                        _ = self._runtime_event_task.cancel()
+        except GracefulAbort:
+            # stop_token fired mid-init via CheckedExitStack safe-point.
+            # Convert to ResourceNotRunning so the caller sees a clear
+            # semantic error instead of @asynccontextmanager's
+            # RuntimeError("generator didn't yield").
+            raise ResourceNotRunning("Agent.running entered with stop_token already set") from None
+
+    @override
+    async def shutdown(self) -> None:
+        """Graceful drain: signal stop, await sub-resources + body task.
+
+        Must be called inside ``running()``; raises
+        :exc:`ResourceNotRunning` otherwise.
+
+        Caller controls the budget by wrapping with
+        :func:`asyncio.wait_for`. Caller-cancel propagates;
+        ``__aexit__`` reconciles any half-state.
+        """
+        if not self._is_running:
+            raise ResourceNotRunning("Agent.shutdown called outside running()")
+        self._stop_token.set()
+        # Drain the runner first: stop reconciling against the
+        # runtime, so the runtime sees no new applies before we ask
+        # it to drain in-flight work.
+        if self._runner is not None:
+            try:
+                await self._runner.shutdown()
+            except ResourceNotRunning:
+                pass
+        try:
+            await self._runtime.shutdown()
+        except ResourceNotRunning:
+            pass
+        # Cancel + collect the runtime event loop task. It's not a
+        # Resource of its own; just a long-lived task we own. The
+        # helper distinguishes our own cancel from an outer cancel
+        # of agent.shutdown — the latter must propagate.
+        if self._runtime_event_task is not None:
+            await cancel_and_collect(self._runtime_event_task)
 
     # ---- runtime → status loop ----------------------------------------
 
-    async def _runtime_event_loop(self, ready: asyncio.Event) -> None:
+    async def _runtime_event_loop(self, ready: asyncio.Future[None]) -> None:
         """Mirror runtime events into Workload status.
 
         ``runtime.watch()`` is an async context manager — synchronous
-        registration on entry, automatic cleanup on exit. We set
+        registration on entry, automatic cleanup on exit. We resolve
         ``ready`` immediately after entering: by then the subscriber
         is on the runtime's broadcast set, so any apply() the agent
-        issues will be observed. No registration sentinel needed.
+        issues will be observed.
 
-        Wrapped in a restart loop because a transient exception in
-        ``_reflect_runtime_event`` would otherwise kill this task
-        silently while the reconciler kept writing specs — leaving
-        status permanently desynced from the runtime.
+        Failure handling has two regimes, distinguished by whether
+        ``ready`` has been resolved:
+
+        - **Setup failure (ready not yet done):** the exception is
+          set on the ``ready`` future and re-raised. ``Agent.running``
+          sees it via ``await runtime_ready`` and propagates the
+          original failure to the caller. Catches bugs like "runtime
+          backend permanently broken."
+        - **Steady-state failure (ready already done):** the exception
+          is logged and the loop pauses before re-subscribing — same
+          shape as a k8s informer recovery on transient store errors.
         """
         while True:
             try:
                 async with self._runtime.watch() as events:
-                    ready.set()
+                    if not ready.done():
+                        ready.set_result(None)
                     async for event in events:
                         await self._reflect_runtime_event(event)
-            except Exception:
+            except Exception as e:
+                if not ready.done():
+                    # Setup failure: surface via the ready future and
+                    # exit. Returning (not re-raising) means the task
+                    # ends with no exception of its own — the error
+                    # lives on the future, where ``await runtime_ready``
+                    # in ``Agent.running()`` consumes it. No need for
+                    # a drain-callback dance to retrieve a duplicate
+                    # task-level exception.
+                    ready.set_exception(e)
+                    return
                 logger.exception("runtime event loop crashed; restarting after pause")
                 await asyncio.sleep(1.0)
 
@@ -398,10 +498,6 @@ async def _write_status(
     except NotFound:
         return
     except Exception:
-        # patch_status can raise Conflict (concurrent writer),
-        # ValidationError (mutator misuse), or pydantic errors.
-        # Log and absorb — letting it propagate would crash the
-        # reconciler / runtime event loop.
         logger.exception(f"AGENT _write_status({ns}/{name}) raised; swallowing")
 
 

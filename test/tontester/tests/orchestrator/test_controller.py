@@ -48,17 +48,24 @@ class _BlockingController(Controller[Workload]):
 
 
 async def test_runner_running_fails_fast_on_watch_setup_error():
-    """Bug round-5 #3: ``ControllerRunner._watch_loop``'s setup
-    (``store.subscription(...)``) can raise — e.g. ``ValidationError``
-    if the watched kind isn't registered. The loop's broad
-    ``except Exception`` arm logs and re-loops, never setting the
-    ``ready`` event. ``running()`` blocks on ``await ready.wait()``
-    forever, instead of failing fast with the configuration error.
+    """Resource-shape contract: a watch_loop's setup error
+    (``store.subscription(...)`` raising, e.g. ``ValidationError``
+    on an unregistered kind) propagates out of ``async with
+    runner.running()`` directly — no ExceptionGroup wrap — and
+    every spawned task gets cancelled by the runner's setup-failure
+    cleanup path.
 
-    Pin the contract: a setup failure surfaces to the caller of
-    ``async with runner.running():`` and every spawned task is
-    cleaned up by TaskGroup unwind.
+    Pre-fix (round-5 #3): the loop's broad ``except Exception``
+    arm logged and re-looped, never setting the ``ready`` future.
+    ``running()`` blocked on ``await ready.wait()`` forever.
+
+    Post-Resource-shape: ``_watch_loop`` calls
+    ``ready.set_exception`` before re-raising, so the ``await ready``
+    in ``running()`` re-raises the original error. Before the
+    re-raise propagates, every spawned task is cancelled.
     """
+    from orchestrator import ValidationError
+
     store = InMemoryStore()
     store.register_kind(Workload)
     # Deliberately don't register Namespace — _BlockingController watches
@@ -76,28 +83,12 @@ async def test_runner_running_fails_fast_on_watch_setup_error():
             ]
             pytest.fail("running() should not have yielded; setup must have failed")
 
-    with pytest.raises(BaseException) as exc_info:
+    with pytest.raises(ValidationError):
         await _try_enter()
 
-    # The original ValidationError must be reachable in the exception chain
-    # (TaskGroup wraps body exceptions in ExceptionGroup).
-    flat: list[BaseException] = []
-
-    def _flatten(e: BaseException) -> None:
-        if isinstance(e, BaseExceptionGroup):
-            for sub in e.exceptions:
-                _flatten(sub)
-        else:
-            flat.append(e)
-
-    _flatten(exc_info.value)
-    from orchestrator import ValidationError
-
-    assert any(isinstance(e, ValidationError) for e in flat), (
-        f"expected ValidationError in exception chain, got {[type(e).__name__ for e in flat]}"
-    )
-    # And every task spawned before the failure must be done — TaskGroup
-    # unwind doesn't leak.
+    # The runner's setup-failure path cancels every spawned task before
+    # the exception propagates. Yield once so the cancellations land.
+    await asyncio.sleep(0)
     for t in spawned_before_failure:
         assert t.done(), f"task {t.get_name()} leaked through fail-fast unwind"
 
@@ -154,20 +145,21 @@ async def test_manager_running_cancellation_stops_already_started_runners():
 
 
 async def test_manager_running_propagates_internal_failures():
-    """Bug 7 (audit round 4) — original shape: ``Manager.shutdown``
-    set ``_stopping=True`` before ``aclose``, leaving the manager
-    permanently un-shutdownable on aclose failure.
+    """Resource-shape contract: a body exception inside
+    ``async with manager.running()`` propagates out unchanged
+    (no TaskGroup wrap), and every sub-resource's sync ``__aexit__``
+    still runs as the :class:`CheckedExitStack` unwinds.
 
-    The fix is structural: there is no longer a ``shutdown()`` method
-    or ``_stopping`` flag. ``Manager.running()`` is an
-    ``AsyncExitStack``-based async context manager. Failure during
-    entry rolls back via the stack's own ``__aexit__``; failure on
-    exit propagates the exception to the caller's ``async with``.
-    There is no in-between state to corrupt.
+    Pre-fix (audit round 4): ``Manager.shutdown`` flipped a
+    ``_stopping=True`` flag before tear-down, leaving the manager
+    permanently un-shutdownable on tear-down failure. The Resource
+    Protocol eliminates that: no flag, no shutdown-before-running
+    sequencing — the body exception just falls through the stack's
+    LIFO unwind.
 
-    This test pins the new contract: an exception raised by code
-    inside ``async with manager.running()`` propagates out, and
-    every cleanup callback the stack accumulated still runs.
+    Manager is one-shot per the Resource discipline: re-entering
+    ``running()`` after exit is not supported (its ``stop_token``
+    has fired).
     """
     from orchestrator import Manager
 
@@ -191,20 +183,15 @@ async def test_manager_running_propagates_internal_failures():
     manager.register_kind(Workload)
     manager.add_controller(_OkController())
 
-    # ``asyncio.TaskGroup`` (used inside each runner's running())
-    # wraps body exceptions in ``BaseExceptionGroup`` per its
-    # documented contract; the original is reachable via ``.split``.
-    with pytest.raises(BaseExceptionGroup) as exc_info:
+    with pytest.raises(RuntimeError, match="boom"):
         async with manager.running():
             raise RuntimeError("boom")
-    runtime_errors, _ = exc_info.value.split(RuntimeError)
-    assert runtime_errors is not None
-    assert any("boom" in str(e) for e in runtime_errors.exceptions)
 
-    # After the failed running() exit, everything is back to the
-    # pre-running() state — re-entering must work, not no-op.
-    async with manager.running():
-        pass
+    # After the body exception, the manager's stop_token is set and
+    # _is_running is False — the runner's sync __aexit__ ran during
+    # CheckedExitStack unwind, so its tasks were cancelled.
+    assert manager.stop_token.is_set
+    assert not manager._is_running
 
 
 async def test_runner_running_propagates_external_cancellation():

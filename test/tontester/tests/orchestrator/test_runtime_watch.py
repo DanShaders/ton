@@ -33,6 +33,31 @@ def _event(i: int) -> RuntimeEvent:
     )
 
 
+async def test_runtime_shutdown_inside_running_succeeds(fake_runtime: FakeRuntime):
+    """Resource contract: ``shutdown(deadline)`` is callable inside
+    ``running()``. After it returns, the runtime is drained but the
+    with-block can still be exited cleanly (sync no-op exit)."""
+    async with fake_runtime.running():
+        await fake_runtime.shutdown()
+
+
+async def test_runtime_shutdown_outside_running_raises(fake_runtime: FakeRuntime):
+    """Resource contract: ``shutdown()`` must be called inside
+    ``running()``. Outside, it raises :exc:`ResourceNotRunning`
+    rather than silently no-op'ing."""
+    from orchestrator.lifecycle import ResourceNotRunning
+
+    # Never entered running(); shutdown must error.
+    with pytest.raises(ResourceNotRunning):
+        await fake_runtime.shutdown()
+
+    # After running()'s context exits, shutdown must also error.
+    async with fake_runtime.running():
+        pass
+    with pytest.raises(ResourceNotRunning):
+        await fake_runtime.shutdown()
+
+
 async def test_watch_overflow_raises_broadcast_overflow(fake_runtime: FakeRuntime):
     """Bug 2 (audit round 4) — original shape: ``_publish`` dropped a
     slow subscriber from ``_subs`` without enqueuing a sentinel, so
