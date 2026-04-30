@@ -28,7 +28,7 @@ import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from enum import StrEnum
-from typing import Generic, TypeVar, final
+from typing import final
 
 
 class BroadcastOverflow(RuntimeError):
@@ -60,15 +60,12 @@ class BroadcastClosed(RuntimeError):
         self.name: str = name
 
 
-_T = TypeVar("_T")
-
-
 @final
-class _BroadcastSub(Generic[_T]):
+class _BroadcastSub[T]:
     """One subscriber's per-instance queue + overflow flag."""
 
     def __init__(self, *, queue_size: int):
-        self._queue: asyncio.Queue[_T | None] = asyncio.Queue(maxsize=queue_size)
+        self._queue: asyncio.Queue[T | None] = asyncio.Queue(maxsize=queue_size)
         self._overflowed: bool = False
         self._closed: bool = False
 
@@ -76,7 +73,7 @@ class _BroadcastSub(Generic[_T]):
     def overflowed(self) -> bool:
         return self._overflowed
 
-    def offer(self, item: _T) -> bool:
+    def offer(self, item: T) -> bool:
         """Try to enqueue ``item``. Return False if the queue is full
         (subscriber is now overflowed and should be dropped)."""
         if self._closed or self._overflowed:
@@ -103,7 +100,7 @@ class _BroadcastSub(Generic[_T]):
         except asyncio.QueueFull:
             pass
 
-    async def next(self) -> _T | None:
+    async def next(self) -> T | None:
         return await self._queue.get()
 
 
@@ -113,12 +110,12 @@ class _State(StrEnum):
 
 
 @final
-class BroadcastQueue(Generic[_T]):
+class BroadcastQueue[T]:
     """Per-publisher fan-out bus.
 
     Construct one per distinct stream. ``publish`` fans out
     synchronously to every active subscriber; ``subscribe`` is an
-    async context manager that yields an ``AsyncIterator[_T]``.
+    async context manager that yields an ``AsyncIterator[T]``.
 
     State machine: ``OPEN`` → ``CLOSED`` (one-way). All methods
     document and enforce which states they accept. ``subscribe``
@@ -129,7 +126,7 @@ class BroadcastQueue(Generic[_T]):
     def __init__(self, name: str, *, queue_size: int = 256):
         self._name: str = name
         self._queue_size: int = queue_size
-        self._subs: set[_BroadcastSub[_T]] = set()
+        self._subs: set[_BroadcastSub[T]] = set()
         self._state: _State = _State.OPEN
 
     @property
@@ -144,7 +141,7 @@ class BroadcastQueue(Generic[_T]):
     def is_closed(self) -> bool:
         return self._state is _State.CLOSED
 
-    def publish(self, item: _T) -> None:
+    def publish(self, item: T) -> None:
         """Fan out to every subscriber. Synchronous, never awaits.
 
         Allowed in any state — publishing on a closed bus is a no-op.
@@ -159,7 +156,7 @@ class BroadcastQueue(Generic[_T]):
         """
         if self._state is _State.CLOSED:
             return
-        dead: list[_BroadcastSub[_T]] = []
+        dead: list[_BroadcastSub[T]] = []
         for sub in self._subs:
             if not sub.offer(item):
                 dead.append(sub)
@@ -181,7 +178,7 @@ class BroadcastQueue(Generic[_T]):
         self._subs.clear()
 
     @asynccontextmanager
-    async def subscribe(self) -> AsyncGenerator[AsyncIterator[_T]]:
+    async def subscribe(self) -> AsyncGenerator[AsyncIterator[T]]:
         """Register a subscriber for the lifetime of the ``async with``.
 
         Synchronous registration: events published after this returns
@@ -195,7 +192,7 @@ class BroadcastQueue(Generic[_T]):
         """
         if self._state is _State.CLOSED:
             raise BroadcastClosed(self._name)
-        sub: _BroadcastSub[_T] = _BroadcastSub(queue_size=self._queue_size)
+        sub: _BroadcastSub[T] = _BroadcastSub(queue_size=self._queue_size)
         self._subs.add(sub)
         try:
             yield self._iter(sub)
@@ -203,7 +200,7 @@ class BroadcastQueue(Generic[_T]):
             self._subs.discard(sub)
             sub.close()
 
-    async def _iter(self, sub: _BroadcastSub[_T]) -> AsyncIterator[_T]:
+    async def _iter(self, sub: _BroadcastSub[T]) -> AsyncIterator[T]:
         while True:
             # Overflow at the top of the loop: under sustained pressure
             # the queue stays full so the bus's None push fails too.

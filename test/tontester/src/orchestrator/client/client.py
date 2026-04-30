@@ -10,14 +10,14 @@ to the manager's store. A WebSocket implementation will plug in as
 """
 
 from collections.abc import AsyncIterator
-from typing import Protocol, TypeVar
+from typing import Protocol
 
 from pydantic import BaseModel
 
 from ..resources import LabelSelector, ResourceLike
 from ..store import WatchEvent
 
-_TRes = TypeVar("_TRes", bound=ResourceLike[BaseModel, BaseModel])
+_AnyResource = ResourceLike[BaseModel, BaseModel]
 
 
 class Client(Protocol):
@@ -27,33 +27,35 @@ class Client(Protocol):
     needs it. The in-process implementation satisfies trivially.
     """
 
-    async def apply(self, desired: _TRes, *, expected_version: int | None = None) -> _TRes: ...
+    async def apply[T: _AnyResource](
+        self, desired: T, *, expected_version: int | None = None
+    ) -> T: ...
 
-    async def get(
+    async def get[T: _AnyResource](
         self,
-        resource_type: type[_TRes],
+        resource_type: type[T],
         *,
         namespace: str | None,
         name: str,
-    ) -> _TRes: ...
+    ) -> T: ...
 
-    async def list(
+    async def list[T: _AnyResource](
         self,
-        resource_type: type[_TRes],
+        resource_type: type[T],
         *,
         namespace: str | None = None,
         selector: LabelSelector | None = None,
-    ) -> list[_TRes]: ...
+    ) -> list[T]: ...
 
-    async def delete(
+    async def delete[T: _AnyResource](
         self,
-        resource_type: type[_TRes],
+        resource_type: type[T],
         *,
         namespace: str | None,
         name: str,
     ) -> None: ...
 
-    def watch(
+    def watch[T: _AnyResource](
         self,
-        resource_type: type[_TRes],
-    ) -> AsyncIterator[WatchEvent[_TRes]]: ...
+        resource_type: type[T],
+    ) -> AsyncIterator[WatchEvent[T]]: ...

@@ -23,7 +23,7 @@ children, and what *active* reconcile does.
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import Generic, TypeVar, override
+from typing import override
 
 from pydantic import BaseModel
 
@@ -34,14 +34,13 @@ from .controller import Controller, ItemRef, Result
 logger = logging.getLogger(__name__)
 
 _AnyResource = ResourceLike[BaseModel, BaseModel]
+
+
 # Invariant: CascadingReconciler's methods both consume and return
 # the parent type, so it can't be covariant. Concrete subclasses fix
 # the parameter (NamespaceReconciler is CascadingReconciler[Namespace],
 # not assignable to CascadingReconciler[Resource]).
-_TParent = TypeVar("_TParent", bound=_AnyResource)
-
-
-class CascadingReconciler(Controller[_TParent], Generic[_TParent], ABC):
+class CascadingReconciler[T: _AnyResource](Controller[T], ABC):
     """Reconciler base that handles finalizer + cascade-delete uniformly.
 
     Subclasses implement:
@@ -70,15 +69,15 @@ class CascadingReconciler(Controller[_TParent], Generic[_TParent], ABC):
 
     @abstractmethod
     def enumerate_children(
-        self, store: InMemoryStore, parent: _TParent
+        self, store: InMemoryStore, parent: T
     ) -> Iterable[tuple[type[_AnyResource], _AnyResource]]: ...
 
-    async def reconcile_active(self, store: InMemoryStore, parent: _TParent) -> Result:
+    async def reconcile_active(self, store: InMemoryStore, parent: T) -> Result:
         """Live-parent reconcile. Default: nothing to do."""
         _ = (store, parent)
         return Result(ok=True, reason="active")
 
-    async def on_terminating_entered(self, store: InMemoryStore, parent: _TParent) -> None:
+    async def on_terminating_entered(self, store: InMemoryStore, parent: T) -> None:
         """Called once on first reconcile after deletion_timestamp is set.
 
         Default: no-op. Override to write status.phase or similar.

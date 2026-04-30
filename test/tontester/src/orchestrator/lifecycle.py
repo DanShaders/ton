@@ -62,7 +62,7 @@ from contextlib import (
     AsyncExitStack,
 )
 from types import TracebackType
-from typing import Protocol, Self, TypeVar, final
+from typing import Protocol, Self, final
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,7 @@ class StopToken:
     or the waiter list; reads and writes are atomic between awaits.
     """
 
-    def __init__(self, *, parent: "StopToken | None" = None):
+    def __init__(self, *, parent: StopToken | None = None):
         self._is_set: bool = False
         self._waiters: list[asyncio.Future[None]] = []
         self._children: weakref.WeakSet[StopToken] = weakref.WeakSet()
@@ -127,7 +127,7 @@ class StopToken:
             if fut in self._waiters:
                 self._waiters.remove(fut)
 
-    def child(self) -> "StopToken":
+    def child(self) -> StopToken:
         """Create a child token. Cancelling self cancels the child."""
         return StopToken(parent=self)
 
@@ -157,9 +157,6 @@ class GracefulAbort(BaseException):
     """
 
 
-_T = TypeVar("_T")
-
-
 @final
 class CheckedExitStack:
     """Like :class:`contextlib.AsyncExitStack`, but every
@@ -183,7 +180,7 @@ class CheckedExitStack:
         self._stack: AsyncExitStack = AsyncExitStack()
         self._stop_token: StopToken = stop_token
 
-    async def __aenter__(self) -> "CheckedExitStack":
+    async def __aenter__(self) -> CheckedExitStack:
         _ = await self._stack.__aenter__()
         return self
 
@@ -195,12 +192,12 @@ class CheckedExitStack:
     ) -> bool | None:
         return await self._stack.__aexit__(exc_type, exc, tb)
 
-    async def enter_async_context(self, cm: AbstractAsyncContextManager[_T]) -> _T:
+    async def enter_async_context[T](self, cm: AbstractAsyncContextManager[T]) -> T:
         if self._stop_token.is_set:
             raise GracefulAbort
         return await self._stack.enter_async_context(cm)
 
-    def enter_context(self, cm: AbstractContextManager[_T]) -> _T:
+    def enter_context[T](self, cm: AbstractContextManager[T]) -> T:
         if self._stop_token.is_set:
             raise GracefulAbort
         return self._stack.enter_context(cm)

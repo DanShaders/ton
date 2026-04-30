@@ -33,7 +33,7 @@ import logging
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Generic, Protocol, Self, TypeVar, final, override
+from typing import Protocol, Self, final, override
 
 from pydantic import BaseModel
 
@@ -46,13 +46,6 @@ from .workqueue import Clock, RealClock, WorkQueue
 logger = logging.getLogger(__name__)
 
 _AnyResource = ResourceLike[BaseModel, BaseModel]
-# Covariant in the owned kind: every method that mentions _TOwned uses
-# it in a return-only / phantom position (``owned_kind`` returns
-# ``type[_TOwned]``, ``reconcile`` doesn't consume it). That lets the
-# Manager hold a heterogeneous list of ``Controller[_AnyResource]`` /
-# ``ControllerRunner[_AnyResource]`` while concrete callers see the
-# narrowed parameter on their specific controller.
-_TOwned = TypeVar("_TOwned", bound=_AnyResource, covariant=True)
 
 
 @dataclass(frozen=True)
@@ -95,7 +88,13 @@ class WatchSpec:
     map_event: EventMapper
 
 
-class Controller(Protocol, Generic[_TOwned]):
+# Covariant in the owned kind: every method that mentions T uses
+# it in a return-only / phantom position (``owned_kind`` returns
+# ``type[T]``, ``reconcile`` doesn't consume it). That lets the
+# Manager hold a heterogeneous list of ``Controller[_AnyResource]`` /
+# ``ControllerRunner[_AnyResource]`` while concrete callers see the
+# narrowed parameter on their specific controller.
+class Controller[T: _AnyResource](Protocol):
     """One reconciler for one owned kind.
 
     ``watches`` lists every kind the controller cares about. The runner
@@ -105,7 +104,7 @@ class Controller(Protocol, Generic[_TOwned]):
     """
 
     @property
-    def owned_kind(self) -> type[_TOwned]: ...
+    def owned_kind(self) -> type[T]: ...
 
     @property
     def watches(self) -> list[WatchSpec]: ...
@@ -137,7 +136,7 @@ def owner_mapper(controller_kind: str) -> EventMapper:
 
 
 @final
-class ControllerRunner(Resource, Generic[_TOwned]):
+class ControllerRunner[T: _AnyResource](Resource):
     """Wires one Controller to the store + a workqueue + worker tasks.
 
     Implements the :class:`~orchestrator.lifecycle.Resource` shape::
@@ -160,14 +159,14 @@ class ControllerRunner(Resource, Generic[_TOwned]):
 
     def __init__(
         self,
-        controller: Controller[_TOwned],
+        controller: Controller[T],
         *,
         store: InMemoryStore,
         worker_count: int = 1,
         clock: Clock | None = None,
         parent_token: StopToken | None = None,
     ):
-        self._controller: Controller[_TOwned] = controller
+        self._controller: Controller[T] = controller
         self._store: InMemoryStore = store
         self._worker_count: int = worker_count
         self._queue: WorkQueue[ItemRef] = WorkQueue(clock=clock or RealClock())

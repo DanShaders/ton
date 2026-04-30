@@ -51,7 +51,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Callable, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TypeVar, final
+from typing import final
 
 from pydantic import BaseModel
 
@@ -67,38 +67,32 @@ from ..resources import (
 from .watch import WatchBus, WatchEvent, WatchEventType
 
 # Internal storage erases to the kind-erased Protocol; public API
-# methods are parameterized in ``_TRes`` and narrow back via
+# methods are parameterized in ``T`` and narrow back via
 # ``isinstance(row, resource_type)``.
 _AnyResource = ResourceLike[BaseModel, BaseModel]
 
-# Bound on the Protocol so we can access .spec / .status (read-only,
-# covariant) inside helpers. Concrete subclasses (Workload, Namespace,
-# ...) substitute via covariance — they all both inherit Resource for
-# pydantic discriminator behavior AND structurally satisfy ResourceLike.
-_TRes = TypeVar("_TRes", bound=_AnyResource)
-
 
 @asynccontextmanager
-async def _typed_subscription(
-    bus: "WatchBus[_AnyResource]",
-    resource_type: type[_TRes],
-) -> "AsyncGenerator[AsyncIterator[WatchEvent[_TRes]]]":
+async def _typed_subscription[T: _AnyResource](
+    bus: WatchBus[_AnyResource],
+    resource_type: type[T],
+) -> AsyncGenerator[AsyncIterator[WatchEvent[T]]]:
     """Wrap the kind-erased bus subscription with type narrowing.
 
     Synchronously registers on the underlying bus (the
     :class:`BroadcastQueue`'s subscribe handles that), then yields an
     iterator that narrows each ``WatchEvent[_AnyResource]`` to
-    ``WatchEvent[_TRes]`` via runtime ``isinstance`` check.
+    ``WatchEvent[T]`` via runtime ``isinstance`` check.
     Cleanup is automatic on exit.
     """
     async with bus.subscribe() as raw_events:
         yield _narrow_events(raw_events, resource_type)
 
 
-async def _narrow_events(
-    events: "AsyncIterator[WatchEvent[_AnyResource]]",
-    resource_type: type[_TRes],
-) -> "AsyncIterator[WatchEvent[_TRes]]":
+async def _narrow_events[T: _AnyResource](
+    events: AsyncIterator[WatchEvent[_AnyResource]],
+    resource_type: type[T],
+) -> AsyncIterator[WatchEvent[T]]:
     async for event in events:
         yield WatchEvent(
             type=event.type,
@@ -151,31 +145,33 @@ class InMemoryStore:
 
     # ---- read paths -----------------------------------------------------
 
-    def get(self, resource_type: type[_TRes], *, namespace: str | None, name: str) -> _TRes:
+    def get[T: _AnyResource](
+        self, resource_type: type[T], *, namespace: str | None, name: str
+    ) -> T:
         state = self._state_for(resource_type)
         row = state.rows.get((namespace, name))
         if row is None:
             raise NotFound(kind=resource_type.__name__, namespace=namespace, name=name)
         return _narrow(row.model_copy(deep=True), resource_type)
 
-    def get_or_none(
-        self, resource_type: type[_TRes], *, namespace: str | None, name: str
-    ) -> _TRes | None:
+    def get_or_none[T: _AnyResource](
+        self, resource_type: type[T], *, namespace: str | None, name: str
+    ) -> T | None:
         state = self._state_for(resource_type)
         row = state.rows.get((namespace, name))
         if row is None:
             return None
         return _narrow(row.model_copy(deep=True), resource_type)
 
-    def list(
+    def list[T: _AnyResource](
         self,
-        resource_type: type[_TRes],
+        resource_type: type[T],
         *,
         namespace: str | None = None,
         selector: LabelSelector | None = None,
-    ) -> list[_TRes]:
+    ) -> list[T]:
         state = self._state_for(resource_type)
-        out: list[_TRes] = []
+        out: list[T] = []
         sel = selector or LabelSelector()
         for (ns, _), row in state.rows.items():
             if namespace is not None and ns != namespace:
@@ -187,7 +183,7 @@ class InMemoryStore:
 
     # ---- write paths ----------------------------------------------------
 
-    async def apply(self, desired: _TRes, *, expected_version: int | None = None) -> _TRes:
+    async def apply[T: _AnyResource](self, desired: T, *, expected_version: int | None = None) -> T:
         """Create or update spec + writable metadata fields.
 
         - On create, allocates uid, sets ``creation_timestamp``,
@@ -252,7 +248,7 @@ class InMemoryStore:
             )
         return _narrow(stored.model_copy(deep=True), kind_type)
 
-    async def create(self, desired: _TRes) -> _TRes:
+    async def create[T: _AnyResource](self, desired: T) -> T:
         """Like :meth:`apply` but errors if the object already exists."""
         kind_type = type(desired)
         state = self._state_for(kind_type)
@@ -277,14 +273,14 @@ class InMemoryStore:
             )
         return _narrow(stored.model_copy(deep=True), kind_type)
 
-    async def patch_status(
+    async def patch_status[T: _AnyResource](
         self,
-        resource_type: type[_TRes],
+        resource_type: type[T],
         *,
         namespace: str | None,
         name: str,
-        mutator: Callable[[_TRes], None],
-    ) -> _TRes:
+        mutator: Callable[[T], None],
+    ) -> T:
         """Run ``mutator`` against the live status under the kind lock.
 
         ``mutator`` receives a *deep copy* of the row and may mutate
@@ -315,9 +311,9 @@ class InMemoryStore:
             )
         return _narrow(stored.model_copy(deep=True), resource_type)
 
-    async def delete(
+    async def delete[T: _AnyResource](
         self,
-        resource_type: type[_TRes],
+        resource_type: type[T],
         *,
         namespace: str | None,
         name: str,
@@ -354,14 +350,14 @@ class InMemoryStore:
                 )
             )
 
-    async def patch_metadata(
+    async def patch_metadata[T: _AnyResource](
         self,
-        resource_type: type[_TRes],
+        resource_type: type[T],
         *,
         namespace: str | None,
         name: str,
         mutator: Callable[[Metadata], None],
-    ) -> _TRes:
+    ) -> T:
         """Edit labels/annotations/finalizers in place under the kind lock.
 
         If the mutator removes the last finalizer on a row that's
@@ -412,9 +408,9 @@ class InMemoryStore:
 
     # ---- watch ----------------------------------------------------------
 
-    def subscription(
-        self, resource_type: type[_TRes]
-    ) -> AbstractAsyncContextManager[AsyncIterator[WatchEvent[_TRes]]]:
+    def subscription[T: _AnyResource](
+        self, resource_type: type[T]
+    ) -> AbstractAsyncContextManager[AsyncIterator[WatchEvent[T]]]:
         """Open a synchronously-registered subscription bound to a kind.
 
         Use as::
@@ -427,16 +423,16 @@ class InMemoryStore:
         ``__aenter__`` (synchronously, so any ``apply`` issued after
         ``async with`` enters is observed), and unregisters on
         ``__aexit__``. The yielded iterator is an
-        ``AsyncIterator[WatchEvent[_TRes]]`` — events are narrowed
+        ``AsyncIterator[WatchEvent[T]]`` — events are narrowed
         from the kind-erased bus type.
         """
         state = self._state_for(resource_type)
         return _typed_subscription(state.bus, resource_type)
 
-    async def subscribe(
+    async def subscribe[T: _AnyResource](
         self,
-        resource_type: type[_TRes],
-    ) -> AsyncIterator[WatchEvent[_TRes]]:
+        resource_type: type[T],
+    ) -> AsyncIterator[WatchEvent[T]]:
         """Convenience: register + iterate in one call.
 
         Equivalent to ``async with store.subscription(...) as events:
@@ -578,11 +574,11 @@ class InMemoryStore:
         return row.model_copy(deep=True, update={"metadata": new_meta})
 
 
-def _narrow(row: _AnyResource, resource_type: type[_TRes]) -> _TRes:
+def _narrow[T: _AnyResource](row: _AnyResource, resource_type: type[T]) -> T:
     """Recover the precise subclass type from the erased base.
 
     Rows are stored under their declared subclass at ``register_kind``
-    time; the runtime instance *is* a ``_TRes``. ``isinstance`` narrows
+    time; the runtime instance *is* a ``T``. ``isinstance`` narrows
     the type without ``cast()``.
     """
     if not isinstance(row, resource_type):

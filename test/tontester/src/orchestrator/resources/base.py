@@ -29,7 +29,7 @@ shape identical. :func:`make_ref` reads them from any
 
 from collections.abc import Iterator, Mapping
 from datetime import datetime
-from typing import ClassVar, Generic, Literal, Protocol, Self, TypeVar
+from typing import ClassVar, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict
 
@@ -144,18 +144,14 @@ class Resource(StrictModel):
     metadata: Metadata
 
 
-_TSpec_co = TypeVar("_TSpec_co", bound=BaseModel, covariant=True)
-_TStatus_co = TypeVar("_TStatus_co", bound=BaseModel, covariant=True)
-
-
-class ResourceLike(Protocol, Generic[_TSpec_co, _TStatus_co]):
+class ResourceLike[TSpec: BaseModel, TStatus: BaseModel](Protocol):
     """Read-only view of any resource — base + concrete subclasses both fit.
 
     Read-only by design — covariant in spec/status. Concrete pydantic
     classes (``Workload`` etc.) satisfy structurally because their
     field accesses behave like read-only properties for Protocol
     matching purposes. The store uses ``ResourceLike[BaseModel,
-    BaseModel]`` as its TypeVar bound; concrete subclasses with
+    BaseModel]`` as its bound; concrete subclasses with
     ``spec: WorkloadSpec`` substitute via covariance.
 
     The ``model_copy`` / ``model_dump`` declarations are thin pydantic
@@ -175,10 +171,10 @@ class ResourceLike(Protocol, Generic[_TSpec_co, _TStatus_co]):
     def metadata(self) -> Metadata: ...
 
     @property
-    def spec(self) -> _TSpec_co: ...
+    def spec(self) -> TSpec: ...
 
     @property
-    def status(self) -> _TStatus_co: ...
+    def status(self) -> TStatus: ...
 
     def model_copy(
         self, *, deep: bool = False, update: Mapping[str, object] | None = None
@@ -187,7 +183,7 @@ class ResourceLike(Protocol, Generic[_TSpec_co, _TStatus_co]):
     def model_dump(self) -> dict[str, object]: ...
 
 
-def make_ref(resource: "ResourceLike[BaseModel, BaseModel]") -> ObjectRef:
+def make_ref(resource: ResourceLike[BaseModel, BaseModel]) -> ObjectRef:
     return ObjectRef(
         api_version=resource.api_version,
         kind=resource.kind,

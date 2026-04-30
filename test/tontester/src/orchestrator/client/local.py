@@ -6,7 +6,7 @@ deep-copies on the way in/out so callers can't mutate stored rows.
 """
 
 from collections.abc import AsyncIterator
-from typing import TypeVar, final, override
+from typing import final, override
 
 from pydantic import BaseModel
 
@@ -14,7 +14,7 @@ from ..resources import LabelSelector, ResourceLike
 from ..store import InMemoryStore, WatchEvent
 from .client import Client
 
-_TRes = TypeVar("_TRes", bound=ResourceLike[BaseModel, BaseModel])
+_AnyResource = ResourceLike[BaseModel, BaseModel]
 
 
 @final
@@ -29,33 +29,33 @@ class LocalClient(Client):
         self._store: InMemoryStore = store
 
     @override
-    async def apply(self, desired: _TRes, *, expected_version: int | None = None) -> _TRes:
+    async def apply[T: _AnyResource](self, desired: T, *, expected_version: int | None = None) -> T:
         return await self._store.apply(desired, expected_version=expected_version)
 
     @override
-    async def get(
+    async def get[T: _AnyResource](
         self,
-        resource_type: type[_TRes],
+        resource_type: type[T],
         *,
         namespace: str | None,
         name: str,
-    ) -> _TRes:
+    ) -> T:
         return self._store.get(resource_type, namespace=namespace, name=name)
 
     @override
-    async def list(
+    async def list[T: _AnyResource](
         self,
-        resource_type: type[_TRes],
+        resource_type: type[T],
         *,
         namespace: str | None = None,
         selector: LabelSelector | None = None,
-    ) -> list[_TRes]:
+    ) -> list[T]:
         return self._store.list(resource_type, namespace=namespace, selector=selector)
 
     @override
-    async def delete(
+    async def delete[T: _AnyResource](
         self,
-        resource_type: type[_TRes],
+        resource_type: type[T],
         *,
         namespace: str | None,
         name: str,
@@ -63,8 +63,8 @@ class LocalClient(Client):
         await self._store.delete(resource_type, namespace=namespace, name=name)
 
     @override
-    def watch(
+    def watch[T: _AnyResource](
         self,
-        resource_type: type[_TRes],
-    ) -> AsyncIterator[WatchEvent[_TRes]]:
+        resource_type: type[T],
+    ) -> AsyncIterator[WatchEvent[T]]:
         return self._store.subscribe(resource_type)

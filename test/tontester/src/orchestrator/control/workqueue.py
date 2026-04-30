@@ -24,7 +24,7 @@ import heapq
 import time
 from collections.abc import AsyncIterator, Hashable
 from dataclasses import dataclass, field
-from typing import Generic, Protocol, TypeVar, final, override
+from typing import Protocol, final, override
 
 
 class QueueClosed(RuntimeError):
@@ -47,18 +47,15 @@ class RealClock(Clock):
             return time.monotonic()
 
 
-_TRef = TypeVar("_TRef", bound=Hashable)
-
-
 @dataclass(frozen=True, order=True)
-class _Scheduled(Generic[_TRef]):
+class _Scheduled[T: Hashable]:
     deadline: float
     seq: int  # monotonic tiebreaker; ensures total order in heap
-    ref: _TRef = field(compare=False)
+    ref: T = field(compare=False)
 
 
 @final
-class WorkQueue(Generic[_TRef]):
+class WorkQueue[T: Hashable]:
     """Rate-limited dedup queue.
 
     The queue is a min-heap on ``(deadline, seq)``. ``add(ref)`` schedules
@@ -78,9 +75,9 @@ class WorkQueue(Generic[_TRef]):
         self._max = max_backoff_s
         self._clock: Clock = clock or RealClock()
 
-        self._heap: list[_Scheduled[_TRef]] = []
-        self._scheduled_refs: set[_TRef] = set()
-        self._in_flight: set[_TRef] = set()
+        self._heap: list[_Scheduled[T]] = []
+        self._scheduled_refs: set[T] = set()
+        self._in_flight: set[T] = set()
         # Tracks the worker's reconcile task per in-flight ref so
         # ``_add_at`` can supersede it: when a new event arrives for
         # a ref already being reconciled, we cancel the in-flight task
@@ -88,19 +85,19 @@ class WorkQueue(Generic[_TRef]):
         # finishing a now-obsolete spec. The supervisor pattern in
         # SubprocessRuntime makes this cancellation safe — RAII
         # unwinds any in-progress process spawn.
-        self._in_flight_tasks: dict[_TRef, asyncio.Task[object]] = {}
+        self._in_flight_tasks: dict[T, asyncio.Task[object]] = {}
         # Refs added while in-flight: rescheduled on done() at the
         # *earliest* requested deadline. Storing the deadline (not
         # just a flag) keeps add_after's debounce request alive across
         # the in-flight window — otherwise a watch event mid-reconcile
         # would silently collapse a 10s requeue_after_s into
         # "immediate" (round-5 #6).
-        self._dirty_in_flight: dict[_TRef, float] = {}
+        self._dirty_in_flight: dict[T, float] = {}
         # Refs whose in-flight reconcile we cancelled (supersede). On
         # done() we use this to skip failure-backoff increment — the
         # cancellation was our doing, not the reconciler's failure.
-        self._superseded: set[_TRef] = set()
-        self._failure_count: dict[_TRef, int] = {}
+        self._superseded: set[T] = set()
+        self._failure_count: dict[T, int] = {}
 
         # Per-call wakeup futures. Each ``get`` waiter appends; producers
         # resolve one. A bare ``asyncio.Event`` was the original
@@ -116,14 +113,14 @@ class WorkQueue(Generic[_TRef]):
 
     # ---- producer side -------------------------------------------------
 
-    def add(self, ref: _TRef) -> None:
+    def add(self, ref: T) -> None:
         """Schedule ``ref`` for immediate processing (deduped)."""
         self._add_at(ref, self._clock.now())
 
-    def add_after(self, ref: _TRef, delay_s: float) -> None:
+    def add_after(self, ref: T, delay_s: float) -> None:
         self._add_at(ref, self._clock.now() + max(0.0, delay_s))
 
-    def _add_at(self, ref: _TRef, deadline: float) -> None:
+    def _add_at(self, ref: T, deadline: float) -> None:
         if self._closed:
             return
         if ref in self._in_flight:
@@ -152,7 +149,7 @@ class WorkQueue(Generic[_TRef]):
         heapq.heappush(self._heap, _Scheduled(deadline=deadline, seq=self._seq, ref=ref))
         self._wake_one()
 
-    def register_in_flight_task(self, ref: _TRef, task: asyncio.Task[object]) -> None:
+    def register_in_flight_task(self, ref: T, task: asyncio.Task[object]) -> None:
         """Worker registers its current reconcile task so the queue
         can supersede-cancel it on a fresh add().
 
@@ -186,7 +183,7 @@ class WorkQueue(Generic[_TRef]):
 
     # ---- consumer side -------------------------------------------------
 
-    async def get(self) -> _TRef:
+    async def get(self) -> T:
         """Block until a ref is due, then return it.
 
         Caller must call :meth:`done` after processing — until then the
@@ -232,7 +229,7 @@ class WorkQueue(Generic[_TRef]):
                 if waiter in self._waiters:
                     self._waiters.remove(waiter)
 
-    def done(self, ref: _TRef, *, success: bool) -> None:
+    def done(self, ref: T, *, success: bool) -> None:
         """Signal that processing of ``ref`` finished.
 
         Failure schedules an exponential-backoff requeue. Success resets
@@ -282,7 +279,7 @@ class WorkQueue(Generic[_TRef]):
         )
         self._add_at(ref, deadline)
 
-    def forget(self, ref: _TRef) -> None:
+    def forget(self, ref: T) -> None:
         """Drop any failure-count history for ``ref``.
 
         Use when a ref becomes irrelevant (object deleted) and we want
@@ -298,12 +295,12 @@ class WorkQueue(Generic[_TRef]):
     def in_flight_count(self) -> int:
         return len(self._in_flight)
 
-    def failure_count(self, ref: _TRef) -> int:
+    def failure_count(self, ref: T) -> int:
         return self._failure_count.get(ref, 0)
 
     # ---- iteration helper ---------------------------------------------
 
-    async def items(self) -> AsyncIterator[_TRef]:
+    async def items(self) -> AsyncIterator[T]:
         """Iterate the queue; stops cleanly on close()."""
         while True:
             try:
