@@ -116,7 +116,7 @@ class BusEventPublishImplBase {
     EventDispatcherFn dispatcher_fn;
   };
 
-  void publish(std::shared_ptr<E> event, BusHandle<B> handle) {
+  void broadcast(std::shared_ptr<E>& event, const BusHandle<B>& handle) {
     for (const auto& [actor, dispatcher_fn] : dispatchers) {
       td::actor::send_closure(actor, dispatcher_fn, handle, event);
     }
@@ -134,7 +134,12 @@ class BusEventPublishImplBase {
 };
 
 template <typename B, typename E>
-class BusEventPublishImpl : public BusEventPublishImplBase<B, E> {};
+class BusEventPublishImpl : public BusEventPublishImplBase<B, E> {
+ public:
+  void publish(std::shared_ptr<E> event, BusHandle<B> handle) {
+    this->broadcast(event, handle);
+  }
+};
 
 template <typename B, ValidRequestFor<B> E>
 class BusEventPublishImpl<B, E> : public BusEventPublishImplBase<B, E> {
@@ -146,7 +151,7 @@ class BusEventPublishImpl<B, E> : public BusEventPublishImplBase<B, E> {
     auto result = co_await td::actor::ask(actor, dispatcher_fn, handle, event).wrap();
     log_response(*event, result);
     if (result.is_ok()) {
-      static_cast<BusEventPublishImplBase<B, E>>(*this).publish(event, handle);
+      this->broadcast(event, handle);
     }
     co_return result;
   }
@@ -169,13 +174,13 @@ using BusImpl = BusPublishImpl<B, typename B::Events>;
 
 template <typename B, typename... Es>
 struct BusPublishImpl<B, td::TypeList<Es...>> : BusEventPublishImpl<B, Es>... {
-  using BusEventPublishImpl<B, Es>::publish...;
+  using BusEventPublishImpl<B, Es>::broadcast..., BusEventPublishImpl<B, Es>::publish...;
 };
 
 template <BusWithParent B, typename... Es>
 struct BusPublishImpl<B, td::TypeList<Es...>> : BusImpl<typename B::Parent>, BusEventPublishImpl<B, Es>... {
-  using BusImpl<typename B::Parent>::publish;
-  using BusEventPublishImpl<B, Es>::publish...;
+  using BusImpl<typename B::Parent>::broadcast, BusImpl<typename B::Parent>::publish;
+  using BusEventPublishImpl<B, Es>::broadcast..., BusEventPublishImpl<B, Es>::publish...;
 };
 
 struct BusTreeNode {
@@ -257,11 +262,17 @@ class BusHandle {
       , impl_(std::static_pointer_cast<BusImpl<B>>(handle.impl_)) {
   }
 
+  template <ValidPublishTargetFor<B> E>
+  void broadcast(std::shared_ptr<E> event) const {
+    CHECK(*this);
+    log_event(true, *node_, *event);
+    impl_->broadcast(event, *this);
+  }
+
   // publish is technically not constant but we give BusHandle const& to user code.
   template <ValidPublishTargetFor<B> E>
   [[nodiscard]] auto publish(std::shared_ptr<E> event) const {
     CHECK(*this);
-
     log_event(true, *node_, *event);
     return impl_->publish(std::move(event), *this);
   }

@@ -83,6 +83,8 @@ struct PeerValidator {
 td::StringBuilder& operator<<(td::StringBuilder& stream, const PeerValidator& peer_validator);
 
 struct ProtocolMessage {
+  ProtocolMessage() = default;
+
   ProtocolMessage(td::BufferSlice data) : data(std::move(data)) {
   }
 
