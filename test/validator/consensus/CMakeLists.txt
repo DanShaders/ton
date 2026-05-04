@@ -11,3 +11,6 @@ target_link_libraries(test-consensus PRIVATE
     ton_validator
     validator
 )
+
+add_executable(test-simplex test-simplex.cpp)
+target_link_libraries(test-simplex PRIVATE tdactor tdutils validator td-test-main)

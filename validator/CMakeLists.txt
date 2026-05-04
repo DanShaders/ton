@@ -226,6 +226,7 @@ target_include_directories(full-node PUBLIC
   )
 
 target_link_libraries(validator PRIVATE validator-common validator-db ton_validator)
+target_link_libraries(validator PUBLIC keyring)
 
 target_link_libraries(validator-disk PRIVATE validator-common validator-db)
 
