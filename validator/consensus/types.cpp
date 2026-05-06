@@ -5,8 +5,12 @@
  */
 
 #include "auto/tl/ton_api.hpp"
+#include "auto/tl/ton_api_json.h"
 #include "keys/encryptor.h"
+#include "td/utils/format.h"
 #include "td/utils/overloaded.h"
+#include "tl/tl_json.h"
+#include "ton/ton-io.hpp"
 #include "validator-session/candidate-serializer.h"
 
 #include "bus.h"
@@ -30,6 +34,27 @@ bool PeerValidator::check_signature(ValidatorSessionId session, td::Slice data, 
 
 td::StringBuilder& operator<<(td::StringBuilder& stream, const PeerValidator& peer_validator) {
   return stream << peer_validator.idx << " at " << peer_validator.short_id;
+}
+
+td::StringBuilder& operator<<(td::StringBuilder& stream, const ProtocolMessage& message) {
+  constexpr size_t max_size_for_json = 1024;
+  constexpr size_t max_size_for_hex_dump = 256;
+
+  td::Slice data = message.data;
+
+  if (data.size() <= max_size_for_json) {
+    auto maybe_decoded = fetch_tl_object<ton_api::Object>(data, true);
+    if (maybe_decoded.is_ok()) {
+      return stream << td::json_encode<std::string>(td::ToJson(maybe_decoded.ok()));
+    }
+  }
+
+  if (data.size() <= max_size_for_hex_dump) {
+    return stream << td::format::as_hex_dump<0>(data);
+  } else {
+    return stream << td::format::as_hex_dump<0>(data.substr(0, max_size_for_json)) << "... (truncated "
+                  << (data.size() - max_size_for_json) << " bytes)";
+  }
 }
 
 CandidateId CandidateId::from_tl(const tl::CandidateIdRef& tl_parent) {
@@ -237,7 +262,24 @@ bool Candidate::is_empty() const {
   return std::holds_alternative<BlockIdExt>(block);
 }
 
-stats::Event::Event() : ts_(td::Clocks::system()) {
+td::StringBuilder& operator<<(td::StringBuilder& stream, const Candidate& candidate) {
+  stream << "Candidate{id=" << candidate.id << ", parent=" << candidate.parent_id << ", leader=" << candidate.leader
+         << ", block=";
+  auto empty_fn = [&](const BlockIdExt& referenced_block) { stream << referenced_block << " (referenced)"; };
+  auto block_fn = [&](const BlockCandidate& block) { stream << block; };
+  std::visit(td::overloaded(empty_fn, block_fn), candidate.block);
+  return stream << "}";
 }
+
+namespace stats {
+
+Event::Event() : ts_(td::Clocks::system()) {
+}
+
+td::StringBuilder& operator<<(td::StringBuilder& stream, const Event& event) {
+  return stream << event.to_string();
+}
+
+}  // namespace stats
 
 }  // namespace ton::validator::consensus

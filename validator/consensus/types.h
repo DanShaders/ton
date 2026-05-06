@@ -92,6 +92,8 @@ struct ProtocolMessage {
   td::BufferSlice data;
 };
 
+td::StringBuilder& operator<<(td::StringBuilder& stream, const ProtocolMessage& message);
+
 struct CandidateId {
   static CandidateId from_tl(const tl::CandidateIdRef& tl_parent);
   static tl::CandidateParentRef parent_id_to_tl(std::optional<CandidateId> parent);
@@ -170,6 +172,8 @@ struct Candidate : td::CntObject {
   td::BufferSlice signature;
 };
 
+td::StringBuilder& operator<<(td::StringBuilder& stream, const Candidate& candidate);
+
 using CandidateRef = td::Ref<Candidate>;
 
 class CollatorSchedule : public td::CntObject {
@@ -206,6 +210,8 @@ class Event {
  protected:
   double ts_;
 };
+
+td::StringBuilder& operator<<(td::StringBuilder& stream, const Event& event);
 
 template <typename Collector>
 class CollectibleEvent : public Event {

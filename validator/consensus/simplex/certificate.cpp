@@ -123,4 +123,22 @@ template struct Certificate<SkipVote>;
 template struct Certificate<FinalizeVote>;
 template struct Certificate<Vote>;
 
+template <ValidVote T>
+td::StringBuilder& operator<<(td::StringBuilder& stream, const Certificate<T>& cert) {
+  std::string ids;
+  for (const auto& signature : cert.signatures) {
+    if (!ids.empty()) {
+      ids += ",";
+    }
+    ids += std::to_string(signature.validator.value());
+  }
+
+  return stream << "Certificate{vote=" << cert.vote << ", signatures=[" << ids << "]}";
+}
+
+template td::StringBuilder& operator<<(td::StringBuilder& stream, const Certificate<NotarizeVote>& cert);
+template td::StringBuilder& operator<<(td::StringBuilder& stream, const Certificate<SkipVote>& cert);
+template td::StringBuilder& operator<<(td::StringBuilder& stream, const Certificate<FinalizeVote>& cert);
+template td::StringBuilder& operator<<(td::StringBuilder& stream, const Certificate<Vote>& cert);
+
 }  // namespace ton::validator::consensus::simplex

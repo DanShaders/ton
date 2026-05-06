@@ -8,22 +8,6 @@
 
 namespace ton::validator::consensus::simplex {
 
-namespace {
-
-std::string certificate_to_string(const CertificateRef<Vote> &cert) {
-  std::string ids;
-  for (const auto &signature : cert->signatures) {
-    if (!ids.empty()) {
-      ids += ",";
-    }
-    ids += std::to_string(signature.validator.value());
-  }
-
-  return PSTRING() << "Certificate{vote=" << cert->vote << ", signatures=[" << ids << "]}";
-}
-
-}  // namespace
-
 std::string BroadcastVote::contents_to_string() const {
   return PSTRING() << "{vote=" << vote << "}";
 }
@@ -57,12 +41,11 @@ std::string ResolveState::contents_to_string() const {
 }
 
 std::string ResolveState::response_to_string(const ReturnType &result) {
-  return PSTRING() << "ResolvedState{state=" << *result.state << ", gen_utime_exact="
-                   << (result.gen_utime_exact ? (PSTRING() << *result.gen_utime_exact) : "nullopt") << "}";
+  return PSTRING() << "ResolvedState{state=" << result.state << ", gen_utime_exact=" << result.gen_utime_exact << "}";
 }
 
 std::string SaveCertificate::contents_to_string() const {
-  return PSTRING() << "{cert=" << certificate_to_string(cert) << "}";
+  return PSTRING() << "{cert=" << cert << "}";
 }
 
 namespace {

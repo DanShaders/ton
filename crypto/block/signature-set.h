@@ -97,4 +97,6 @@ class BlockSignatureSet : public td::CntObject {
   static constexpr size_t MAX_SIGNATURES = 1024;
 };
 
+td::StringBuilder& operator<<(td::StringBuilder& stream, const BlockSignatureSet& signatures);
+
 }  // namespace block

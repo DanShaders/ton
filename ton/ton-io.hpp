@@ -44,4 +44,31 @@ inline td::StringBuilder &operator<<(td::StringBuilder &stream, const ton::Block
   return stream << x.to_str();
 }
 
+inline td::StringBuilder &operator<<(td::StringBuilder &stream, const ton::BlockCandidate &x) {
+  return stream << "BlockCandidate{id=" << x.id << ", block_size=" << x.data.size()
+                << ", collated_size=" << x.collated_data.size() << ", collated_file_hash=" << x.collated_file_hash
+                << ", pubkey=" << x.pubkey.as_bits256() << "}";
+}
+
+inline td::StringBuilder &operator<<(td::StringBuilder &stream, const ton::NewConsensusConfig::NoncriticalParams &x) {
+  stream << "NoncriticalParams{";
+  bool first = true;
+  auto add_comma_if_not_first = [&]() {
+    if (!first) {
+      stream << ", ";
+    }
+    first = false;
+  };
+#define APPEND_PARAM(_, name, value) \
+  add_comma_if_not_first();          \
+  stream << #name << "=" << x.name;
+#define APPEND_DURATION(_, name, value) \
+  add_comma_if_not_first();             \
+  stream << #name << "=" << x.name.count() << "ms";
+  ENUMERATE_NONCRITICAL_PARAMS(APPEND_PARAM, APPEND_PARAM, APPEND_DURATION)
+#undef APPEND_PARAM
+#undef APPEND_DURATION
+  return stream << "}";
+}
+
 }  // namespace td

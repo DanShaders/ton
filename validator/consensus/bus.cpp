@@ -4,67 +4,18 @@
  * SPDX-License-Identifier: LGPL-2.0-or-later
  */
 
-#include "auto/tl/ton_api_json.h"
-#include "tl/tl_json.h"
 #include "ton/ton-io.hpp"
 
 #include "bus.h"
 
 namespace ton::validator::consensus {
 
-namespace {
-
-std::string block_candidate_to_string(const BlockCandidate& candidate) {
-  return PSTRING() << "BlockCandidate{id=" << candidate.id << ", block_size=" << candidate.data.size()
-                   << ", collated_size=" << candidate.collated_data.size()
-                   << ", collated_file_hash=" << candidate.collated_file_hash
-                   << ", pubkey=" << candidate.pubkey.as_bits256() << "}";
-}
-
-std::string candidate_to_string(const CandidateRef& candidate) {
-  auto block_fn = [](const BlockCandidate& block) { return block_candidate_to_string(block); };
-  auto empty_fn = [](const BlockIdExt& id) { return PSTRING() << id << " (referenced)"; };
-
-  return PSTRING() << "Candidate{id=" << candidate->id << ", parent=" << candidate->parent_id
-                   << ", leader=" << candidate->leader
-                   << ", block=" << std::visit(td::overloaded(block_fn, empty_fn), candidate->block) << "}";
-}
-
-std::string message_to_string(const ProtocolMessage& message) {
-  constexpr size_t max_size_for_json = 1024;
-  constexpr size_t max_size_for_hex_dump = 256;
-
-  td::Slice data = message.data;
-
-  if (data.size() <= max_size_for_json) {
-    auto maybe_decoded = fetch_tl_object<ton_api::Object>(data, true);
-    if (maybe_decoded.is_ok()) {
-      return td::json_encode<std::string>(td::ToJson(maybe_decoded.ok()));
-    }
-  }
-
-  if (data.size() <= max_size_for_hex_dump) {
-    return PSTRING() << td::format::as_hex_dump<0>(data);
-  } else {
-    return PSTRING() << td::format::as_hex_dump<0>(data.substr(0, max_size_for_json)) << "... (truncated "
-                     << (data.size() - max_size_for_json) << " bytes)";
-  }
-}
-
-std::string block_signature_set_to_string(const td::Ref<block::BlockSignatureSet>& set) {
-  return PSTRING() << "<BlockSignatureSet size=" << set->get_size() << " final=" << set->is_final()
-                   << " ordinary=" << set->is_ordinary() << ">";
-}
-
-}  // namespace
-
 std::string Start::contents_to_string() const {
   return PSTRING() << "{state=" << state << "}";
 }
 
 std::string FinalizeBlock::contents_to_string() const {
-  return PSTRING() << "{candidate=" << candidate_to_string(candidate)
-                   << ", signatures=" << block_signature_set_to_string(signatures) << "}";
+  return PSTRING() << "{candidate=" << candidate << ", signatures=" << signatures << "}";
 }
 
 std::string OurLeaderWindowStarted::contents_to_string() const {
@@ -73,16 +24,15 @@ std::string OurLeaderWindowStarted::contents_to_string() const {
 }
 
 std::string CandidateGenerated::contents_to_string() const {
-  return PSTRING() << "{candidate=" << candidate_to_string(candidate)
-                   << ", collator_id=" << (collator_id.has_value() ? (PSTRING() << *collator_id) : "none") << "}";
+  return PSTRING() << "{candidate=" << candidate << ", collator_id=" << collator_id << "}";
 }
 
 std::string CandidateReceived::contents_to_string() const {
-  return PSTRING() << "{candidate=" << candidate_to_string(candidate) << "}";
+  return PSTRING() << "{candidate=" << candidate << "}";
 }
 
 std::string ValidationRequest::contents_to_string() const {
-  return PSTRING() << "{state=" << state << ", candidate=" << candidate_to_string(candidate) << "}";
+  return PSTRING() << "{state=" << state << ", candidate=" << candidate << "}";
 }
 
 std::string ValidationRequest::response_to_string(const ReturnType& result) {
@@ -96,29 +46,28 @@ std::string ValidationRequest::response_to_string(const ReturnType& result) {
 }
 
 std::string IncomingProtocolMessage::contents_to_string() const {
-  return PSTRING() << "{source=" << source << ", message=" << message_to_string(message) << "}";
+  return PSTRING() << "{source=" << source << ", message=" << message << "}";
 }
 
 std::string OutgoingProtocolMessage::contents_to_string() const {
-  return PSTRING() << "{recipient=" << (recipient.has_value() ? (PSTRING() << *recipient) : "broadcast")
-                   << ", message=" << message_to_string(message) << "}";
+  return PSTRING() << "{recipient=" << recipient << ", message=" << message << "}";
 }
 
 std::string IncomingOverlayRequest::contents_to_string() const {
-  return PSTRING() << "{source=" << source << ", request=" << message_to_string(request) << "}";
+  return PSTRING() << "{source=" << source << ", request=" << request << "}";
 }
 
 std::string IncomingOverlayRequest::response_to_string(const ReturnType& response) {
-  return PSTRING() << message_to_string(response);
+  return PSTRING() << response;
 }
 
 std::string OutgoingOverlayRequest::contents_to_string() const {
   return PSTRING() << "{destination=" << destination << ", timeout=" << timeout.in()
-                   << " remaining, request=" << message_to_string(request) << "}";
+                   << " remaining, request=" << request << "}";
 }
 
 std::string OutgoingOverlayRequest::response_to_string(const ReturnType& response) {
-  return PSTRING() << message_to_string(response);
+  return PSTRING() << response;
 }
 
 std::string BlockFinalizedInMasterchain::contents_to_string() const {
@@ -130,17 +79,11 @@ std::string MisbehaviorReport::contents_to_string() const {
 }
 
 std::string TraceEvent::contents_to_string() const {
-  return PSTRING() << "{event=" << event->to_string() << "}";
+  return PSTRING() << "{event=" << event << "}";
 }
 
 std::string NoncriticalParamsUpdated::contents_to_string() const {
-  td::StringBuilder sb;
-#define APPEND_PARAM(_, name, value) sb << #name << "=" << params.name << ", ";
-#define APPEND_DURATION(_, name, value) sb << #name << "=" << params.name.count() << "ms, ";
-  ENUMERATE_NONCRITICAL_PARAMS(APPEND_PARAM, APPEND_PARAM, APPEND_DURATION)
-#undef APPEND_PARAM
-#undef APPEND_DURATION
-  return PSTRING() << "{params={" << td::Slice{sb.as_cslice()}.remove_suffix(2) << "}}";
+  return PSTRING() << "{params=" << params << "}";
 }
 
 std::string PrecheckCandidateBroadcast::contents_to_string() const {

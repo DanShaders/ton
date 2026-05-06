@@ -469,6 +469,11 @@ td::Ref<BlockSignatureSet> BlockSignatureSet::fetch(const ton::tl_object_ptr<ton
   return sig_set;
 }
 
+td::StringBuilder& operator<<(td::StringBuilder& stream, const BlockSignatureSet& signatures) {
+  return stream << "<BlockSignatureSet size=" << signatures.get_size() << " final=" << signatures.is_final()
+                << " ordinary=" << signatures.is_ordinary() << ">";
+}
+
 td::Result<td::Ref<BlockSignatureSet>> BlockSignatureSet::fetch(
     const ton::tl_object_ptr<ton::lite_api::liteServer_SignatureSet>& f) {
   td::Result<td::Ref<BlockSignatureSet>> sig_set;

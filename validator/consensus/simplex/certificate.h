@@ -69,6 +69,9 @@ struct Certificate : td::CntObject {
   std::vector<VoteSignature> signatures;
 };
 
+template <ValidVote T>
+td::StringBuilder& operator<<(td::StringBuilder& stream, const Certificate<T>& cert);
+
 template <typename T>
 using CertificateRef = td::Ref<Certificate<T>>;
 

@@ -25,8 +25,8 @@ Test_ConsensusEventStrings_IncomingProtocolMessage :: default :: 46
 Test_ConsensusEventStrings_MisbehaviorReport :: default :: 16
 {id=validator 6}
 
-Test_ConsensusEventStrings_NoncriticalParamsUpdated :: default :: 520
-{params={target_rate=2400ms, first_block_timeout=1000ms, first_block_timeout_multiplier=1.200000, first_block_timeout_cap=100000ms, candidate_resolve_timeout=1000ms, candidate_resolve_timeout_multiplier=1.200000, candidate_resolve_timeout_cap=10000ms, candidate_resolve_cooldown=10ms, standstill_timeout=10000ms, standstill_max_egress_bytes_per_s=6553600, max_leader_window_desync=250, bad_signature_ban_duration=5000ms, candidate_resolve_rate_limit=10, min_block_interval=0ms, no_empty_blocks_on_error_timeout=15000ms}}
+Test_ConsensusEventStrings_NoncriticalParamsUpdated :: default :: 537
+{params=NoncriticalParams{target_rate=2400ms, first_block_timeout=1000ms, first_block_timeout_multiplier=1.200000, first_block_timeout_cap=100000ms, candidate_resolve_timeout=1000ms, candidate_resolve_timeout_multiplier=1.200000, candidate_resolve_timeout_cap=10000ms, candidate_resolve_cooldown=10ms, standstill_timeout=10000ms, standstill_max_egress_bytes_per_s=6553600, max_leader_window_desync=250, bad_signature_ban_duration=5000ms, candidate_resolve_rate_limit=10, min_block_interval=0ms, no_empty_blocks_on_error_timeout=15000ms}}
 
 Test_ConsensusEventStrings_OurLeaderWindowStarted :: default :: 462
 {base={6, 3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d0=}, state=ChainState{min_mc_block_id=(0,8000000000000000,0):AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB, tip={(0,8000000000000000,1):AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB}}, start_slot=10, end_slot=14, start_time=1700000000.000000}
@@ -34,8 +34,8 @@ Test_ConsensusEventStrings_OurLeaderWindowStarted :: default :: 462
 Test_ConsensusEventStrings_OutgoingOverlayRequest :: default :: 79
 {destination=validator 4, timeout=2.500000 remaining, request=0102030405060708}
 
-Test_ConsensusEventStrings_OutgoingProtocolMessage :: broadcast :: 47
-{recipient=broadcast, message=0102030405060708}
+Test_ConsensusEventStrings_OutgoingProtocolMessage :: broadcast :: 42
+{recipient=none, message=0102030405060708}
 
 Test_ConsensusEventStrings_OutgoingProtocolMessage :: with_recipient :: 49
 {recipient=validator 5, message=0102030405060708}
