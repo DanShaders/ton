@@ -150,12 +150,8 @@ ChainState::ChainState(Tip tip, BlockIdExt min_mc_block_id)
 }
 
 td::StringBuilder& operator<<(td::StringBuilder& sb, const ChainState& state) {
-  std::vector<std::string> blocks;
-  for (const auto& block : state.block_ids()) {
-    blocks.push_back(block.to_str());
-  }
-
-  return sb << "ChainState{min_mc_block_id=" << state.min_mc_block_id().to_str() << ", tip=" << blocks << "}";
+  return sb << "ChainState{min_mc_block_id=" << state.min_mc_block_id().to_str() << ", tip=" << state.block_ids()
+            << "}";
 }
 
 }  // namespace ton::validator::consensus
