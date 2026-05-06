@@ -41,7 +41,7 @@ tl::CandidateIdRef CandidateId::to_tl() const {
 }
 
 td::StringBuilder& operator<<(td::StringBuilder& stream, const CandidateId& id) {
-  return stream << "{" << id.slot << ", " << id.hash << ", ?}";
+  return stream << "{" << id.slot << ", " << id.hash << "}";
 }
 
 td::StringBuilder& operator<<(td::StringBuilder& stream, const ParentId& id) {
