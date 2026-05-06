@@ -19,6 +19,7 @@
 #pragma once
 
 #include <cstddef>
+#include <tuple>
 #include <type_traits>
 
 namespace td {
@@ -69,6 +70,27 @@ struct InHelper<T, TypeList<Ts...>> {
   constexpr static bool value = (std::is_same_v<T, Ts> || ...);
 };
 
+template <typename T, typename... Ts>
+struct InHelper<T, std::tuple<Ts...>> {
+  constexpr static bool value = (std::is_same_v<T, Ts> || ...);
+};
+
+template <typename T, typename... Ts>
+consteval std::size_t index_of() {
+  std::size_t i = 0;
+  std::size_t found = sizeof...(Ts);
+  ((std::is_same_v<T, Ts> && found == sizeof...(Ts) ? (found = i, void()) : void(), ++i), ...);
+  return found;
+}
+
+template <typename, typename>
+struct IndexInHelper;
+
+template <typename T, typename... Ts>
+struct IndexInHelper<T, std::tuple<Ts...>> {
+  static constexpr std::size_t value = index_of<T, Ts...>();
+};
+
 }  // namespace detail
 
 template <typename T, template <typename...> typename Template>
@@ -83,5 +105,11 @@ concept In = detail::InHelper<T, List>::value;
 
 template <typename T, typename... Ts>
 concept OneOf = (std::is_same_v<T, Ts> || ...);
+
+template <typename T, typename... Ts>
+inline constexpr std::size_t IndexOf = detail::index_of<T, Ts...>();
+
+template <typename T, typename Tuple>
+inline constexpr std::size_t IndexIn = detail::IndexInHelper<T, Tuple>::value;
 
 }  // namespace td

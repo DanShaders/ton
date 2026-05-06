@@ -114,6 +114,7 @@ set(VALIDATOR_SOURCE
   consensus/private-overlay.cpp
   consensus/trace-collector.cpp
   consensus/stats.cpp
+  consensus/test/fixtures.cpp
   consensus/types.cpp
   consensus/utils.cpp
 
