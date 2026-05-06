@@ -10,6 +10,7 @@
 #include "keyring/keyring.h"
 #include "overlay/overlays.h"
 #include "td/actor/BusRuntime.h"
+#include "td/actor/BusUtils.h"
 #include "ton/ton-types.h"
 
 #include "chain-state.h"
@@ -21,6 +22,7 @@ namespace ton::validator::consensus {
 struct Start {
   ChainStateRef state;
 
+  TON_RUNTIME_EVENT_OF(state);
   std::string contents_to_string() const;
 };
 
@@ -34,6 +36,7 @@ struct FinalizeBlock {
   CandidateRef candidate;
   td::Ref<block::BlockSignatureSet> signatures;
 
+  TON_RUNTIME_EVENT_OF(candidate, signatures);
   std::string contents_to_string() const;
 };
 
@@ -44,6 +47,7 @@ struct OurLeaderWindowStarted {
   td::uint32 end_slot;
   td::Timestamp start_time;
 
+  TON_RUNTIME_EVENT_OF(base, state, start_slot, end_slot, start_time);
   std::string contents_to_string() const;
 };
 
@@ -51,6 +55,7 @@ struct CandidateGenerated {
   CandidateRef candidate;
   std::optional<adnl::AdnlNodeIdShort> collator_id;
 
+  TON_RUNTIME_EVENT_OF(candidate, collator_id);
   std::string contents_to_string() const;
 };
 
@@ -58,6 +63,7 @@ struct CandidateGenerated {
 struct CandidateReceived {
   CandidateRef candidate;
 
+  TON_RUNTIME_EVENT_OF(candidate);
   std::string contents_to_string() const;
 };
 
@@ -67,6 +73,7 @@ struct ValidationRequest {
   ChainStateRef state;
   CandidateRef candidate;
 
+  TON_RUNTIME_EVENT_OF(state, candidate);
   std::string contents_to_string() const;
   static std::string response_to_string(const ReturnType&);
 };
@@ -77,6 +84,7 @@ struct IncomingProtocolMessage {
   PeerValidatorId source;
   ProtocolMessage message;
 
+  TON_RUNTIME_EVENT_OF(source, message);
   std::string contents_to_string() const;
 };
 
@@ -86,6 +94,7 @@ struct OutgoingProtocolMessage {
   std::optional<PeerValidatorId> recipient;
   ProtocolMessage message;
 
+  TON_RUNTIME_EVENT_OF(recipient, message);
   std::string contents_to_string() const;
 };
 
@@ -96,6 +105,7 @@ struct IncomingOverlayRequest {
   PeerValidatorId source;
   ProtocolMessage request;
 
+  TON_RUNTIME_EVENT_OF(source, request);
   std::string contents_to_string() const;
   static std::string response_to_string(const ReturnType&);
 };
@@ -108,6 +118,7 @@ struct OutgoingOverlayRequest {
   td::Timestamp timeout;
   ProtocolMessage request;
 
+  TON_RUNTIME_EVENT_OF(destination, timeout, request);
   std::string contents_to_string() const;
   static std::string response_to_string(const ReturnType&);
 };
@@ -115,6 +126,7 @@ struct OutgoingOverlayRequest {
 struct BlockFinalizedInMasterchain {
   BlockIdExt block;
 
+  TON_RUNTIME_EVENT_OF(block);
   std::string contents_to_string() const;
 };
 
@@ -122,18 +134,21 @@ struct MisbehaviorReport {
   PeerValidatorId id;
   MisbehaviorRef proof;
 
+  TON_RUNTIME_EVENT_OF(id, proof);
   std::string contents_to_string() const;
 };
 
 struct TraceEvent {
   std::unique_ptr<const stats::Event> event;
 
+  TON_RUNTIME_EVENT_OF(event);
   std::string contents_to_string() const;
 };
 
 struct NoncriticalParamsUpdated {
   NewConsensusConfig::NoncriticalParams params;
 
+  TON_RUNTIME_EVENT_OF(params);
   std::string contents_to_string() const;
 };
 
@@ -144,6 +159,7 @@ struct PrecheckCandidateBroadcast {
   td::Bits256 broadcast_id;
   bool signature_checked;
 
+  TON_RUNTIME_EVENT_OF(slot, broadcast_id, signature_checked);
   std::string contents_to_string() const;
 };
 

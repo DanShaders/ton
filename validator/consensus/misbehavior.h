@@ -15,6 +15,10 @@ class Misbehavior : public td::CntObject {
   virtual ~Misbehavior() = default;
 };
 
+inline td::StringBuilder& operator<<(td::StringBuilder& stream, const Misbehavior& misbehavior) {
+  return stream << "Misbehavior";
+}
+
 using MisbehaviorRef = td::Ref<Misbehavior>;
 
 }  // namespace ton::validator::consensus

@@ -17,6 +17,7 @@ struct BroadcastVote {
 
   Vote vote;
 
+  TON_RUNTIME_EVENT_OF(vote);
   std::string contents_to_string() const;
 };
 
@@ -24,6 +25,7 @@ struct NotarizationObserved {
   CandidateId id;
   NotarCertRef certificate;
 
+  TON_RUNTIME_EVENT_OF(id, certificate);
   std::string contents_to_string() const;
 };
 
@@ -31,6 +33,7 @@ struct FinalizationObserved {
   CandidateId id;
   FinalCertRef certificate;
 
+  TON_RUNTIME_EVENT_OF(id, certificate);
   std::string contents_to_string() const;
 };
 
@@ -40,6 +43,7 @@ struct LeaderWindowObserved {
   td::uint32 start_slot;
   ParentId base;
 
+  TON_RUNTIME_EVENT_OF(start_slot, base);
   std::string contents_to_string() const;
 };
 
@@ -48,6 +52,7 @@ struct WaitForParent {
 
   CandidateRef candidate;
 
+  TON_RUNTIME_EVENT_OF(candidate);
   std::string contents_to_string() const;
 };
 
@@ -61,6 +66,7 @@ struct ResolveCandidate {
 
   CandidateId id;
 
+  TON_RUNTIME_EVENT_OF(id);
   std::string contents_to_string() const;
 };
 
@@ -68,6 +74,8 @@ struct StoreCandidate {
   using ReturnType = td::Unit;
 
   CandidateRef candidate;
+
+  TON_RUNTIME_EVENT_OF(candidate);
   std::string contents_to_string() const;
 };
 
@@ -81,6 +89,7 @@ struct ResolveState {
 
   ParentId id;
 
+  TON_RUNTIME_EVENT_OF(id);
   std::string contents_to_string() const;
   static std::string response_to_string(const ReturnType&);
 };
@@ -90,6 +99,7 @@ struct SaveCertificate {
 
   CertificateRef<Vote> cert;
 
+  TON_RUNTIME_EVENT_OF(cert);
   std::string contents_to_string() const;
 };
 

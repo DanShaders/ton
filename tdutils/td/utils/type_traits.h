@@ -20,6 +20,7 @@
 
 #include <cstddef>
 #include <type_traits>
+#include <utility>
 
 namespace td {
 
@@ -83,5 +84,14 @@ concept In = detail::InHelper<T, List>::value;
 
 template <typename T, typename... Ts>
 concept OneOf = (std::is_same_v<T, Ts> || ...);
+
+template <size_t n, typename F, size_t... i>
+constexpr auto unroll(F&& f, std::index_sequence<i...> = {}) {
+  if constexpr (sizeof...(i) != n) {
+    return unroll<n>(std::forward<F>(f), std::make_index_sequence<n>());
+  } else {
+    return (f(std::integral_constant<size_t, i>{}), ...);
+  }
+}
 
 }  // namespace td

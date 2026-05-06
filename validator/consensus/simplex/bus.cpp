@@ -9,43 +9,53 @@
 namespace ton::validator::consensus::simplex {
 
 std::string BroadcastVote::contents_to_string() const {
-  return PSTRING() << "{vote=" << vote << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string NotarizationObserved::contents_to_string() const {
-  return PSTRING() << "{id=" << id << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string FinalizationObserved::contents_to_string() const {
-  return PSTRING() << "{id=" << id << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string LeaderWindowObserved::contents_to_string() const {
-  return PSTRING() << "{start_slot=" << start_slot << ", base=" << base << "}";
+  return td::actor::stringify_event(*this);
+}
+
+static void format_field(td::StringBuilder& sb, const WaitForParent& v,
+                         td::actor::detail::field_tag<&WaitForParent::candidate>) {
+  sb << "{id=" << v.candidate->id << ", parent_id=" << v.candidate->parent_id << "}";
 }
 
 std::string WaitForParent::contents_to_string() const {
-  return PSTRING() << "{id=" << candidate->id << ", parent=" << candidate->parent_id << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string ResolveCandidate::contents_to_string() const {
-  return PSTRING() << "{id=" << id << "}";
+  return td::actor::stringify_event(*this);
+}
+
+static void format_field(td::StringBuilder& sb, const StoreCandidate& v,
+                         td::actor::detail::field_tag<&StoreCandidate::candidate>) {
+  sb << "{id=" << v.candidate->id << "}";
 }
 
 std::string StoreCandidate::contents_to_string() const {
-  return PSTRING() << "{id=" << candidate->id << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string ResolveState::contents_to_string() const {
-  return PSTRING() << "{id=" << id << "}";
+  return td::actor::stringify_event(*this);
 }
 
-std::string ResolveState::response_to_string(const ReturnType &result) {
+std::string ResolveState::response_to_string(const ReturnType& result) {
   return PSTRING() << "ResolvedState{state=" << result.state << ", gen_utime_exact=" << result.gen_utime_exact << "}";
 }
 
 std::string SaveCertificate::contents_to_string() const {
-  return PSTRING() << "{cert=" << cert << "}";
+  return td::actor::stringify_event(*this);
 }
 
 namespace {

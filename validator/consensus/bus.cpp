@@ -11,28 +11,32 @@
 namespace ton::validator::consensus {
 
 std::string Start::contents_to_string() const {
-  return PSTRING() << "{state=" << state << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string FinalizeBlock::contents_to_string() const {
-  return PSTRING() << "{candidate=" << candidate << ", signatures=" << signatures << "}";
+  return td::actor::stringify_event(*this);
+}
+
+static void format_field(td::StringBuilder& sb, const OurLeaderWindowStarted& v,
+                         td::actor::detail::field_tag<&OurLeaderWindowStarted::start_time>) {
+  sb << v.start_time.at_unix();
 }
 
 std::string OurLeaderWindowStarted::contents_to_string() const {
-  return PSTRING() << "{base=" << base << ", state=" << state << ", start_slot=" << start_slot
-                   << ", end_slot=" << end_slot << ", start_time=" << start_time.at_unix() << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string CandidateGenerated::contents_to_string() const {
-  return PSTRING() << "{candidate=" << candidate << ", collator_id=" << collator_id << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string CandidateReceived::contents_to_string() const {
-  return PSTRING() << "{candidate=" << candidate << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string ValidationRequest::contents_to_string() const {
-  return PSTRING() << "{state=" << state << ", candidate=" << candidate << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string ValidationRequest::response_to_string(const ReturnType& result) {
@@ -46,24 +50,28 @@ std::string ValidationRequest::response_to_string(const ReturnType& result) {
 }
 
 std::string IncomingProtocolMessage::contents_to_string() const {
-  return PSTRING() << "{source=" << source << ", message=" << message << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string OutgoingProtocolMessage::contents_to_string() const {
-  return PSTRING() << "{recipient=" << recipient << ", message=" << message << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string IncomingOverlayRequest::contents_to_string() const {
-  return PSTRING() << "{source=" << source << ", request=" << request << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string IncomingOverlayRequest::response_to_string(const ReturnType& response) {
   return PSTRING() << response;
 }
 
+static void format_field(td::StringBuilder& sb, const OutgoingOverlayRequest& v,
+                         td::actor::detail::field_tag<&OutgoingOverlayRequest::timeout>) {
+  sb << v.timeout.in() << " remaining";
+}
+
 std::string OutgoingOverlayRequest::contents_to_string() const {
-  return PSTRING() << "{destination=" << destination << ", timeout=" << timeout.in()
-                   << " remaining, request=" << request << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string OutgoingOverlayRequest::response_to_string(const ReturnType& response) {
@@ -71,24 +79,23 @@ std::string OutgoingOverlayRequest::response_to_string(const ReturnType& respons
 }
 
 std::string BlockFinalizedInMasterchain::contents_to_string() const {
-  return PSTRING() << "{block=" << block << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string MisbehaviorReport::contents_to_string() const {
-  return PSTRING() << "{id=" << id << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string TraceEvent::contents_to_string() const {
-  return PSTRING() << "{event=" << event << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string NoncriticalParamsUpdated::contents_to_string() const {
-  return PSTRING() << "{params=" << params << "}";
+  return td::actor::stringify_event(*this);
 }
 
 std::string PrecheckCandidateBroadcast::contents_to_string() const {
-  return PSTRING() << "{slot=" << slot << ", broadcast_id=" << broadcast_id
-                   << ", signature_checked=" << signature_checked << "}";
+  return td::actor::stringify_event(*this);
 }
 
 }  // namespace ton::validator::consensus

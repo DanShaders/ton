@@ -4,14 +4,14 @@
 Test_SimplexEventStrings_BroadcastVote :: default :: 73
 {vote=NotarizeVote{id={8, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}}}
 
-Test_SimplexEventStrings_FinalizationObserved :: default :: 54
-{id={8, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}}
+Test_SimplexEventStrings_FinalizationObserved :: default :: 170
+{id={8, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}, certificate=Certificate{vote=FinalizeVote{id={8, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}}, signatures=[1,2]}}
 
 Test_SimplexEventStrings_LeaderWindowObserved :: default :: 72
 {start_slot=16, base={15, 3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d0=}}
 
-Test_SimplexEventStrings_NotarizationObserved :: default :: 54
-{id={8, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}}
+Test_SimplexEventStrings_NotarizationObserved :: default :: 170
+{id={8, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}, certificate=Certificate{vote=NotarizeVote{id={8, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}}, signatures=[1,2]}}
 
 Test_SimplexEventStrings_ResolveCandidate :: default :: 54
 {id={9, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}}
@@ -28,11 +28,11 @@ ResolvedState{state=ChainState{min_mc_block_id=(0,8000000000000000,0):AAAAAAAAAA
 Test_SimplexEventStrings_ResolveState_Response :: without_gen_utime :: 383
 ResolvedState{state=ChainState{min_mc_block_id=(0,8000000000000000,0):AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB, tip={(0,8000000000000000,1):AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB}}, gen_utime_exact=none}
 
-Test_SimplexEventStrings_SaveCertificate :: default :: 106
-{cert=Certificate{vote=NotarizeVote{id={8, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}}, signatures=[]}}
+Test_SimplexEventStrings_SaveCertificate :: default :: 109
+{cert=Certificate{vote=NotarizeVote{id={8, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}}, signatures=[1,2]}}
 
-Test_SimplexEventStrings_StoreCandidate :: default :: 54
-{id={7, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}}
+Test_SimplexEventStrings_StoreCandidate :: default :: 66
+{candidate={id={7, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}}}
 
-Test_SimplexEventStrings_WaitForParent :: default :: 112
-{id={7, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}, parent={6, 3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d0=}}
+Test_SimplexEventStrings_WaitForParent :: default :: 127
+{candidate={id={7, zMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMw=}, parent_id={6, 3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d0=}}}
