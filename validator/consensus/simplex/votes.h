@@ -82,6 +82,8 @@ struct Vote {
 
   tl::UnsignedVoteRef to_tl() const;
 
+  bool operator==(const Vote&) const = default;
+
   std::variant<NotarizeVote, FinalizeVote, SkipVote> vote;
 };
 

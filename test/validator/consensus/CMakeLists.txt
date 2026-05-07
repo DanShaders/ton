@@ -26,4 +26,7 @@ target_link_libraries(test-event-strings PRIVATE
 )
 ton_snapshot_test(test-event-strings)
 
+add_executable(test-simplex test-simplex.cpp)
+target_link_libraries(test-simplex PRIVATE tdactor tdutils validator td-test-main)
+
 add_subdirectory(simplex)

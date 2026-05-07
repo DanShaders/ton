@@ -197,6 +197,7 @@ set(BLOCK_SOURCE
   block/block-db.cpp
   block/block-parse.cpp
   block/check-proof.cpp
+  block/fixtures.cpp
   block/mc-config.cpp
   block/output-queue-merger.cpp
   block/transaction.cpp
@@ -211,6 +212,7 @@ set(BLOCK_SOURCE
   block/block.h
   block/block-parse.h
   block/check-proof.h
+  block/fixtures.h
   block/output-queue-merger.h
   block/transaction.h
   block/precompiled-smc/PrecompiledSmartContract.h

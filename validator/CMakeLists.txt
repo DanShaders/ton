@@ -115,6 +115,7 @@ set(VALIDATOR_SOURCE
   consensus/private-overlay.cpp
   consensus/trace-collector.cpp
   consensus/stats.cpp
+  consensus/test/fixtures.cpp
   consensus/types.cpp
   consensus/utils.cpp
 
@@ -227,6 +228,7 @@ target_include_directories(full-node PUBLIC
   )
 
 target_link_libraries(validator PRIVATE validator-common validator-db ton_validator)
+target_link_libraries(validator PUBLIC keyring)
 
 target_link_libraries(validator-disk PRIVATE validator-common validator-db)
 
