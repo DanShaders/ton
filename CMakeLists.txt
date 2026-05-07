@@ -538,6 +538,12 @@ function(ton_test TEST_NAME)
   add_dependencies(all-tests ${TEST_NAME})
 endfunction()
 
+function(ton_snapshot_test TEST_NAME)
+  ton_test(${TEST_NAME} ${ARGN})
+  set_tests_properties(${TEST_NAME} PROPERTIES
+    ENVIRONMENT "TON_SNAPSHOT_FILE=${CMAKE_CURRENT_SOURCE_DIR}/${TEST_NAME}.snap")
+endfunction()
+
 enable_testing()
 
 set(TDUTILS_MIME_TYPE OFF CACHE BOOL "Generate mime type conversion")

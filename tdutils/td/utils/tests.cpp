@@ -28,6 +28,7 @@
 #include "td/utils/filesystem.h"
 #include "td/utils/port/Stat.h"
 #include "td/utils/port/path.h"
+#include "td/utils/tests-snapshot.h"
 #include "td/utils/tests.h"
 
 namespace td {
@@ -170,6 +171,10 @@ void TestsRunner::set_regression_tester(unique_ptr<RegressionTester> regression_
   regression_tester_ = std::move(regression_tester);
 }
 
+void TestsRunner::set_snapshot_storage(unique_ptr<SnapshotStorage> storage) {
+  snapshot_storage_ = std::move(storage);
+}
+
 void TestsRunner::set_stress_flag(bool flag) {
   stress_flag_ = flag;
 }
@@ -254,6 +259,13 @@ bool TestsRunner::run_all_step() {
 
   auto ret = state_.it != state_.end;
   if (!ret) {
+    if (snapshot_storage_ && snapshot_storage_->update_mode()) {
+      auto status = snapshot_storage_->save();
+      if (status.is_error()) {
+        LOG(ERROR) << "failed to save snapshot file " << snapshot_storage_->path() << ": " << status;
+        any_test_failed_ = true;
+      }
+    }
     if (pretty_output_) {
       if (failed_tests_.empty()) {
         std::cerr << passed_tests_ << " test(s) passed" << std::endl;
@@ -287,6 +299,10 @@ Status TestsRunner::verify(Slice data) {
 void TestsRunner::register_test_failure() {
   CHECK(state_.is_running);
   test_failed_ = true;
+}
+
+SnapshotStorage *TestsRunner::snapshots() {
+  return snapshot_storage_.get();
 }
 
 bool TestsRunner::any_test_failed() const {

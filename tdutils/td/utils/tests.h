@@ -44,6 +44,8 @@
 
 namespace td {
 
+class SnapshotStorage;
+
 class RandomSteps {
  public:
   struct Step {
@@ -106,6 +108,7 @@ class TestContext : public Context<TestContext> {
   virtual Slice name() = 0;
   virtual Status verify(Slice data) = 0;
   virtual void register_test_failure() = 0;
+  virtual SnapshotStorage *snapshots() = 0;
 };
 
 class TestsRunner : public TestContext {
@@ -119,6 +122,7 @@ class TestsRunner : public TestContext {
   void run_all();
   bool run_all_step();
   void set_regression_tester(unique_ptr<RegressionTester> regression_tester);
+  void set_snapshot_storage(unique_ptr<SnapshotStorage> storage);
   bool any_test_failed() const;
   bool use_pretty_output() const;
 
@@ -139,11 +143,13 @@ class TestsRunner : public TestContext {
   State state_;
   std::atomic<bool> test_failed_ = false;
   unique_ptr<RegressionTester> regression_tester_;
+  unique_ptr<SnapshotStorage> snapshot_storage_;
   bool any_test_failed_{false};
 
   Slice name() override;
   Status verify(Slice data) override;
   void register_test_failure() override;
+  SnapshotStorage *snapshots() override;
 };
 
 template <class T>

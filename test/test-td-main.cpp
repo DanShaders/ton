@@ -30,6 +30,7 @@
 #include "td/utils/Time.h"
 #include "td/utils/misc.h"
 #include "td/utils/port/signals.h"
+#include "td/utils/tests-snapshot.h"
 #include "td/utils/tests.h"
 
 int main(int argc, char **argv) {
@@ -53,6 +54,17 @@ int main(int argc, char **argv) {
       SET_VERBOSITY_LEVEL(td::to_integer<td::int32>(td::Slice(argv[++i])));
     }
   }
+
+  if (const char *snap_path = std::getenv("TON_SNAPSHOT_FILE")) {
+    bool update = false;
+    if (const char *upd = std::getenv("TON_UPDATE_SNAPSHOTS")) {
+      update = std::strcmp(upd, "0") != 0 && upd[0] != '\0';
+    }
+    auto storage = td::make_unique<td::SnapshotStorage>(snap_path, update);
+    storage->load().ensure();
+    runner.set_snapshot_storage(std::move(storage));
+  }
+
   runner.run_all();
   return runner.any_test_failed() ? 1 : 0;
 }

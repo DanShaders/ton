@@ -124,6 +124,7 @@ set(TDUTILS_SOURCE
   td/utils/Timer.cpp
   td/utils/TsFileLog.cpp
   td/utils/tests.cpp
+  td/utils/tests-snapshot.cpp
   td/utils/tl_parsers.cpp
   td/utils/translit.cpp
   td/utils/TsFileLog.cpp
@@ -255,6 +256,7 @@ set(TDUTILS_SOURCE
   td/utils/StorerBase.h
   td/utils/StringBuilder.h
   td/utils/tests.h
+  td/utils/tests-snapshot.h
   td/utils/ThreadLocalStorage.h
   td/utils/ThreadSafeCounter.h
   td/utils/Time.h
