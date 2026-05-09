@@ -154,45 +154,39 @@ echo "Installing musl headers..."
     # we need C library headers. Musl provides a target to install headers but it is unfortunately
     # gated by ./configure that needs _a_ compiler, so here we create a best-effort clang invocation
     # that is good enough for `./configure`.
-    CC="$CC -no-canonical-prefixes --target=$TARGET_TRIPLE --sysroot=$SYSROOT -fuse-ld=lld --rtlib=compiler-rt" \
+    CC="$CC -no-canonical-prefixes --target=$TARGET_TRIPLE --sysroot=$SYSROOT" \
+    LDFLAGS="-fuse-ld=lld" \
+    LIBCC="compiler-rt" \
     ./configure --prefix=/usr "--target=$TARGET_TRIPLE"
     DESTDIR="$SYSROOT" make install-headers -j"$NPROC"
 )
 
-# ===== Create initial CMake toolchain (needed for compiler-rt build) =====
+# ===== Create initial CMake toolchain for compiler-rt & libc++ build =====
 TOOLCHAIN_FILE="$SYSROOT/Toolchain.cmake"
 
-# To build compiler-rt, it is easier to create a proper CMake toolchain file already.
 cat > "$TOOLCHAIN_FILE" <<TOOLCHAIN_EOF
 set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR $TOOLCHAIN_SYSTEM_PROCESSOR)
 
 set(CMAKE_SYSROOT $SYSROOT)
 
-set(CMAKE_C_COMPILER $CC)
+set(rtlib_flag --start-no-unused-arguments -rtlib=compiler-rt --end-no-unused-arguments)
+
+set(CMAKE_C_COMPILER $CC -no-canonical-prefixes \${rtlib_flag})
 set(CMAKE_C_COMPILER_TARGET $TARGET_TRIPLE)
-set(CMAKE_CXX_COMPILER $CXX)
+set(CMAKE_CXX_COMPILER $CXX -no-canonical-prefixes -nostdlib++ \${rtlib_flag})
 set(CMAKE_CXX_COMPILER_TARGET $TARGET_TRIPLE)
-set(CMAKE_ASM_COMPILER $CC)
+set(CMAKE_ASM_COMPILER $CC -no-canonical-prefixes)
 set(CMAKE_ASM_COMPILER_TARGET $TARGET_TRIPLE)
 set(CMAKE_AR $AR)
 set(CMAKE_RANLIB $RANLIB)
+
+set(CMAKE_LINKER_TYPE LLD)
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
-
-set(CMAKE_C_FLAGS_INIT "-no-canonical-prefixes")
-set(CMAKE_CXX_FLAGS_INIT "-no-canonical-prefixes")
-set(CMAKE_EXE_LINKER_FLAGS_INIT "-no-canonical-prefixes -rtlib=compiler-rt -fuse-ld=lld")
-if (NOT TON_COMPILING_LIBCXX)
-    set(CMAKE_CXX_FLAGS_INIT "\${CMAKE_CXX_FLAGS_INIT} -stdlib=libc++")
-    set(CMAKE_EXE_LINKER_FLAGS_INIT "\${CMAKE_EXE_LINKER_FLAGS_INIT} -stdlib=libc++")
-else()
-    set(CMAKE_EXE_LINKER_FLAGS_INIT "\${CMAKE_EXE_LINKER_FLAGS_INIT} -nostdlib++")
-endif()
-set(CMAKE_SHARED_LINKER_FLAGS_INIT "\${CMAKE_EXE_LINKER_FLAGS_INIT}")
 TOOLCHAIN_EOF
 
 echo "Building compiler-rt builtins..."
@@ -238,7 +232,6 @@ echo "Building libc++ and libc++abi..."
     # additionally pass -nostdlib++ to linker to make it "work".
     cmake -S runtimes -B build-runtime \
         -DCMAKE_BUILD_TYPE=Release \
-        -DTON_COMPILING_LIBCXX=On \
         -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
         -DCMAKE_INSTALL_PREFIX="$SYSROOT/usr" \
         -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi;libunwind" \
@@ -250,27 +243,28 @@ echo "Building libc++ and libc++abi..."
 )
 
 # ===== Write the final toolchain with full flags =====
-CFLAGS="-no-canonical-prefixes"
-CXXFLAGS="-no-canonical-prefixes -stdlib=libc++"
-LDFLAGS="-no-canonical-prefixes -rtlib=compiler-rt -fuse-ld=lld -stdlib=libc++"
+ccommon="-no-canonical-prefixes"
+cc=""
+cld="-rtlib=compiler-rt"
+cxxcommon="-no-canonical-prefixes -stdlib=libc++"
+cxxc=""
+cxxld="-rtlib=compiler-rt"
 
 if [ -n "$SANITIZER" ]; then
-    CFLAGS="$CFLAGS -fsanitize=$SANITIZER"
-    CXXFLAGS="$CXXFLAGS -fsanitize=$SANITIZER"
-    LDFLAGS="$LDFLAGS -fsanitize=$SANITIZER"
+    ccommon="$ccommon -fsanitize=$SANITIZER"
+    cxxcommon="$cxxcommon -fsanitize=$SANITIZER"
 fi
 if [ -n "$ARCH_FLAG" ]; then
-    CFLAGS="$CFLAGS -march=$ARCH_FLAG"
-    CXXFLAGS="$CXXFLAGS -march=$ARCH_FLAG"
+    cld="$cld -march=$ARCH_FLAG"
+    cxxld="$cxxld -march=$ARCH_FLAG"
 fi
 
-export TOOLCHAIN_SYSTEM_NAME=Linux
-export TOOLCHAIN_SYSTEM_PROCESSOR
-export TOOLCHAIN_TARGET_TRIPLE="$TARGET_TRIPLE"
-export TOOLCHAIN_SYSROOT="$SYSROOT"
-export TOOLCHAIN_EXTRA_C_FLAGS="$CFLAGS"
-export TOOLCHAIN_EXTRA_CXX_FLAGS="$CXXFLAGS"
-export TOOLCHAIN_EXTRA_LINKER_FLAGS="$LDFLAGS"
+TOOLCHAIN_SYSTEM_NAME=Linux
+TOOLCHAIN_TARGET_TRIPLE="$TARGET_TRIPLE"
+TOOLCHAIN_SYSROOT="$SYSROOT"
+COMBINED_C_FLAGS="$ccommon --start-no-unused-arguments $cld $cc --end-no-unused-arguments"
+COMBINED_CXX_FLAGS="$cxxcommon --start-no-unused-arguments $cxxld $cxxc --end-no-unused-arguments"
+COMBINED_ASM_FLAGS="-no-canonical-prefixes"
 generate_toolchain "$TOOLCHAIN_FILE"
 
 # ===== Build third-party deps =====
@@ -283,9 +277,8 @@ export BUILD_DIR="$BUILD_ROOT"
 export TARBALLS_DIR
 export NPROC
 export CMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"
-extra_flags="--sysroot=$SYSROOT --target=$TARGET_TRIPLE"
-export CFLAGS="$extra_flags -O3 -Wall $CFLAGS"
-export CXXFLAGS="$extra_flags -O3 -Wall -std=c++20 $CXXFLAGS"
-export LDFLAGS="$extra_flags $LDFLAGS"
+sysroot_flags="--sysroot=$SYSROOT --target=$TARGET_TRIPLE"
+export CFLAGS="$sysroot_flags $ccommon $cc"
+export LDFLAGS="$sysroot_flags $ccommon $cld -fuse-ld=lld"
 
 "$SCRIPT_DIR/build-deps.sh"

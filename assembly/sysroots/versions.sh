@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 
 # ===== musl libc =====
-MUSL_VERSION=1.2.5
+MUSL_VERSION=1.2.6
 MUSL_URL="https://musl.libc.org/releases/musl-${MUSL_VERSION}.tar.gz"
-MUSL_SHA256="a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4"
-MUSL_PATCH1_URL="https://www.openwall.com/lists/musl/2025/02/13/1/1"
-MUSL_PATCH1_SHA256="0896fcdb5125d9d0723f4e165f13c209830e7045a75cba4e858060837cb7292e"
-MUSL_PATCH2_URL="https://www.openwall.com/lists/musl/2025/02/13/1/2"
-MUSL_PATCH2_SHA256="0620fcee4e8a4e52ebe1ea75e2b51d2197ebda242489c0586924eafa9e9606a1"
+MUSL_SHA256="d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a"
+MUSL_PATCH1_URL="https://www.openwall.com/lists/musl/2026/04/10/3/1"
+MUSL_PATCH1_SHA256="1ee29f64f9ca8e8ad7c349779d661ff6b52126a27575d3586981357a52c406fb"
+MUSL_PATCH2_URL="https://www.openwall.com/lists/musl/2026/04/03/2/1"
+MUSL_PATCH2_SHA256="444fa70e52ca158fb7d4bad560637790bbf8f72e80b82fff840dd66fa83091e3"
 
 # ===== Linux kernel headers =====
-LINUX_HEADERS_VERSION=6.6.118
+LINUX_HEADERS_VERSION=6.6.138
 LINUX_HEADERS_URL="https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${LINUX_HEADERS_VERSION}.tar.xz"
-LINUX_HEADERS_SHA256="4bdddce35474afc8d26f74ebfbcd0e1045ecd15f69e60f53529dba143374b17d"
+LINUX_HEADERS_SHA256="add06b5fdb655c7e575fbfa29e7bab23a3c36c5388e77fa759ed4b0d1a55a80f"
 
 # ===== LLVM =====
-LLVM_MAJOR_VERSION=21
-LLVM_VERSION=21.1.7
+LLVM_MAJOR_VERSION=22
+LLVM_VERSION=22.1.5
 LLVM_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz"
-LLVM_SHA256="e5b65fd79c95c343bb584127114cb2d252306c1ada1e057899b6aacdd445899e"
+LLVM_SHA256="7972b87b705a003ce70ab55f9f0fb495d156887cba0eb296d284731139118e2c"
 
 # ===== OpenSSL =====
 OPENSSL_VERSION=3.5.5

@@ -65,7 +65,7 @@ find_tool_with_pattern() {
 
 # find_clang <major_version>
 # Finds clang/clang++/llvm-ar/llvm-ranlib with the given major version.
-# Sets CC, CXX, AR, RANLIB.
+# Exports CC, CXX, AR, RANLIB.
 find_clang() {
     local version="$1"
 
@@ -79,10 +79,11 @@ find_clang() {
 
 # generate_toolchain <output_file> [extra_args...]
 # Generates a CMake toolchain file from the template.
-# Expects the following environment variables:
+# Expects the following variables:
 #   TOOLCHAIN_SYSTEM_NAME, TOOLCHAIN_SYSTEM_PROCESSOR, TOOLCHAIN_TARGET_TRIPLE,
 #   TOOLCHAIN_SYSROOT, CC, CXX, AR, RANLIB
-#   Optional: TOOLCHAIN_EXTRA_C_FLAGS, TOOLCHAIN_EXTRA_CXX_FLAGS, TOOLCHAIN_EXTRA_LINKER_FLAGS
+# The following arguments are optional:
+#   COMBINED_C_FLAGS, COMBINED_CXX_FLAGS, COMBINED_ASM_FLAGS
 generate_toolchain() {
     local output="$1"
 
@@ -94,8 +95,8 @@ generate_toolchain() {
         -e "s|@CXX@|${CXX}|g" \
         -e "s|@AR@|${AR}|g" \
         -e "s|@RANLIB@|${RANLIB}|g" \
-        -e "s|@EXTRA_C_FLAGS@|${TOOLCHAIN_EXTRA_C_FLAGS:-}|g" \
-        -e "s|@EXTRA_CXX_FLAGS@|${TOOLCHAIN_EXTRA_CXX_FLAGS:-}|g" \
-        -e "s|@EXTRA_LINKER_FLAGS@|${TOOLCHAIN_EXTRA_LINKER_FLAGS:-}|g" \
+        -e "s|@COMBINED_C_FLAGS@|${COMBINED_C_FLAGS:-}|g" \
+        -e "s|@COMBINED_CXX_FLAGS@|${COMBINED_CXX_FLAGS:-}|g" \
+        -e "s|@COMBINED_ASM_FLAGS@|${COMBINED_ASM_FLAGS:-}|g" \
         "$SCRIPT_DIR/Toolchain.cmake.in" > "$output"
 }

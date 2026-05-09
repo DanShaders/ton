@@ -13,30 +13,11 @@ set -euo pipefail
 #   DESTDIR        - actual filesystem root to install into (PREFIX is relative to this)
 #
 # Optional environment:
-#   CMAKE_TOOLCHAIN_FILE - toolchain file for cross-compilation (used by CMake deps)
-#   CFLAGS, CXXFLAGS, LDFLAGS - extra flags (sanitizers, arch, etc.)
+#   CMAKE_TOOLCHAIN_FILE - toolchain file for CMake deps
+#   CFLAGS, LDFLAGS - extra flags for non-CMake deps
 #   NPROC          - parallelism (defaults to nproc)
-#   SANITIZERS     - comma-separated list: address,thread,undefined (for CMake deps)
 #
 # Usage: ./build-deps.sh [dep1 dep2 ...] or ./build-deps.sh (builds all)
-
-echo "TARGET_TRIPLE=\"$TARGET_TRIPLE\" \\"
-echo "CC=\"$CC\" \\"
-echo "CXX=\"$CXX\" \\"
-echo "AR=\"$AR\" \\"
-echo "RANLIB=\"$RANLIB\" \\"
-echo "SOURCE_DIR=\"$SOURCE_DIR\" \\"
-echo "BUILD_DIR=\"$BUILD_DIR\" \\"
-echo "TARBALLS_DIR=\"$TARBALLS_DIR\" \\"
-echo "PREFIX=\"$PREFIX\" \\"
-echo "DESTDIR=\"$DESTDIR \"\\" 
-echo "CMAKE_TOOLCHAIN_FILE=\"${CMAKE_TOOLCHAIN_FILE:-}\" \\"
-echo "CFLAGS=\"$CFLAGS\" \\"
-echo "CXXFLAGS=\"$CXXFLAGS\" \\"
-echo "LDFLAGS=\"$LDFLAGS\" \\"
-echo "NPROC=\"$NPROC\" \\"
-echo "SANITIZERS=\"${SANITIZERS:=}\" \\"
-
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 source "$SCRIPT_DIR/common.sh"
@@ -74,7 +55,6 @@ cmake_common_args() {
         -DCMAKE_BUILD_TYPE=Release
         -DCMAKE_INSTALL_PREFIX="$PREFIX"
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-        -DCMAKE_PREFIX_PATH="$DESTDIR$PREFIX"
     )
     if [ -n "${CMAKE_TOOLCHAIN_FILE:-}" ]; then
         args+=(-DCMAKE_TOOLCHAIN_FILE="$CMAKE_TOOLCHAIN_FILE")
@@ -91,7 +71,6 @@ cmake_build_install() {
     rm -rf "$build"
     (
         unset CFLAGS
-        unset CXXFLAGS
         unset LDFLAGS
         cmake -S "$src" -B "$build" $(cmake_common_args) "$@"
         cmake --build "$build" --parallel "$NPROC"
@@ -100,7 +79,7 @@ cmake_build_install() {
 }
 
 # ===========================================================================
-# Non-CMake dependencies (autotools, custom build scripts)
+# Dependencies
 # ===========================================================================
 
 # ===== OpenSSL =====
@@ -266,10 +245,6 @@ build_secp256k1() {
         -DSECP256K1_BUILD_EXAMPLES=OFF \
         -DBUILD_SHARED_LIBS=OFF
 }
-
-# ===========================================================================
-# CMake-based dependencies
-# ===========================================================================
 
 # ===== zlib =====
 build_zlib() {
