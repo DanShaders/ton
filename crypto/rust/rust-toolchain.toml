@@ -1,0 +1,6 @@
+# Picked up by rustup. Hosts without rustup ignore this and use whatever
+# rustc/cargo are on PATH; CI is expected to install rustup so toolchain
+# selection is deterministic.
+[toolchain]
+channel = "1.95"
+profile = "minimal"

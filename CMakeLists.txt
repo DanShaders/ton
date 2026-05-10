@@ -93,6 +93,11 @@ option(TON_INSERT_GDB_HOOKS "Insert GDB hooks" OFF)
 
 option(TON_USE_LLD "Use LLD for linking" OFF)
 
+# Builds an opt-in Rust crate (crypto/rust) and exposes its FFI to the C++
+# `ton_crypto` library. Off by default — production paths still go through
+# OpenSSL / libsodium until call sites are migrated explicitly.
+option(TON_USE_RUST_CRYPTO "Build crypto/rust and link the Rust ed25519/curve25519 FFI into ton_crypto" OFF)
+
 if (TON_USE_LLD)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=lld")
@@ -121,6 +126,9 @@ set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMake" ${CMAKE_MODULE_PATH})
 include(BuildOpenSSL)
 include(BuildSodium)
 include(BuildLZ4)
+if (TON_USE_RUST_CRYPTO)
+  include(AddRustCrate)
+endif()
 
 if (USE_EMSCRIPTEN OR EMSCRIPTEN)
   set(SODIUM_ROOT_DIR ${CMAKE_BINARY_DIR}/3pp_emscripten/libsodium CACHE PATH "Sodium root directory" FORCE)

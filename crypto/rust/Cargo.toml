@@ -1,0 +1,20 @@
+[package]
+name = "ton-rust-crypto"
+version = "0.1.0"
+edition = "2021"
+license = "LGPL-2.0-or-later"
+publish = false
+description = "Rust crypto primitives exposed to TON via FFI: ed25519-zebra signing/verification, curve25519-dalek X25519 + ristretto255."
+
+[lib]
+# CMake's ton_add_rust_crate() picks up `lib<name>.a` (or `<name>.lib` on Windows).
+name = "ton_rust_crypto"
+crate-type = ["staticlib"]
+
+[dependencies]
+# Loose minimum-version ranges here; exact pinning lives in Cargo.lock so a
+# single `cargo update` (with review) refreshes deps without manifest churn.
+ed25519-zebra = "4.2"
+curve25519-dalek = "4.1"
+sha2 = { version = "0.10", default-features = false }
+rand = { version = "0.8", default-features = false, features = ["std", "std_rng"] }

@@ -334,6 +334,18 @@ endif()
 target_include_directories(ton_crypto PRIVATE ${BLST_INCLUDE_DIR})
 target_link_libraries(ton_crypto PRIVATE ${BLST_LIB})
 
+# Opt-in Rust FFI: builds the crypto/rust crate via cargo and exposes its
+# extern "C" entry points to ton_crypto. Production code paths still use
+# OpenSSL / libsodium until callers are migrated explicitly.
+if (TON_USE_RUST_CRYPTO)
+  ton_add_rust_crate(
+    NAME ton_rust_crypto
+    MANIFEST_PATH rust/Cargo.toml
+  )
+  target_link_libraries(ton_crypto PUBLIC ton_rust_crypto)
+  target_compile_definitions(ton_crypto PUBLIC TON_USE_RUST_CRYPTO=1)
+endif()
+
 target_include_directories(ton_crypto_core PUBLIC $<BUILD_INTERFACE:${SECP256K1_INCLUDE_DIR}>)
 
 if (MSVC)
