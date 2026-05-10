@@ -241,8 +241,9 @@ build_blst() {
 build_secp256k1() {
     cmake_build_install secp256k1 "$THIRD_PARTY/secp256k1" \
         -DSECP256K1_ENABLE_MODULE_RECOVERY=ON \
-        -DSECP256K1_ENABLE_MODULE_EXTRAKEYS=ON \
-        -DSECP256K1_BUILD_EXAMPLES=OFF \
+        -DSECP256K1_BUILD_BENCHMARK=OFF \
+        -DSECP256K1_BUILD_TESTS=OFF \
+        -DSECP256K1_BUILD_EXHAUSTIVE_TESTS=OFF \
         -DBUILD_SHARED_LIBS=OFF
 }
 
@@ -260,7 +261,7 @@ build_lz4() {
         -DBUILD_SHARED_LIBS=OFF \
         -DBUILD_STATIC_LIBS=ON \
         -DLZ4_BUNDLED_MODE=ON \
-        -DLZ4_POSITION_INDEPENDENT_LIB=ON
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.10
 }
 
 # ===== libbacktrace =====
@@ -289,8 +290,18 @@ build_libbacktrace() {
 }
 
 # ===== crc32c =====
+# Downloaded from upstream rather than built from third-party/crc32c so that
+# we can apply patches/crc32c-clang-cl-msvc-sim.patch — crc32c upstream gates
+# its MSVC-syntax flag setup on CMAKE_CXX_COMPILER_ID == "MSVC", which clang-cl
+# fails (it reports "Clang" with CMAKE_CXX_SIMULATE_ID == "MSVC"). The patch
+# extends those checks to recognize the simulation case.
 build_crc32c() {
-    cmake_build_install crc32c "$THIRD_PARTY/crc32c" \
+    echo "=== Building crc32c ${CRC32C_VERSION} ==="
+
+    prepare_source crc32c "$CRC32C_VERSION" "$CRC32C_URL" "$CRC32C_SHA256"
+    patch -p1 -d "$PREPARED_SRC" < "$SCRIPT_DIR/patches/crc32c-clang-cl-msvc-sim.patch"
+
+    cmake_build_install crc32c "$PREPARED_SRC" \
         -DCRC32C_BUILD_TESTS=OFF \
         -DCRC32C_BUILD_BENCHMARKS=OFF \
         -DCRC32C_USE_GLOG=OFF \
@@ -320,6 +331,8 @@ build_rocksdb() {
         -DWITH_GFLAGS=OFF \
         -DWITH_TESTS=OFF \
         -DWITH_TOOLS=OFF \
+        -DWITH_BENCHMARK_TOOLS=OFF \
+        -DWITH_CORE_TOOLS=OFF \
         -DUSE_RTTI=ON \
         -DFAIL_ON_WARNINGS=OFF \
         -DROCKSDB_INSTALL_ON_WINDOWS=ON \

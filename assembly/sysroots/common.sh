@@ -71,19 +71,32 @@ find_clang() {
 
     CC=$(find_tool_with_pattern "clang-$version" "clang version $version\." "${CC:-}" "clang-$version" "clang")
     CXX=$(find_tool_with_pattern "clang++-$version" "clang version $version\." "${CXX:-}" "clang++-$version" "clang++")
-    RANLIB=$(find_tool_with_pattern "llvm-ranlib" "LLVM" "${RANLIB:-}" "llvm-ranlib" "llvm-ranlib-$version")
-    AR=$(find_tool_with_pattern "llvm-ar" "LLVM" "${AR:-}" "llvm-ar" "llvm-ar-$version")
+    RANLIB=$(find_tool_with_pattern "llvm-ranlib" "LLVM version $version\." "${RANLIB:-}" "llvm-ranlib" "llvm-ranlib-$version")
+    AR=$(find_tool_with_pattern "llvm-ar" "LLVM version $version\." "${AR:-}" "llvm-ar" "llvm-ar-$version")
 
     export CC CXX RANLIB AR
 }
 
-# generate_toolchain <output_file> [extra_args...]
-# Generates a CMake toolchain file from the template.
-# Expects the following variables:
-#   TOOLCHAIN_SYSTEM_NAME, TOOLCHAIN_SYSTEM_PROCESSOR, TOOLCHAIN_TARGET_TRIPLE,
+# find_clang_cl <major_version>
+# Finds clang-cl + llvm-lib for cross-compiling to Windows from Linux. Same
+# binary handles C and CXX. No RANLIB on Windows (llvm-lib does the job of
+# both ar and ranlib in one go).
+find_clang_cl() {
+    local version="$1"
+
+    CC=$(find_tool_with_pattern "clang-cl-$version" "clang version $version\." "clang-cl-$version" "clang-cl")
+    CXX=$CC
+    AR=$(find_tool_with_pattern "llvm-lib" "" "llvm-lib" "llvm-lib-$version")
+    LINKER=$(find_tool_with_pattern "lld-link" "LLD $version." "lld-link" "lld-link-$version")
+
+    export CC CXX AR LINKER
+}
+
+# generate_toolchain <output_file>
+# Generates a Unix-flavored CMake toolchain file from Toolchain.cmake.in.
+# Expects: TOOLCHAIN_SYSTEM_NAME, TOOLCHAIN_SYSTEM_PROCESSOR, TOOLCHAIN_TARGET_TRIPLE,
 #   TOOLCHAIN_SYSROOT, CC, CXX, AR, RANLIB
-# The following arguments are optional:
-#   COMBINED_C_FLAGS, COMBINED_CXX_FLAGS, COMBINED_ASM_FLAGS
+# Optional: COMBINED_C_FLAGS, COMBINED_CXX_FLAGS, COMBINED_ASM_FLAGS
 generate_toolchain() {
     local output="$1"
 
@@ -99,4 +112,26 @@ generate_toolchain() {
         -e "s|@COMBINED_CXX_FLAGS@|${COMBINED_CXX_FLAGS:-}|g" \
         -e "s|@COMBINED_ASM_FLAGS@|${COMBINED_ASM_FLAGS:-}|g" \
         "$SCRIPT_DIR/Toolchain.cmake.in" > "$output"
+}
+
+# generate_toolchain_windows <output_file>
+# Generates a clang-cl + lld-link CMake toolchain file from
+# ToolchainWindows.cmake.in.
+# Expects: TOOLCHAIN_SYSTEM_NAME, TOOLCHAIN_SYSTEM_PROCESSOR,
+#   TOOLCHAIN_TARGET_TRIPLE, TOOLCHAIN_SYSROOT, CC, CXX, AR
+# Optional: COMBINED_C_FLAGS, COMBINED_CXX_FLAGS
+generate_toolchain_windows() {
+    local output="$1"
+
+    sed -e "s|@CMAKE_SYSTEM_NAME@|${TOOLCHAIN_SYSTEM_NAME}|g" \
+        -e "s|@CMAKE_SYSTEM_PROCESSOR@|${TOOLCHAIN_SYSTEM_PROCESSOR}|g" \
+        -e "s|@TARGET_TRIPLE@|${TOOLCHAIN_TARGET_TRIPLE}|g" \
+        -e "s|@SYSROOT_PATH@|${TOOLCHAIN_SYSROOT}|g" \
+        -e "s|@CC@|${CC}|g" \
+        -e "s|@CXX@|${CXX}|g" \
+        -e "s|@AR@|${AR}|g" \
+        -e "s|@LINKER@|${LINKER}|g" \
+        -e "s|@COMBINED_C_FLAGS@|${COMBINED_C_FLAGS:-}|g" \
+        -e "s|@COMBINED_CXX_FLAGS@|${COMBINED_CXX_FLAGS:-}|g" \
+        "$SCRIPT_DIR/ToolchainWindows.cmake.in" > "$output"
 }
