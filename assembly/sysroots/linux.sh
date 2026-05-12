@@ -63,39 +63,27 @@ SYSROOT="$BUILD_DIR/sysroot-$TARGET_TRIPLE"
 
 mkdir -p "$TARBALLS_DIR" "$BUILD_ROOT"
 
-# ===== Download all sources =====
+# ===== Download and extract sources =====
 cd "$TARBALLS_DIR"
+
+download_verified "$LINUX_HEADERS_URL" "linux-$LINUX_HEADERS_VERSION.tar.xz" "$LINUX_HEADERS_SHA256"
+prepare_tarball "$TARBALLS_DIR/linux-$LINUX_HEADERS_VERSION" \
+    "$TARBALLS_DIR/linux-$LINUX_HEADERS_VERSION.tar.xz"
+LINUX_HEADERS_SRC="$PREPARED_SRC"
+
 download_verified "$MUSL_URL" "musl-$MUSL_VERSION.tar.gz" "$MUSL_SHA256"
 download_verified "$MUSL_PATCH1_URL" "musl-patch-1.patch" "$MUSL_PATCH1_SHA256"
 download_verified "$MUSL_PATCH2_URL" "musl-patch-2.patch" "$MUSL_PATCH2_SHA256"
-download_verified "$LINUX_HEADERS_URL" "linux-$LINUX_HEADERS_VERSION.tar.xz" "$LINUX_HEADERS_SHA256"
+prepare_tarball "$TARBALLS_DIR/musl-$MUSL_VERSION" \
+    "$TARBALLS_DIR/musl-$MUSL_VERSION.tar.gz" \
+    --patch="$TARBALLS_DIR/musl-patch-1.patch" \
+    --patch="$TARBALLS_DIR/musl-patch-2.patch"
+MUSL_SRC="$PREPARED_SRC"
+
 download_verified "$LLVM_URL" "llvm-project-$LLVM_VERSION.src.tar.xz" "$LLVM_SHA256"
-
-# ===== Extract sources =====
-cd "$BUILD_ROOT"
-
-# It is faster to re-extract Linux kernel source than to try cleaning it...
-rm -rf "linux-$LINUX_HEADERS_VERSION"
-echo "Extracting linux-$LINUX_HEADERS_VERSION.tar.xz..."
-tar xf "$TARBALLS_DIR/linux-$LINUX_HEADERS_VERSION.tar.xz"
-
-MUSL_EXTRACTED=false
-if [ ! -d "musl-$MUSL_VERSION" ]; then
-    echo "Extracting musl-$MUSL_VERSION.tar.gz..."
-    tar xf "$TARBALLS_DIR/musl-$MUSL_VERSION.tar.gz"
-    MUSL_EXTRACTED=true
-else
-    make -C "musl-$MUSL_VERSION" clean
-fi
-
-if [ ! -d "llvm-project-$LLVM_VERSION.src" ]; then
-    echo "Extracting llvm-project-$LLVM_VERSION.src.tar.xz..."
-    tar xf "$TARBALLS_DIR/llvm-project-$LLVM_VERSION.src.tar.xz"
-else
-    rm -rf "llvm-project-$LLVM_VERSION.src/build-resource-headers"
-    rm -rf "llvm-project-$LLVM_VERSION.src/build-builtins"
-    rm -rf "llvm-project-$LLVM_VERSION.src/build-runtime"
-fi
+prepare_tarball "$TARBALLS_DIR/llvm-project-$LLVM_VERSION.src" \
+    "$TARBALLS_DIR/llvm-project-$LLVM_VERSION.src.tar.xz"
+LLVM_SRC="$PREPARED_SRC"
 
 # ===== Build sysroot =====
 rm -rf "$SYSROOT"
@@ -104,8 +92,10 @@ ln -sf "$SYSROOT/usr/lib" "$SYSROOT/usr/lib64"
 
 echo "Installing Linux kernel headers..."
 (
-    cd "linux-$LINUX_HEADERS_VERSION"
-    make headers_install INSTALL_HDR_PATH="$SYSROOT/usr" ARCH="$LINUX_ARCH" "HOSTCC=$CC" -j"$NPROC"
+    clean_and_enter "$BUILD_ROOT/linux-headers-build"
+
+    make -C "$LINUX_HEADERS_SRC" O="$PWD" \
+        headers_install INSTALL_HDR_PATH="$SYSROOT/usr" ARCH="$LINUX_ARCH" "HOSTCC=$CC" -j"$NPROC"
 )
 
 # In order not to force users to build a specific distribution of Clang that is capable of
@@ -121,13 +111,14 @@ echo "Installing Linux kernel headers..."
 # least resistance and install Clang resource headers into the sysroot as well.
 echo "Installing Clang resource headers..."
 (
-    cd "llvm-project-$LLVM_VERSION.src"
-    cmake -S llvm -B build-resource-headers \
+    clean_and_enter "$BUILD_ROOT/clang-resource-headers-build"
+
+    cmake -S "$LLVM_SRC/llvm" -B . \
         -DCMAKE_BUILD_TYPE=Release \
         -DLLVM_ENABLE_PROJECTS="clang" \
         -DCMAKE_INSTALL_PREFIX=/usr \
         "-DLLVM_TARGETS_TO_BUILD=$LLVM_ARCH"
-    DESTDIR="$SYSROOT" cmake --build build-resource-headers --target install-clang-resource-headers
+    DESTDIR="$SYSROOT" cmake --build . --target install-clang-resource-headers
 )
 
 # Clang likes to find its bundled resources relative to its own path, so since we intend on
@@ -141,23 +132,17 @@ ln -sf "$CXX" "$SYSROOT/usr/bin/clang++-host"
 CXX="$SYSROOT/usr/bin/clang++-host"
 export CC CXX
 
+# We don't have compiler-rt builtins, so C compiler is non-functional. To compile the builtins, we
+# need C library headers. Musl provides a target to install headers but it is unfortunately gated by
+# ./configure that needs _a_ compiler, so we create a best-effort clang invocation (actually, just
+# copy the one we will eventually use later) that is good enough for `./configure`.
 echo "Installing musl headers..."
 (
-    cd "musl-$MUSL_VERSION"
+    clean_and_enter "$BUILD_ROOT/musl-headers-build"
 
-    if [ "$MUSL_EXTRACTED" = true ]; then
-        patch -p1 < "$TARBALLS_DIR/musl-patch-1.patch"
-        patch -p1 < "$TARBALLS_DIR/musl-patch-2.patch"
-    fi
-
-    # We don't have compiler-rt builtins, so C compiler is non-functional. To compile the builtins,
-    # we need C library headers. Musl provides a target to install headers but it is unfortunately
-    # gated by ./configure that needs _a_ compiler, so here we create a best-effort clang invocation
-    # that is good enough for `./configure`.
-    CC="$CC -no-canonical-prefixes --target=$TARGET_TRIPLE --sysroot=$SYSROOT" \
+    CC="$CC -no-canonical-prefixes --target=$TARGET_TRIPLE --sysroot=$SYSROOT -rtlib=compiler-rt" \
     LDFLAGS="-fuse-ld=lld" \
-    LIBCC="compiler-rt" \
-    ./configure --prefix=/usr "--target=$TARGET_TRIPLE"
+    "$MUSL_SRC/configure" --prefix=/usr "--target=$TARGET_TRIPLE"
     DESTDIR="$SYSROOT" make install-headers -j"$NPROC"
 )
 
@@ -170,18 +155,20 @@ set(CMAKE_SYSTEM_PROCESSOR $TOOLCHAIN_SYSTEM_PROCESSOR)
 
 set(CMAKE_SYSROOT $SYSROOT)
 
-set(rtlib_flag --start-no-unused-arguments -rtlib=compiler-rt --end-no-unused-arguments)
-
-set(CMAKE_C_COMPILER $CC -no-canonical-prefixes \${rtlib_flag})
+set(CMAKE_C_COMPILER $CC)
 set(CMAKE_C_COMPILER_TARGET $TARGET_TRIPLE)
-set(CMAKE_CXX_COMPILER $CXX -no-canonical-prefixes -nostdlib++ \${rtlib_flag})
+set(CMAKE_CXX_COMPILER $CXX)
 set(CMAKE_CXX_COMPILER_TARGET $TARGET_TRIPLE)
-set(CMAKE_ASM_COMPILER $CC -no-canonical-prefixes)
+set(CMAKE_ASM_COMPILER $CC)
 set(CMAKE_ASM_COMPILER_TARGET $TARGET_TRIPLE)
 set(CMAKE_AR $AR)
 set(CMAKE_RANLIB $RANLIB)
 
 set(CMAKE_LINKER_TYPE LLD)
+
+add_compile_options(-no-canonical-prefixes)
+add_link_options(-no-canonical-prefixes -rtlib=compiler-rt)
+add_link_options(\$<\$<LINK_LANGUAGE:CXX>:-nostdlib++>) # see comment near libc++ build
 
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
@@ -191,9 +178,9 @@ TOOLCHAIN_EOF
 
 echo "Building compiler-rt builtins..."
 (
-    cd "llvm-project-$LLVM_VERSION.src"
+    clean_and_enter "$BUILD_ROOT/compiler-rt-build"
 
-    cmake -S runtimes -B build-builtins \
+    cmake -S "$LLVM_SRC/runtimes" -B . \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
         -DCMAKE_INSTALL_PREFIX=/usr/lib/clang/$LLVM_MAJOR_VERSION \
@@ -209,28 +196,29 @@ echo "Building compiler-rt builtins..."
         -DCOMPILER_RT_BUILD_ORC=Off \
         -DCOMPILER_RT_BUILD_GWP_ASAN=Off \
         -DCOMPILER_RT_EXCLUDE_ATOMIC_BUILTIN=Off
-    DESTDIR="$SYSROOT" cmake --build build-builtins --target install
+    DESTDIR="$SYSROOT" cmake --build . --target install
 )
 
+# With compiler-rt builtins in place, we can finally properly configure and build musl.
 echo "Building musl libc..."
 (
-    cd "musl-$MUSL_VERSION"
+    clean_and_enter "$BUILD_ROOT/musl-build"
 
-    # With compiler-rt builtins in place, we can finally properly configure and build musl.
-    CC="$CC -no-canonical-prefixes --target=$TARGET_TRIPLE --sysroot=$SYSROOT -fuse-ld=lld -rtlib=compiler-rt" \
-    ./configure --prefix=/usr "--target=$TARGET_TRIPLE"
+    CC="$CC -no-canonical-prefixes --target=$TARGET_TRIPLE --sysroot=$SYSROOT -rtlib=compiler-rt" \
+    LDFLAGS="-fuse-ld=lld" \
+    "$MUSL_SRC/configure" --prefix=/usr "--target=$TARGET_TRIPLE"
     DESTDIR="$SYSROOT" make install -j"$NPROC"
 )
 
+# And libc and builtins allow us to build C++ runtime libraries and libc++. Since we don't want to
+# pass -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY (it breaks symbol detection, we did not care
+# about this in builtins build but libc++ does care), we need to additionally pass -nostdlib++ to
+# linker to make it "work".
 echo "Building libc++ and libc++abi..."
 (
-    cd "llvm-project-$LLVM_VERSION.src"
+    clean_and_enter "$BUILD_ROOT/libcxx-build"
 
-    # And libc and builtins allow us to build C++ runtime libraries and libc++.
-    # Since we don't want to pass -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY (it breaks symbol
-    # detection, we did not care about this in builtins build but libc++ does care), we need to
-    # additionally pass -nostdlib++ to linker to make it "work".
-    cmake -S runtimes -B build-runtime \
+    cmake -S "$LLVM_SRC/runtimes" -B . \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE" \
         -DCMAKE_INSTALL_PREFIX="$SYSROOT/usr" \
@@ -239,46 +227,58 @@ echo "Building libc++ and libc++abi..."
         -DLIBUNWIND_USE_COMPILER_RT=On \
         -DLIBCXXABI_USE_COMPILER_RT=On \
         -DLIBCXX_USE_COMPILER_RT=On
-    cmake --build build-runtime --target install
+    cmake --build . --target install
 )
 
 # ===== Write the final toolchain with full flags =====
-ccommon="-no-canonical-prefixes"
-cc=""
-cld="-rtlib=compiler-rt"
-cxxcommon="-no-canonical-prefixes -stdlib=libc++"
-cxxc=""
-cxxld="-rtlib=compiler-rt"
-
+compile_options=(
+    -no-canonical-prefixes
+    '$<$<COMPILE_LANGUAGE:CXX>:-stdlib=libc++>'
+)
+link_options=(
+    -no-canonical-prefixes
+    -rtlib=compiler-rt
+    '$<$<LINK_LANGUAGE:CXX>:-stdlib=libc++>'
+)
 if [ -n "$SANITIZER" ]; then
-    ccommon="$ccommon -fsanitize=$SANITIZER"
-    cxxcommon="$cxxcommon -fsanitize=$SANITIZER"
+    compile_options+=("-fsanitize=$SANITIZER")
+    link_options+=("-fsanitize=$SANITIZER")
 fi
 if [ -n "$ARCH_FLAG" ]; then
-    cld="$cld -march=$ARCH_FLAG"
-    cxxld="$cxxld -march=$ARCH_FLAG"
+    compile_options+=("-march=$ARCH_FLAG")
 fi
 
 TOOLCHAIN_SYSTEM_NAME=Linux
 TOOLCHAIN_TARGET_TRIPLE="$TARGET_TRIPLE"
 TOOLCHAIN_SYSROOT="$SYSROOT"
-COMBINED_C_FLAGS="$ccommon --start-no-unused-arguments $cld $cc --end-no-unused-arguments"
-COMBINED_CXX_FLAGS="$cxxcommon --start-no-unused-arguments $cxxld $cxxc --end-no-unused-arguments"
-COMBINED_ASM_FLAGS="-no-canonical-prefixes"
+COMPILE_OPTIONS="${compile_options[*]}"
+LINK_OPTIONS="${link_options[*]}"
 generate_toolchain "$TOOLCHAIN_FILE"
 
 # ===== Build third-party deps =====
 echo "Building dependencies..."
-export TARGET_TRIPLE
-export PREFIX=/usr
-export DESTDIR="$SYSROOT"
-export SOURCE_DIR
-export BUILD_DIR="$BUILD_ROOT"
-export TARBALLS_DIR
-export NPROC
 export CMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"
-sysroot_flags="--sysroot=$SYSROOT --target=$TARGET_TRIPLE"
-export CFLAGS="$sysroot_flags $ccommon $cc"
-export LDFLAGS="$sysroot_flags $ccommon $cld -fuse-ld=lld"
+# CC, CXX, AR, RANLIB are already exported by find_clang. CFLAGS/LDFLAGS are
+# the user's to set; build-deps.sh prepends --target-cflags/--target-ldflags
+# for autotools deps, and CMake deps get target wiring from the toolchain file.
+target_cflags=(--sysroot="$SYSROOT" --target="$TARGET_TRIPLE" -no-canonical-prefixes)
+target_ldflags=(--sysroot="$SYSROOT" --target="$TARGET_TRIPLE" -no-canonical-prefixes
+                -rtlib=compiler-rt -fuse-ld=lld)
+if [ -n "$SANITIZER" ]; then
+    target_cflags+=("-fsanitize=$SANITIZER")
+    target_ldflags+=("-fsanitize=$SANITIZER")
+fi
+if [ -n "$ARCH_FLAG" ]; then
+    target_cflags+=("-march=$ARCH_FLAG")
+fi
 
-"$SCRIPT_DIR/build-deps.sh"
+"$SCRIPT_DIR/build-deps.sh" \
+    --target="$TARGET_TRIPLE" \
+    --source-dir="$SOURCE_DIR" \
+    --build-dir="$BUILD_ROOT" \
+    --tarballs-dir="$TARBALLS_DIR" \
+    --nproc="$NPROC" \
+    --prefix=/usr \
+    --destdir="$SYSROOT" \
+    --target-cflags="${target_cflags[*]}" \
+    --target-ldflags="${target_ldflags[*]}"

@@ -77,30 +77,15 @@ if [ ! -d "$XWIN_SYSROOT/Windows Kits/10/Include/$WINDOWS_SDK_VERSION" ]; then
         --preserve-ms-arch-notation --include-debug-libs --use-winsysroot-style
 fi
 
-# ===== Generate thin compiler/linker wrappers =====
-# CMake's CMAKE_LINKER is strictly a single path on Windows (LINKER mode), with
-# no immutable-args channel akin to CMAKE_<LANG>_COMPILER's _ARG1 plumbing —
-# the lld-link wrapper sidesteps that limitation by being a real binary-from-
-# CMake's-POV while still injecting /winsysroot: on every link invocation.
-#
-# The clang-msvc wrapper handles a different problem: autotools-driven deps
-# (notably OpenSSL via the mingw64 target) feed GCC-style flags that clang-cl
-# rejects but plain clang in --target=x86_64-pc-windows-msvc mode accepts.
-# That mode does not understand /winsysroot, so the wrapper instead expands
-# it manually into -isystem/-L into the xwin layout, plus the ABI-relevant
-# bits clang-cl auto-adds (-D_MT/-D_DLL, --dependent-lib for the dynamic CRT)
-# so its objects are ABI-compatible with the rest of the sysroot. See
-# README/comments for the full enumeration of clang-cl's implicit cc1 args.
+# ===== Generate the autotools-only clang wrapper =====
+# Autotools-driven deps (notably OpenSSL via the mingw64 target) feed GCC-style
+# flags that clang-cl rejects but plain clang in --target=x86_64-pc-windows-msvc
+# mode accepts. That mode does not understand /winsysroot, so the wrapper
+# expands it manually into -isystem/-L into the xwin layout, plus the
+# ABI-relevant bits clang-cl auto-adds (-D_MT/-D_DLL, --dependent-lib for the
+# dynamic CRT) so its objects are ABI-compatible with the rest of the sysroot.
+# See README/comments for the full enumeration of clang-cl's implicit cc1 args.
 mkdir -p "$SYSROOT/bin"
-
-LINK_WRAPPER="$SYSROOT/bin/lld-link"
-cat > "$LINK_WRAPPER" <<WRAPPER_EOF
-#!/bin/sh
-exec "$LINKER" "/winsysroot:$XWIN_SYSROOT" "\$@"
-WRAPPER_EOF
-chmod +x "$LINK_WRAPPER"
-LINKER="$LINK_WRAPPER"
-export LINKER
 
 CLANG_MSVC_WRAPPER="$SYSROOT/bin/clang-msvc"
 cat > "$CLANG_MSVC_WRAPPER" <<WRAPPER_EOF
@@ -120,11 +105,13 @@ WRAPPER_EOF
 chmod +x "$CLANG_MSVC_WRAPPER"
 
 # ===== Generate the toolchain =====
-# -winsysroot is required at compile (header search) and link (lib search),
-# so it goes into the immutable CMAKE_<LANG>_COMPILER list. --target is set
-# via CMAKE_<LANG>_COMPILER_TARGET inside the template.
-export COMBINED_C_FLAGS="-winsysroot $XWIN_SYSROOT"
-export COMBINED_CXX_FLAGS="-winsysroot $XWIN_SYSROOT"
+# /winsysroot: is required at compile (header search) for clang-cl and at link
+# (lib search) for lld-link. add_compile_options / add_link_options route it
+# to each context — at link, CMake's MSVC link rule expands <LINK_FLAGS> on
+# the `vs_link_exe -- <linker> ...` line, so flags do reach the linker even
+# though clang-cl isn't driving it.
+export COMPILE_OPTIONS="/winsysroot:$XWIN_SYSROOT"
+export LINK_OPTIONS="/winsysroot:$XWIN_SYSROOT"
 
 export TOOLCHAIN_SYSTEM_NAME=Windows
 export TOOLCHAIN_SYSTEM_PROCESSOR
@@ -136,30 +123,27 @@ generate_toolchain_windows "$TOOLCHAIN_FILE"
 
 # ===== Build third-party deps =====
 echo "Building dependencies..."
-export TARGET_TRIPLE
-export PREFIX=/usr
-export DESTDIR="$SYSROOT"
-export SOURCE_DIR
-export BUILD_DIR="$BUILD_ROOT"
-export TARBALLS_DIR
-export NPROC
 export CMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"
 
-# build-deps.sh's CMake-driven deps unset CFLAGS/CXXFLAGS internally and rely
-# on the toolchain file, so the env values below matter only for the deps
-# that still go through autotools / their own Configure→Makefile (currently
-# OpenSSL, which we route through the plain-clang wrapper).
+# CC/CXX matter only for the deps that go through autotools (currently just
+# OpenSSL via the mingw64 target). CMake deps use the toolchain file, which
+# overrides CC/CXX. The clang-msvc wrapper already bakes in /winsysroot via
+# -isystem/-L, so no extra --target-cflags/--target-ldflags are needed.
 export CC="$CLANG_MSVC_WRAPPER"
 export CXX="$CLANG_MSVC_WRAPPER"
-export CFLAGS=""
-export CXXFLAGS=""
-export LDFLAGS=""
 
 # sodium, mhd, libbacktrace still need separate handling on Linux→Windows
 # (autotools-only; would need similar treatment to OpenSSL but their
 # Configure scripts have additional Windows quirks). blst's custom build.sh
 # also hasn't been validated against clang-cl yet.
 "$SCRIPT_DIR/build-deps.sh" \
+    --target="$TARGET_TRIPLE" \
+    --source-dir="$SOURCE_DIR" \
+    --build-dir="$BUILD_ROOT" \
+    --tarballs-dir="$TARBALLS_DIR" \
+    --nproc="$NPROC" \
+    --prefix=/usr \
+    --destdir="$SYSROOT" \
     openssl secp256k1 zlib lz4 crc32c rocksdb abseil ngtcp2
 
 echo

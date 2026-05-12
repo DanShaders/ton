@@ -36,6 +36,70 @@ download_verified() {
     fi
 }
 
+# prepare_tarball <base_dir> <tarball> [--patch=<file>]... [--clean=<cmd>]
+# Idempotently extracts <tarball> (with --strip-components=1) into
+# "<base_dir>-<patch-hash>" and applies the given patches. The hash is a short
+# sha256 of `sha256sum <patches...>`, so concurrent runs from branches with
+# different patch sets get distinct directories. Sets the global PREPARED_SRC
+# to the resulting path.
+#
+# On success, writes the full patch fingerprint to <PREPARED_SRC>/.prepared.
+# Subsequent calls with the same patches skip extraction (and run --clean, if
+# given, inside <PREPARED_SRC> to reset build artifacts). Any failure before
+# .prepared is written causes the next call to re-extract from scratch.
+# <cmd> is run via `bash -c` from within <PREPARED_SRC>.
+prepare_tarball() {
+    local base_dir="$1" tarball="$2"
+    shift 2
+    local patches=() clean_cmd=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --patch=*) patches+=("${1#*=}") ;;
+            --clean=*) clean_cmd="${1#*=}" ;;
+            *) echo "prepare_tarball: unknown arg: $1" >&2; return 1 ;;
+        esac
+        shift
+    done
+
+    local fingerprint=""
+    if [ ${#patches[@]} -gt 0 ]; then
+        fingerprint=$(sha256sum "${patches[@]}")
+    fi
+    local hash
+    hash=$(printf '%s' "$fingerprint" | sha256sum | cut -c1-12)
+    PREPARED_SRC="$base_dir-$hash"
+
+    if [ -f "$PREPARED_SRC/.prepared" ] && [ "$(cat "$PREPARED_SRC/.prepared")" = "$fingerprint" ]; then
+        if [ -n "$clean_cmd" ]; then
+            (cd "$PREPARED_SRC" && bash -c "$clean_cmd")
+        fi
+        return 0
+    fi
+
+    rm -rf "$PREPARED_SRC"
+    mkdir -p "$PREPARED_SRC"
+    echo "Extracting $(basename "$tarball")..."
+    tar xf "$tarball" -C "$PREPARED_SRC" --strip-components=1
+    local p
+    for p in "${patches[@]}"; do
+        echo "Applying $(basename "$p")..."
+        patch -p1 -d "$PREPARED_SRC" < "$p"
+    done
+    printf '%s' "$fingerprint" > "$PREPARED_SRC/.prepared"
+}
+
+# clean_and_enter <dir>
+# Wipes <dir> (if any), recreates it empty, and changes the current shell's
+# working directory to it. Intended for use inside a subshell so the cd doesn't
+# leak — each consumer ends up with a fresh build directory at $PWD and can use
+# "." for build-dir args (cmake -B, cmake --build, etc.).
+clean_and_enter() {
+    local dir="$1"
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    cd "$dir"
+}
+
 find_tool_with_pattern() {
     local name="$1"
     local pattern="$2"
@@ -49,9 +113,7 @@ find_tool_with_pattern() {
         local path
         path=$(command -v "$candidate" 2>/dev/null)
         if [ -n "$path" ]; then
-            local version
-            version=$("$path" --version 2>/dev/null | head -n1)
-            if echo "$version" | grep -q "$pattern"; then
+            if "$path" --version 2>/dev/null | grep -q "$pattern"; then
                 echo "Using $path for $name." >&2
                 echo "$path"
                 return 0
@@ -96,7 +158,7 @@ find_clang_cl() {
 # Generates a Unix-flavored CMake toolchain file from Toolchain.cmake.in.
 # Expects: TOOLCHAIN_SYSTEM_NAME, TOOLCHAIN_SYSTEM_PROCESSOR, TOOLCHAIN_TARGET_TRIPLE,
 #   TOOLCHAIN_SYSROOT, CC, CXX, AR, RANLIB
-# Optional: COMBINED_C_FLAGS, COMBINED_CXX_FLAGS, COMBINED_ASM_FLAGS
+# Optional: COMPILE_OPTIONS, LINK_OPTIONS
 generate_toolchain() {
     local output="$1"
 
@@ -108,18 +170,17 @@ generate_toolchain() {
         -e "s|@CXX@|${CXX}|g" \
         -e "s|@AR@|${AR}|g" \
         -e "s|@RANLIB@|${RANLIB}|g" \
-        -e "s|@COMBINED_C_FLAGS@|${COMBINED_C_FLAGS:-}|g" \
-        -e "s|@COMBINED_CXX_FLAGS@|${COMBINED_CXX_FLAGS:-}|g" \
-        -e "s|@COMBINED_ASM_FLAGS@|${COMBINED_ASM_FLAGS:-}|g" \
-        "$SCRIPT_DIR/Toolchain.cmake.in" > "$output"
+        -e "s|@COMPILE_OPTIONS@|${COMPILE_OPTIONS:-}|g" \
+        -e "s|@LINK_OPTIONS@|${LINK_OPTIONS:-}|g" \
+        "$SCRIPT_DIR/ToolchainUnix.cmake.in" > "$output"
 }
 
 # generate_toolchain_windows <output_file>
 # Generates a clang-cl + lld-link CMake toolchain file from
 # ToolchainWindows.cmake.in.
 # Expects: TOOLCHAIN_SYSTEM_NAME, TOOLCHAIN_SYSTEM_PROCESSOR,
-#   TOOLCHAIN_TARGET_TRIPLE, TOOLCHAIN_SYSROOT, CC, CXX, AR
-# Optional: COMBINED_C_FLAGS, COMBINED_CXX_FLAGS
+#   TOOLCHAIN_TARGET_TRIPLE, TOOLCHAIN_SYSROOT, CC, CXX, AR, LINKER
+# Optional: COMPILE_OPTIONS, LINK_OPTIONS
 generate_toolchain_windows() {
     local output="$1"
 
@@ -131,7 +192,7 @@ generate_toolchain_windows() {
         -e "s|@CXX@|${CXX}|g" \
         -e "s|@AR@|${AR}|g" \
         -e "s|@LINKER@|${LINKER}|g" \
-        -e "s|@COMBINED_C_FLAGS@|${COMBINED_C_FLAGS:-}|g" \
-        -e "s|@COMBINED_CXX_FLAGS@|${COMBINED_CXX_FLAGS:-}|g" \
+        -e "s|@COMPILE_OPTIONS@|${COMPILE_OPTIONS:-}|g" \
+        -e "s|@LINK_OPTIONS@|${LINK_OPTIONS:-}|g" \
         "$SCRIPT_DIR/ToolchainWindows.cmake.in" > "$output"
 }
