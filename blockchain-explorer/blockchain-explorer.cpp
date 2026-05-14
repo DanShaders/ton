@@ -257,7 +257,7 @@ class CoreActor : public CoreActorInterface {
       } else {
         td::actor::create_actor<HttpQueryBlockSearch>("blocksearch", opts, prefix, std::move(promise)).release();
       }
-    } else if (command == "last") {
+    } else if (command == "last" || command.empty()) {
       td::actor::create_actor<HttpQueryViewLastBlock>("", opts, prefix, std::move(promise)).release();
     } else if (command == "download") {
       td::actor::create_actor<HttpQueryBlockData>("downloadblock", opts, prefix, std::move(promise)).release();
