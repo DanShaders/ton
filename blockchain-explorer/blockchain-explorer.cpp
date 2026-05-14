@@ -123,6 +123,7 @@ class CoreActor : public CoreActorInterface {
 
   td::uint32 http_port_ = 80;
   td::actor::ActorOwn<http::HttpServer> http_server_;
+  td::FileFd http_ready_fd_;
 
   td::IPAddress remote_addr_;
   ton::PublicKey remote_public_key_;
@@ -204,6 +205,9 @@ class CoreActor : public CoreActorInterface {
   }
   void set_hide_ips(bool value) {
     hide_ips_ = value;
+  }
+  void set_http_ready_fd(td::FileFd fd) {
+    http_ready_fd_ = std::move(fd);
   }
 
   void send_lite_query(td::BufferSlice query, td::Promise<td::BufferSlice> promise) override;
@@ -311,6 +315,8 @@ class CoreActor : public CoreActorInterface {
       payload_->slice_gc();
       if (buffer_.size() + chunk.size() > max_post_size) {
         errored_ = true;
+        LOG(ERROR) << "PostBodyReader: oversized body (have " << buffer_.size() << ", +" << chunk.size()
+                   << " > limit " << max_post_size << "), sending 413";
         http::answer_error(http::status_payload_too_large, "", std::move(promise_));
         return;
       }
@@ -390,8 +396,17 @@ class CoreActor : public CoreActorInterface {
     }
     n_servers_ = servers.size();
     client_ = liteclient::ExtClient::create(std::move(servers), make_callback(), true);
+
+    auto on_bind = td::PromiseCreator::lambda(
+        [ready_fd = std::move(http_ready_fd_)](td::Result<td::Unit> R) mutable {
+          if (!ready_fd.empty()) {
+            ready_fd.write(R.is_ok() ? "1" : "0").ensure();
+            ready_fd.close();
+          }
+        });
     http_server_ = http::HttpServer::create(static_cast<td::uint16>(http_port_),
-                                            std::make_shared<HttpServerCallback>(actor_id(this)));
+                                            std::make_shared<HttpServerCallback>(actor_id(this)),
+                                            std::move(on_bind));
   }
 };
 
@@ -564,6 +579,16 @@ int main(int argc, char* argv[]) {
     local_scripts = true;
     return td::Status::OK();
   });
+#if !TD_PORT_WINDOWS
+  p.add_checked_option(
+      '\0', "http-ready-fd", "file descriptor to notify when http listener is bound",
+      [&](td::Slice s) -> td::Status {
+        TRY_RESULT(v, td::to_integer_safe<int>(s));
+        td::actor::send_closure(x, &CoreActor::set_http_ready_fd,
+                                td::FileFd::from_native_fd(td::NativeFd(v)));
+        return td::Status::OK();
+      });
+#endif
 #if TD_DARWIN || TD_LINUX
   p.add_checked_option('l', "logname", "log to file", [&](td::Slice fname) {
     auto FileLog = td::FileFd::open(td::CSlice(fname.str().c_str()),

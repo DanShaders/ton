@@ -23,8 +23,8 @@ namespace ton {
 
 namespace http {
 
-HttpServer::HttpServer(td::IPAddress address, std::shared_ptr<Callback> callback)
-    : address_(address), callback_(std::move(callback)) {
+HttpServer::HttpServer(td::IPAddress address, std::shared_ptr<Callback> callback, td::Promise<td::Unit> on_bind)
+    : address_(address), callback_(std::move(callback)), on_bind_(std::move(on_bind)) {
   add_collector(collector_.get());
 }
 
@@ -42,6 +42,9 @@ void HttpServer::start_up() {
     Callback(td::actor::ActorId<HttpServer> id) : id_(id) {
     }
 
+    void on_bind() override {
+      td::actor::send_closure(id_, &HttpServer::bound);
+    }
     void accept(td::SocketFd fd) override {
       td::actor::send_closure(id_, &HttpServer::accepted, std::move(fd));
     }
@@ -50,6 +53,12 @@ void HttpServer::start_up() {
   listener_ = td::actor::create_actor<td::TcpInfiniteListener>(
       td::actor::ActorOptions().with_name("listener").with_poll(), address_.get_port(),
       std::make_unique<Callback>(actor_id(this)), address_.get_ip_host());
+}
+
+void HttpServer::bound() {
+  if (on_bind_) {
+    on_bind_.set_value(td::Unit());
+  }
 }
 
 void HttpServer::accepted(td::SocketFd fd) {

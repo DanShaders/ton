@@ -40,17 +40,19 @@ class HttpServer : public td::actor::Actor, public virtual metrics::CollectorWra
         td::Promise<std::pair<std::unique_ptr<HttpResponse>, std::shared_ptr<HttpPayload>>> promise) = 0;
   };
 
-  HttpServer(td::IPAddress address, std::shared_ptr<Callback> callback);
+  HttpServer(td::IPAddress address, std::shared_ptr<Callback> callback, td::Promise<td::Unit> on_bind = {});
 
-  HttpServer(td::uint16 port, std::shared_ptr<Callback> callback)
-      : HttpServer(make_any_address(port), std::move(callback)) {
+  HttpServer(td::uint16 port, std::shared_ptr<Callback> callback, td::Promise<td::Unit> on_bind = {})
+      : HttpServer(make_any_address(port), std::move(callback), std::move(on_bind)) {
   }
 
   void start_up() override;
+  void bound();
   void accepted(td::SocketFd fd);
 
-  static td::actor::ActorOwn<HttpServer> create(td::uint16 port, std::shared_ptr<Callback> callback) {
-    return td::actor::create_actor<HttpServer>("httpserver", port, std::move(callback));
+  static td::actor::ActorOwn<HttpServer> create(td::uint16 port, std::shared_ptr<Callback> callback,
+                                                td::Promise<td::Unit> on_bind = {}) {
+    return td::actor::create_actor<HttpServer>("httpserver", port, std::move(callback), std::move(on_bind));
   }
 
   struct AllMetrics {
@@ -68,6 +70,7 @@ class HttpServer : public td::actor::Actor, public virtual metrics::CollectorWra
  private:
   td::IPAddress address_;
   std::shared_ptr<Callback> callback_;
+  td::Promise<td::Unit> on_bind_;
 
   td::actor::ActorOwn<td::TcpInfiniteListener> listener_;
 

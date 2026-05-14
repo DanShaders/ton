@@ -564,6 +564,7 @@ class FullNode(Network.Node):
         self._client: TonlibClient | None = None
         self._engine_console: EngineConsoleClient | None = None
         self._blockchain_explorer: asyncio.Task[None] | None = None
+        self._blockchain_explorer_addr: _IPv4AddressAndPort | None = None
         self._static_populated = False
 
     def make_initial_validator(self):
@@ -578,7 +579,7 @@ class FullNode(Network.Node):
     def validator_key(self):
         return self._validator_key
 
-    async def _wait_console_ready(self, fd: int):
+    async def _wait_ready_byte(self, fd: int, what: str):
         loop = asyncio.get_event_loop()
         future: asyncio.Future[None] = loop.create_future()
 
@@ -589,9 +590,7 @@ class FullNode(Network.Node):
                     future.set_result(None)
                 else:
                     future.set_exception(
-                        RuntimeError(
-                            f"validator-engine console of {self.name} did not start successfully"
-                        )
+                        RuntimeError(f"{what} of {self.name} did not start successfully")
                     )
 
         loop.add_reader(fd, on_readable)
@@ -641,7 +640,7 @@ class FullNode(Network.Node):
             closed = True
             os.close(ready_w)
 
-            await self._wait_console_ready(ready_r)
+            await self._wait_ready_byte(ready_r, "validator-engine console")
 
     @property
     def _liteserver_config(self):
@@ -698,15 +697,27 @@ class FullNode(Network.Node):
             ]
         )
 
-    def enable_blockchain_explorer(self):
+    @property
+    def blockchain_explorer_url(self) -> str | None:
+        if self._blockchain_explorer_addr is None:
+            return None
+        return f"http://{self._blockchain_explorer_addr.address}"
+
+    async def enable_blockchain_explorer(self):
         if self._blockchain_explorer is not None:
             return
 
         address = self._new_network_address()
+        self._blockchain_explorer_addr = address
         config_file = self._directory / "explorer_config.json"
         _write_model(config_file, self._liteserver_config)
 
-        async def explorer():
+        async with AsyncExitStack() as stack:
+            ready_r, ready_w = os.pipe()
+            closed = False
+            _ = stack.callback(lambda: os.close(ready_r))
+            _ = stack.callback(lambda: os.close(ready_w) if not closed else None)
+
             cmd = [
                 str(self._network.install.blockchain_explorer_exe),
                 "-C",
@@ -714,25 +725,35 @@ class FullNode(Network.Node):
                 # FIXME: IP?
                 "-H",
                 str(address.port),
+                "--http-ready-fd",
+                str(ready_w),
             ]
             l.info(
-                f"Running blockchain explorer using node '{self.name}' on http://{address.address}/last"
+                f"Running blockchain explorer using node '{self.name}' on {self.blockchain_explorer_url}/last"
             )
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=self._directory,
+                pass_fds=(ready_w,),
             )
-            try:
-                _ = await process.wait()
-            except asyncio.CancelledError:
-                try:
-                    process.terminate()
-                except ProcessLookupError:
-                    pass
-                _ = await asyncio.shield(process.wait())
-                raise
 
-        self._blockchain_explorer = asyncio.create_task(explorer())
+            async def watcher():
+                try:
+                    _ = await process.wait()
+                except asyncio.CancelledError:
+                    try:
+                        process.terminate()
+                    except ProcessLookupError:
+                        pass
+                    _ = await asyncio.shield(process.wait())
+                    raise
+
+            self._blockchain_explorer = asyncio.create_task(watcher())
+
+            closed = True
+            os.close(ready_w)
+
+            await self._wait_ready_byte(ready_r, "blockchain explorer")
 
     @override
     async def stop(self):

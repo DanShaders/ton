@@ -5,7 +5,7 @@ from pathlib import Path
 
 from contract import WalletV1Blueprint, ton
 from tontester.install import Install
-from tontester.network import FullNode, Network
+from tontester.network import FullNode, Network, StartOptions
 
 
 async def main():
@@ -36,9 +36,11 @@ async def main():
             nodes.append(node)
 
         async with asyncio.TaskGroup() as start_group:
-            _ = start_group.create_task(dht.run())
+            _ = start_group.create_task(dht.run(StartOptions(console_verbosity=1)))
             for node in nodes:
-                _ = start_group.create_task(node.run())
+                _ = start_group.create_task(node.run(StartOptions(console_verbosity=1)))
+
+        await nodes[0].enable_blockchain_explorer()
 
         await network.wait_mc_block(seqno=1)
 
@@ -64,6 +66,11 @@ async def main():
         wallet_state = await main_wallet.current
         assert wallet_state.seqno == 1
 
+        await asyncio.Future()
+
+        # await asyncio.sleep(6000)
+
 
 if __name__ == "__main__":
-    asyncio.run(asyncio.wait_for(main(), 5 * 60))
+    # asyncio.run(asyncio.wait_for(main(), 5 * 60))
+    asyncio.run(main())

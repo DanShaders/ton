@@ -925,8 +925,8 @@ void answer_error(HttpStatusCode code, std::string reason,
 
 void answer_ok(td::Slice content, td::Slice content_type, ResponsePromise promise) {
   auto response = HttpResponse::create("HTTP/1.1", status_ok, "OK", false, false).move_as_ok();
-  response->add_header(HttpHeader{"Content-Length", std::to_string(content.size())}).move_as_ok();
-  response->add_header(HttpHeader{"Content-Type", content_type.str()}).move_as_ok();
+  response->add_header(HttpHeader{"Content-Length", std::to_string(content.size())}).ensure();
+  response->add_header(HttpHeader{"Content-Type", content_type.str()}).ensure();
   response->complete_parse_header();
 
   auto payload = response->create_empty_payload().move_as_ok();
