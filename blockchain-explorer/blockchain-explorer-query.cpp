@@ -172,20 +172,17 @@ void HttpQueryCommon::abort_query(td::Status error) {
     HttpAnswer A{"error", prefix_};
     A.abort(std::move(error));
     auto page = A.finish();
-    auto R = MHD_create_response_from_buffer(page.length(), const_cast<char *>(page.c_str()), MHD_RESPMEM_MUST_COPY);
-    MHD_add_response_header(R, "Content-Type", "text/html");
-    promise_.set_value(std::move(R));
+    http::answer_ok(page, "text/html", std::move(promise_));
   }
   stop();
 }
 
-HttpQueryBlockData::HttpQueryBlockData(ton::BlockIdExt block_id, std::string prefix,
-                                       td::Promise<MHD_Response *> promise)
+HttpQueryBlockData::HttpQueryBlockData(ton::BlockIdExt block_id, std::string prefix, http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)), block_id_(block_id) {
 }
 
 HttpQueryBlockData::HttpQueryBlockData(std::map<std::string, std::string> opts, std::string prefix,
-                                       td::Promise<MHD_Response *> promise)
+                                       http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)) {
   auto R = parse_block_id(opts);
   if (R.is_ok()) {
@@ -197,15 +194,14 @@ HttpQueryBlockData::HttpQueryBlockData(std::map<std::string, std::string> opts, 
 
 void HttpQueryBlockData::abort_query(td::Status error) {
   if (promise_) {
-    promise_.set_result(nullptr);
+    http::answer_error(http::status_internal_server_error, error.to_string(), std::move(promise_));
   }
   stop();
 }
 
 void HttpQueryBlockData::finish_query() {
   if (promise_) {
-    auto response = MHD_create_response_from_buffer(data_.length(), data_.as_slice().begin(), MHD_RESPMEM_MUST_COPY);
-    promise_.set_result(response);
+    http::answer_ok(data_.as_slice(), "application/octet-stream", std::move(promise_));
   }
   stop();
 }
@@ -236,13 +232,12 @@ void HttpQueryBlockData::got_block_data(td::BufferSlice data) {
   finish_query();
 }
 
-HttpQueryBlockView::HttpQueryBlockView(ton::BlockIdExt block_id, std::string prefix,
-                                       td::Promise<MHD_Response *> promise)
+HttpQueryBlockView::HttpQueryBlockView(ton::BlockIdExt block_id, std::string prefix, http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)), block_id_(block_id) {
 }
 
 HttpQueryBlockView::HttpQueryBlockView(std::map<std::string, std::string> opts, std::string prefix,
-                                       td::Promise<MHD_Response *> promise)
+                                       http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)) {
   auto R = parse_block_id(opts);
   if (R.is_ok()) {
@@ -266,9 +261,7 @@ void HttpQueryBlockView::finish_query() {
       A << HttpAnswer::RawData<block::gen::Block>{root};
       return A.finish();
     }();
-    auto R = MHD_create_response_from_buffer(page.length(), const_cast<char *>(page.c_str()), MHD_RESPMEM_MUST_COPY);
-    MHD_add_response_header(R, "Content-Type", "text/html");
-    promise_.set_value(std::move(R));
+    http::answer_ok(page, "text/html", std::move(promise_));
   }
   stop();
 }
@@ -298,13 +291,12 @@ void HttpQueryBlockView::got_block_data(td::BufferSlice data) {
   finish_query();
 }
 
-HttpQueryBlockInfo::HttpQueryBlockInfo(ton::BlockIdExt block_id, std::string prefix,
-                                       td::Promise<MHD_Response *> promise)
+HttpQueryBlockInfo::HttpQueryBlockInfo(ton::BlockIdExt block_id, std::string prefix, http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)), block_id_(block_id) {
 }
 
 HttpQueryBlockInfo::HttpQueryBlockInfo(std::map<std::string, std::string> opts, std::string prefix,
-                                       td::Promise<MHD_Response *> promise)
+                                       http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)) {
   auto R = parse_block_id(opts);
   if (R.is_ok()) {
@@ -464,27 +456,24 @@ void HttpQueryBlockInfo::finish_query() {
 
       return A.finish();
     }();
-    auto R = MHD_create_response_from_buffer(page.length(), const_cast<char *>(page.c_str()), MHD_RESPMEM_MUST_COPY);
-    MHD_add_response_header(R, "Content-Type", "text/html");
-    promise_.set_value(std::move(R));
+    http::answer_ok(page, "text/html", std::move(promise_));
   }
   stop();
 }
 
 HttpQueryBlockSearch::HttpQueryBlockSearch(ton::WorkchainId workchain, ton::AccountIdPrefix account,
-                                           ton::BlockSeqno seqno, std::string prefix,
-                                           td::Promise<MHD_Response *> promise)
+                                           ton::BlockSeqno seqno, std::string prefix, http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise))
     , account_prefix_{workchain, account}
     , mode_(1)
     , seqno_(seqno) {
 }
 HttpQueryBlockSearch::HttpQueryBlockSearch(ton::WorkchainId workchain, ton::AccountIdPrefix account,
-                                           ton::LogicalTime lt, std::string prefix, td::Promise<MHD_Response *> promise)
+                                           ton::LogicalTime lt, std::string prefix, http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)), account_prefix_{workchain, account}, mode_(2), lt_(lt) {
 }
 HttpQueryBlockSearch::HttpQueryBlockSearch(ton::WorkchainId workchain, ton::AccountIdPrefix account, bool dummy,
-                                           ton::UnixTime utime, std::string prefix, td::Promise<MHD_Response *> promise)
+                                           ton::UnixTime utime, std::string prefix, http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise))
     , account_prefix_{workchain, account}
     , mode_(4)
@@ -492,7 +481,7 @@ HttpQueryBlockSearch::HttpQueryBlockSearch(ton::WorkchainId workchain, ton::Acco
 }
 
 HttpQueryBlockSearch::HttpQueryBlockSearch(std::map<std::string, std::string> opts, std::string prefix,
-                                           td::Promise<MHD_Response *> promise)
+                                           http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)) {
   auto R2 = parse_account_prefix(opts, false);
   if (R2.is_ok()) {
@@ -686,19 +675,17 @@ void HttpQueryBlockSearch::finish_query() {
 
       return A.finish();
     }();
-    auto R = MHD_create_response_from_buffer(page.length(), const_cast<char *>(page.c_str()), MHD_RESPMEM_MUST_COPY);
-    MHD_add_response_header(R, "Content-Type", "text/html");
-    promise_.set_value(std::move(R));
+    http::answer_ok(page, "text/html", std::move(promise_));
   }
   stop();
 }
 HttpQueryViewAccount::HttpQueryViewAccount(ton::BlockIdExt block_id, block::StdAddress addr, std::string prefix,
-                                           td::Promise<MHD_Response *> promise)
+                                           http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)), block_id_(block_id), addr_(addr) {
 }
 
 HttpQueryViewAccount::HttpQueryViewAccount(std::map<std::string, std::string> opts, std::string prefix,
-                                           td::Promise<MHD_Response *> promise)
+                                           http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)) {
   auto R = parse_block_id(opts, true);
   if (R.is_ok()) {
@@ -773,20 +760,18 @@ void HttpQueryViewAccount::finish_query() {
       A << HttpAnswer::AccountCell{addr_, res_block_id_, root, Q_roots};
       return A.finish();
     }();
-    auto R = MHD_create_response_from_buffer(page.length(), const_cast<char *>(page.c_str()), MHD_RESPMEM_MUST_COPY);
-    MHD_add_response_header(R, "Content-Type", "text/html");
-    promise_.set_value(std::move(R));
+    http::answer_ok(page, "text/html", std::move(promise_));
   }
   stop();
 }
 
 HttpQueryViewTransaction::HttpQueryViewTransaction(block::StdAddress addr, ton::LogicalTime lt, ton::Bits256 hash,
-                                                   std::string prefix, td::Promise<MHD_Response *> promise)
+                                                   std::string prefix, http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)), addr_(addr), lt_(lt), hash_(hash) {
 }
 
 HttpQueryViewTransaction::HttpQueryViewTransaction(std::map<std::string, std::string> opts, std::string prefix,
-                                                   td::Promise<MHD_Response *> promise)
+                                                   http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)) {
   auto R2 = parse_account_addr(opts);
   if (R2.is_ok()) {
@@ -872,21 +857,19 @@ void HttpQueryViewTransaction::finish_query() {
       }
       return A.finish();
     }();
-    auto R = MHD_create_response_from_buffer(page.length(), const_cast<char *>(page.c_str()), MHD_RESPMEM_MUST_COPY);
-    MHD_add_response_header(R, "Content-Type", "text/html");
-    promise_.set_value(std::move(R));
+    http::answer_ok(page, "text/html", std::move(promise_));
   }
   stop();
 }
 
 HttpQueryViewTransaction2::HttpQueryViewTransaction2(ton::BlockIdExt block_id, block::StdAddress addr,
                                                      ton::LogicalTime lt, std::string prefix,
-                                                     td::Promise<MHD_Response *> promise)
+                                                     http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)), block_id_(block_id), addr_(addr), lt_(lt) {
 }
 
 HttpQueryViewTransaction2::HttpQueryViewTransaction2(std::map<std::string, std::string> opts, std::string prefix,
-                                                     td::Promise<MHD_Response *> promise)
+                                                     http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)) {
   auto R = parse_block_id(opts);
   if (R.is_ok()) {
@@ -954,19 +937,17 @@ void HttpQueryViewTransaction2::finish_query() {
       A << HttpAnswer::TransactionCell{addr_, block_id_, list};
       return A.finish();
     }();
-    auto R = MHD_create_response_from_buffer(page.length(), const_cast<char *>(page.c_str()), MHD_RESPMEM_MUST_COPY);
-    MHD_add_response_header(R, "Content-Type", "text/html");
-    promise_.set_value(std::move(R));
+    http::answer_ok(page, "text/html", std::move(promise_));
   }
   stop();
 }
 
-HttpQueryViewLastBlock::HttpQueryViewLastBlock(std::string prefix, td::Promise<MHD_Response *> promise)
+HttpQueryViewLastBlock::HttpQueryViewLastBlock(std::string prefix, http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)) {
 }
 
 HttpQueryViewLastBlock::HttpQueryViewLastBlock(std::map<std::string, std::string> opts, std::string prefix,
-                                               td::Promise<MHD_Response *> promise)
+                                               http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)) {
 }
 
@@ -1008,12 +989,12 @@ void HttpQueryViewLastBlock::finish_query() {
 }
 
 HttpQueryConfig::HttpQueryConfig(std::string prefix, ton::BlockIdExt block_id, std::vector<td::int32> params,
-                                 td::Promise<MHD_Response *> promise)
+                                 http::ResponsePromise promise)
     : HttpQueryCommon(prefix, std::move(promise)), block_id_(block_id), params_(std::move(params)) {
 }
 
 HttpQueryConfig::HttpQueryConfig(std::map<std::string, std::string> opts, std::string prefix,
-                                 td::Promise<MHD_Response *> promise)
+                                 http::ResponsePromise promise)
     : HttpQueryCommon(prefix, std::move(promise)) {
   auto R = parse_block_id(opts, true);
   if (R.is_error()) {
@@ -1158,19 +1139,17 @@ void HttpQueryConfig::finish_query() {
       }
       return A.finish();
     }();
-    auto R = MHD_create_response_from_buffer(page.length(), const_cast<char *>(page.c_str()), MHD_RESPMEM_MUST_COPY);
-    MHD_add_response_header(R, "Content-Type", "text/html");
-    promise_.set_value(std::move(R));
+    http::answer_ok(page, "text/html", std::move(promise_));
   }
   stop();
 }
 
-HttpQuerySendForm::HttpQuerySendForm(std::string prefix, td::Promise<MHD_Response *> promise)
+HttpQuerySendForm::HttpQuerySendForm(std::string prefix, http::ResponsePromise promise)
     : HttpQueryCommon(prefix, std::move(promise)) {
 }
 
 HttpQuerySendForm::HttpQuerySendForm(std::map<std::string, std::string> opts, std::string prefix,
-                                     td::Promise<MHD_Response *> promise)
+                                     http::ResponsePromise promise)
     : HttpQueryCommon(prefix, std::move(promise)) {
 }
 
@@ -1190,19 +1169,16 @@ void HttpQuerySendForm::finish_query() {
         << "</div></form></div>";
       return A.finish();
     }();
-    auto R = MHD_create_response_from_buffer(page.length(), const_cast<char *>(page.c_str()), MHD_RESPMEM_MUST_COPY);
-    MHD_add_response_header(R, "Content-Type", "text/html");
-    promise_.set_value(std::move(R));
+    http::answer_ok(page, "text/html", std::move(promise_));
   }
   stop();
 }
 
-HttpQuerySend::HttpQuerySend(std::string prefix, td::BufferSlice data, td::Promise<MHD_Response *> promise)
+HttpQuerySend::HttpQuerySend(std::string prefix, td::BufferSlice data, http::ResponsePromise promise)
     : HttpQueryCommon(prefix, std::move(promise)), data_(std::move(data)) {
 }
 
-HttpQuerySend::HttpQuerySend(std::map<std::string, std::string> opts, std::string prefix,
-                             td::Promise<MHD_Response *> promise)
+HttpQuerySend::HttpQuerySend(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise)
     : HttpQueryCommon(prefix, std::move(promise)) {
   auto it = opts.find("filedata");
   if (it != opts.end()) {
@@ -1252,16 +1228,14 @@ void HttpQuerySend::finish_query() {
       }
       return A.finish();
     }();
-    auto R = MHD_create_response_from_buffer(page.length(), const_cast<char *>(page.c_str()), MHD_RESPMEM_MUST_COPY);
-    MHD_add_response_header(R, "Content-Type", "text/html");
-    promise_.set_value(std::move(R));
+    http::answer_ok(page, "text/html", std::move(promise_));
   }
   stop();
 }
 
 HttpQueryRunMethod::HttpQueryRunMethod(ton::BlockIdExt block_id, block::StdAddress addr, std::string method_name,
                                        std::vector<vm::StackEntry> params, std::string prefix,
-                                       td::Promise<MHD_Response *> promise)
+                                       http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise))
     , block_id_(block_id)
     , addr_(addr)
@@ -1270,7 +1244,7 @@ HttpQueryRunMethod::HttpQueryRunMethod(ton::BlockIdExt block_id, block::StdAddre
 }
 
 HttpQueryRunMethod::HttpQueryRunMethod(std::map<std::string, std::string> opts, std::string prefix,
-                                       td::Promise<MHD_Response *> promise)
+                                       http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)) {
   auto R = parse_block_id(opts, true);
   if (R.is_ok()) {
@@ -1382,17 +1356,15 @@ void HttpQueryRunMethod::got_result(td::BufferSlice data) {
     A << HttpAnswer::CodeBlock{os.str()};
     return A.finish();
   }();
-  auto R = MHD_create_response_from_buffer(page.length(), const_cast<char *>(page.c_str()), MHD_RESPMEM_MUST_COPY);
-  MHD_add_response_header(R, "Content-Type", "text/html");
-  promise_.set_value(std::move(R));
+  http::answer_ok(page, "text/html", std::move(promise_));
   stop();
 }
-HttpQueryStatus::HttpQueryStatus(std::string prefix, td::Promise<MHD_Response *> promise)
+HttpQueryStatus::HttpQueryStatus(std::string prefix, http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)) {
 }
 
 HttpQueryStatus::HttpQueryStatus(std::map<std::string, std::string> opts, std::string prefix,
-                                 td::Promise<MHD_Response *> promise)
+                                 http::ResponsePromise promise)
     : HttpQueryCommon(std::move(prefix), std::move(promise)) {
 }
 
@@ -1459,9 +1431,7 @@ void HttpQueryStatus::finish_query() {
       A << "</table></div>";
       return A.finish();
     }();
-    auto R = MHD_create_response_from_buffer(page.length(), const_cast<char *>(page.c_str()), MHD_RESPMEM_MUST_COPY);
-    MHD_add_response_header(R, "Content-Type", "text/html");
-    promise_.set_value(std::move(R));
+    http::answer_ok(page, "text/html", std::move(promise_));
   }
   stop();
 }

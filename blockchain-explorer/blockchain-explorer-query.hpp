@@ -28,9 +28,9 @@
 #pragma once
 
 #include <map>
-#include <microhttpd.h>
 
 #include "block/block.h"
+#include "http/http.h"
 #include "td/actor/actor.h"
 #include "ton/ton-types.h"
 
@@ -45,7 +45,7 @@ class HttpAnswer;
 
 class HttpQueryCommon : public td::actor::Actor {
  public:
-  HttpQueryCommon(std::string prefix, td::Promise<MHD_Response *> promise)
+  HttpQueryCommon(std::string prefix, http::ResponsePromise promise)
       : prefix_(std::move(prefix)), promise_(std::move(promise)) {
   }
   void start_up() override {
@@ -66,13 +66,13 @@ class HttpQueryCommon : public td::actor::Actor {
   td::Status error_;
 
   std::string prefix_;
-  td::Promise<MHD_Response *> promise_;
+  http::ResponsePromise promise_;
 };
 
 class HttpQueryBlockData : public HttpQueryCommon {
  public:
-  HttpQueryBlockData(ton::BlockIdExt block_id, std::string prefix, td::Promise<MHD_Response *> promise);
-  HttpQueryBlockData(std::map<std::string, std::string> opts, std::string prefix, td::Promise<MHD_Response *> promise);
+  HttpQueryBlockData(ton::BlockIdExt block_id, std::string prefix, http::ResponsePromise promise);
+  HttpQueryBlockData(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise);
 
   void abort_query(td::Status error) override;
   void finish_query();
@@ -88,8 +88,8 @@ class HttpQueryBlockData : public HttpQueryCommon {
 
 class HttpQueryBlockView : public HttpQueryCommon {
  public:
-  HttpQueryBlockView(ton::BlockIdExt block_id, std::string prefix, td::Promise<MHD_Response *> promise);
-  HttpQueryBlockView(std::map<std::string, std::string> opts, std::string prefix, td::Promise<MHD_Response *> promise);
+  HttpQueryBlockView(ton::BlockIdExt block_id, std::string prefix, http::ResponsePromise promise);
+  HttpQueryBlockView(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise);
 
   void finish_query();
 
@@ -104,8 +104,8 @@ class HttpQueryBlockView : public HttpQueryCommon {
 
 class HttpQueryBlockInfo : public HttpQueryCommon {
  public:
-  HttpQueryBlockInfo(ton::BlockIdExt block_id, std::string prefix, td::Promise<MHD_Response *> promise);
-  HttpQueryBlockInfo(std::map<std::string, std::string> opts, std::string prefix, td::Promise<MHD_Response *> promise);
+  HttpQueryBlockInfo(ton::BlockIdExt block_id, std::string prefix, http::ResponsePromise promise);
+  HttpQueryBlockInfo(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise);
 
   void finish_query();
 
@@ -139,13 +139,12 @@ class HttpQueryBlockInfo : public HttpQueryCommon {
 class HttpQueryBlockSearch : public HttpQueryCommon {
  public:
   HttpQueryBlockSearch(ton::WorkchainId workchain, ton::AccountIdPrefix account, ton::BlockSeqno seqno,
-                       std::string prefix, td::Promise<MHD_Response *> promise);
+                       std::string prefix, http::ResponsePromise promise);
   HttpQueryBlockSearch(ton::WorkchainId workchain, ton::AccountIdPrefix account, ton::LogicalTime lt,
-                       std::string prefix, td::Promise<MHD_Response *> promise);
+                       std::string prefix, http::ResponsePromise promise);
   HttpQueryBlockSearch(ton::WorkchainId workchain, ton::AccountIdPrefix account, bool dummy, ton::UnixTime utime,
-                       std::string prefix, td::Promise<MHD_Response *> promise);
-  HttpQueryBlockSearch(std::map<std::string, std::string> opts, std::string prefix,
-                       td::Promise<MHD_Response *> promise);
+                       std::string prefix, http::ResponsePromise promise);
+  HttpQueryBlockSearch(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise);
 
   void finish_query();
 
@@ -185,9 +184,8 @@ class HttpQueryBlockSearch : public HttpQueryCommon {
 class HttpQueryViewAccount : public HttpQueryCommon {
  public:
   HttpQueryViewAccount(ton::BlockIdExt block_id, block::StdAddress addr, std::string prefix,
-                       td::Promise<MHD_Response *> promise);
-  HttpQueryViewAccount(std::map<std::string, std::string> opts, std::string prefix,
-                       td::Promise<MHD_Response *> promise);
+                       http::ResponsePromise promise);
+  HttpQueryViewAccount(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise);
 
   void finish_query();
 
@@ -206,9 +204,8 @@ class HttpQueryViewAccount : public HttpQueryCommon {
 class HttpQueryViewTransaction : public HttpQueryCommon {
  public:
   HttpQueryViewTransaction(block::StdAddress addr, ton::LogicalTime lt, ton::Bits256 hash, std::string prefix,
-                           td::Promise<MHD_Response *> promise);
-  HttpQueryViewTransaction(std::map<std::string, std::string> opts, std::string prefix,
-                           td::Promise<MHD_Response *> promise);
+                           http::ResponsePromise promise);
+  HttpQueryViewTransaction(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise);
 
   void finish_query();
 
@@ -227,9 +224,8 @@ class HttpQueryViewTransaction : public HttpQueryCommon {
 class HttpQueryViewTransaction2 : public HttpQueryCommon {
  public:
   HttpQueryViewTransaction2(ton::BlockIdExt block_id, block::StdAddress addr, ton::LogicalTime lt, std::string prefix,
-                            td::Promise<MHD_Response *> promise);
-  HttpQueryViewTransaction2(std::map<std::string, std::string> opts, std::string prefix,
-                            td::Promise<MHD_Response *> promise);
+                            http::ResponsePromise promise);
+  HttpQueryViewTransaction2(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise);
 
   void finish_query();
 
@@ -247,9 +243,8 @@ class HttpQueryViewTransaction2 : public HttpQueryCommon {
 
 class HttpQueryViewLastBlock : public HttpQueryCommon {
  public:
-  HttpQueryViewLastBlock(std::string prefix, td::Promise<MHD_Response *> promise);
-  HttpQueryViewLastBlock(std::map<std::string, std::string> opts, std::string prefix,
-                         td::Promise<MHD_Response *> promise);
+  HttpQueryViewLastBlock(std::string prefix, http::ResponsePromise promise);
+  HttpQueryViewLastBlock(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise);
 
   void finish_query();
 
@@ -263,8 +258,8 @@ class HttpQueryViewLastBlock : public HttpQueryCommon {
 class HttpQueryConfig : public HttpQueryCommon {
  public:
   HttpQueryConfig(std::string prefix, ton::BlockIdExt block_id, std::vector<td::int32> params,
-                  td::Promise<MHD_Response *> promise);
-  HttpQueryConfig(std::map<std::string, std::string> opts, std::string prefix, td::Promise<MHD_Response *> promise);
+                  http::ResponsePromise promise);
+  HttpQueryConfig(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise);
 
   void finish_query();
 
@@ -283,8 +278,8 @@ class HttpQueryConfig : public HttpQueryCommon {
 
 class HttpQuerySendForm : public HttpQueryCommon {
  public:
-  HttpQuerySendForm(std::string prefix, td::Promise<MHD_Response *> promise);
-  HttpQuerySendForm(std::map<std::string, std::string> opts, std::string prefix, td::Promise<MHD_Response *> promise);
+  HttpQuerySendForm(std::string prefix, http::ResponsePromise promise);
+  HttpQuerySendForm(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise);
 
   void start_up() override;
   void finish_query();
@@ -294,8 +289,8 @@ class HttpQuerySendForm : public HttpQueryCommon {
 
 class HttpQuerySend : public HttpQueryCommon {
  public:
-  HttpQuerySend(std::string prefix, td::BufferSlice data, td::Promise<MHD_Response *> promise);
-  HttpQuerySend(std::map<std::string, std::string> opts, std::string prefix, td::Promise<MHD_Response *> promise);
+  HttpQuerySend(std::string prefix, td::BufferSlice data, http::ResponsePromise promise);
+  HttpQuerySend(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise);
 
   void finish_query();
 
@@ -310,8 +305,8 @@ class HttpQuerySend : public HttpQueryCommon {
 class HttpQueryRunMethod : public HttpQueryCommon {
  public:
   HttpQueryRunMethod(ton::BlockIdExt block_id, block::StdAddress addr, std::string method_name,
-                     std::vector<vm::StackEntry> params, std::string prefix, td::Promise<MHD_Response *> promise);
-  HttpQueryRunMethod(std::map<std::string, std::string> opts, std::string prefix, td::Promise<MHD_Response *> promise);
+                     std::vector<vm::StackEntry> params, std::string prefix, http::ResponsePromise promise);
+  HttpQueryRunMethod(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise);
 
   void start_up_query() override;
   void got_result(td::BufferSlice result);
@@ -325,8 +320,8 @@ class HttpQueryRunMethod : public HttpQueryCommon {
 
 class HttpQueryStatus : public HttpQueryCommon {
  public:
-  HttpQueryStatus(std::string prefix, td::Promise<MHD_Response *> promise);
-  HttpQueryStatus(std::map<std::string, std::string> opts, std::string prefix, td::Promise<MHD_Response *> promise);
+  HttpQueryStatus(std::string prefix, http::ResponsePromise promise);
+  HttpQueryStatus(std::map<std::string, std::string> opts, std::string prefix, http::ResponsePromise promise);
 
   void finish_query();
 

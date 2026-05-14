@@ -25,8 +25,6 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
-#include <microhttpd.h>
-
 #include "adnl/adnl-ext-client.h"
 #include "adnl/utils.hpp"
 #include "auto/tl/lite_api.h"
@@ -35,6 +33,7 @@
 #include "block/block-db.h"
 #include "block/block.h"
 #include "block/mc-config.h"
+#include "http/http-server.h"
 #include "lite-client/ext-client.h"
 #include "td/utils/OptionParser.h"
 #include "td/utils/Random.h"
@@ -68,8 +67,6 @@ namespace ton::be {
 
 namespace {
 
-td::actor::Scheduler* scheduler_ptr;
-
 std::string urldecode(td::Slice from, bool decode_plus_sign_as_space) {
   size_t to_i = 0;
 
@@ -92,37 +89,31 @@ std::string urldecode(td::Slice from, bool decode_plus_sign_as_space) {
   return to.truncate(to_i).str();
 }
 
-}  // namespace
-
-class HttpQueryRunner {
- public:
-  HttpQueryRunner(std::function<void(td::Promise<MHD_Response*>)> func) {
-    auto P = td::PromiseCreator::lambda([Self = this](td::Result<MHD_Response*> R) {
-      if (R.is_ok()) {
-        Self->finish(R.move_as_ok());
-      } else {
-        Self->finish(nullptr);
+std::map<std::string, std::string> parse_query_string(td::Slice qs) {
+  std::map<std::string, std::string> opts;
+  size_t i = 0;
+  while (i < qs.size()) {
+    size_t eq = i;
+    while (eq < qs.size() && qs[eq] != '=' && qs[eq] != '&') {
+      ++eq;
+    }
+    size_t amp = eq;
+    while (amp < qs.size() && qs[amp] != '&') {
+      ++amp;
+    }
+    if (eq < qs.size() && qs[eq] == '=' && eq > i && amp > eq + 1) {
+      auto key = urldecode(qs.substr(i, eq - i), /*decode_plus_sign_as_space=*/true);
+      auto value = urldecode(qs.substr(eq + 1, amp - eq - 1), /*decode_plus_sign_as_space=*/true);
+      if (!key.empty() && !value.empty()) {
+        opts.emplace(std::move(key), std::move(value));
       }
-    });
-    scheduler_ptr->run_in_context([&]() { func(std::move(P)); });
+    }
+    i = amp + 1;
   }
-  void finish(MHD_Response* response) {
-    std::unique_lock<std::mutex> lock(mutex_);
-    response_ = response;
-    cond.notify_all();
-  }
-  MHD_Response* wait() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    cond.wait(lock, [&]() { return response_ != nullptr; });
-    return response_;
-  }
+  return opts;
+}
 
- private:
-  std::function<void(td::Promise<MHD_Response*>)> func_;
-  MHD_Response* response_ = nullptr;
-  std::mutex mutex_;
-  std::condition_variable cond;
-};
+}  // namespace
 
 class CoreActor : public CoreActorInterface {
  private:
@@ -131,7 +122,7 @@ class CoreActor : public CoreActorInterface {
   td::actor::ActorOwn<liteclient::ExtClient> client_;
 
   td::uint32 http_port_ = 80;
-  MHD_Daemon* daemon_ = nullptr;
+  td::actor::ActorOwn<http::HttpServer> http_server_;
 
   td::IPAddress remote_addr_;
   ton::PublicKey remote_public_key_;
@@ -238,202 +229,144 @@ class CoreActor : public CoreActorInterface {
     self_id_ = actor_id(this);
   }
   void tear_down() override {
-    if (daemon_) {
-      MHD_stop_daemon(daemon_);
-      daemon_ = nullptr;
-    }
+    http_server_.reset();
   }
 
   CoreActor() {
   }
 
-  static MHD_RESULT get_arg_iterate(void* cls, enum MHD_ValueKind kind, const char* key, const char* value) {
-    auto X = static_cast<std::map<std::string, std::string>*>(cls);
-    if (key && value && std::strlen(key) > 0 && std::strlen(value) > 0) {
-      X->emplace(key, urldecode(td::Slice{value}, false));
-    }
-    return MHD_YES;
-  }
-
-  struct HttpRequestExtra {
-    HttpRequestExtra(MHD_Connection* connection, bool is_post) {
-      if (is_post) {
-        postprocessor = MHD_create_post_processor(connection, 1 << 14, iterate_post, static_cast<void*>(this));
-      }
-    }
-    ~HttpRequestExtra() {
-      MHD_destroy_post_processor(postprocessor);
-    }
-    static MHD_RESULT iterate_post(void* coninfo_cls, enum MHD_ValueKind kind, const char* key, const char* filename,
-                                   const char* content_type, const char* transfer_encoding, const char* data,
-                                   uint64_t off, size_t size) {
-      auto ptr = static_cast<HttpRequestExtra*>(coninfo_cls);
-      ptr->total_size += strlen(key) + size;
-      if (ptr->total_size > max_post_size) {
-        return MHD_NO;
-      }
-      std::string k = key;
-      if (ptr->opts[k].size() < off + size) {
-        ptr->opts[k].resize(off + size);
-      }
-      td::MutableSlice(ptr->opts[k]).remove_prefix(off).copy_from(td::Slice(data, size));
-      return MHD_YES;
-    }
-    MHD_PostProcessor* postprocessor;
-    std::map<std::string, std::string> opts;
-    td::uint64 total_size = 0;
-  };
-
-  static void request_completed(void* cls, struct MHD_Connection* connection, void** ptr,
-                                enum MHD_RequestTerminationCode toe) {
-    auto e = static_cast<HttpRequestExtra*>(*ptr);
-    if (e) {
-      delete e;
-    }
-  }
-
-  static MHD_RESULT process_http_request(void* cls, struct MHD_Connection* connection, const char* url,
-                                         const char* method, const char* version, const char* upload_data,
-                                         size_t* upload_data_size, void** ptr) {
-    struct MHD_Response* response = nullptr;
-    MHD_RESULT ret;
-
-    bool is_post = false;
-    if (std::strcmp(method, "GET") == 0) {
-      is_post = false;
-    } else if (std::strcmp(method, "POST") == 0) {
-      is_post = true;
-    } else {
-      return MHD_NO; /* unexpected method */
-    }
-    std::map<std::string, std::string> opts;
-    if (!is_post) {
-      if (!*ptr) {
-        *ptr = static_cast<void*>(new HttpRequestExtra{connection, false});
-        return MHD_YES;
-      }
-      if (0 != *upload_data_size)
-        return MHD_NO; /* upload data in a GET!? */
-    } else {
-      if (!*ptr) {
-        *ptr = static_cast<void*>(new HttpRequestExtra{connection, true});
-        return MHD_YES;
-      }
-      auto e = static_cast<HttpRequestExtra*>(*ptr);
-      if (0 != *upload_data_size) {
-        CHECK(e->postprocessor);
-        MHD_post_process(e->postprocessor, upload_data, *upload_data_size);
-        *upload_data_size = 0;
-        return MHD_YES;
-      }
-      for (auto& o : e->opts) {
-        opts[o.first] = std::move(o.second);
-      }
-    }
-
-    std::string url_s = url;
-
-    *ptr = nullptr; /* clear context pointer */
-
-    auto pos = url_s.rfind('/');
+  void dispatch(std::string path, std::map<std::string, std::string> opts, http::ResponsePromise promise) {
+    auto pos = path.rfind('/');
     std::string prefix;
     std::string command;
     if (pos == std::string::npos) {
       prefix = "";
-      command = url_s;
+      command = std::move(path);
     } else {
-      prefix = url_s.substr(0, pos + 1);
-      command = url_s.substr(pos + 1);
+      prefix = path.substr(0, pos + 1);
+      command = path.substr(pos + 1);
     }
-
-    MHD_get_connection_values(connection, MHD_GET_ARGUMENT_KIND, get_arg_iterate, static_cast<void*>(&opts));
 
     if (command == "status") {
-      HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-        td::actor::create_actor<HttpQueryStatus>("blockinfo", opts, prefix, std::move(promise)).release();
-      }};
-      response = g.wait();
+      td::actor::create_actor<HttpQueryStatus>("blockinfo", opts, prefix, std::move(promise)).release();
     } else if (command == "block") {
-      HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-        td::actor::create_actor<HttpQueryBlockInfo>("blockinfo", opts, prefix, std::move(promise)).release();
-      }};
-      response = g.wait();
+      td::actor::create_actor<HttpQueryBlockInfo>("blockinfo", opts, prefix, std::move(promise)).release();
     } else if (command == "search") {
       if (opts.count("roothash") + opts.count("filehash") > 0) {
-        HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-          td::actor::create_actor<HttpQueryBlockInfo>("blockinfo", opts, prefix, std::move(promise)).release();
-        }};
-        response = g.wait();
+        td::actor::create_actor<HttpQueryBlockInfo>("blockinfo", opts, prefix, std::move(promise)).release();
       } else {
-        HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-          td::actor::create_actor<HttpQueryBlockSearch>("blocksearch", opts, prefix, std::move(promise)).release();
-        }};
-        response = g.wait();
+        td::actor::create_actor<HttpQueryBlockSearch>("blocksearch", opts, prefix, std::move(promise)).release();
       }
     } else if (command == "last") {
-      HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-        td::actor::create_actor<HttpQueryViewLastBlock>("", opts, prefix, std::move(promise)).release();
-      }};
-      response = g.wait();
+      td::actor::create_actor<HttpQueryViewLastBlock>("", opts, prefix, std::move(promise)).release();
     } else if (command == "download") {
-      HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-        td::actor::create_actor<HttpQueryBlockData>("downloadblock", opts, prefix, std::move(promise)).release();
-      }};
-      response = g.wait();
+      td::actor::create_actor<HttpQueryBlockData>("downloadblock", opts, prefix, std::move(promise)).release();
     } else if (command == "viewblock") {
-      HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-        td::actor::create_actor<HttpQueryBlockView>("viewblock", opts, prefix, std::move(promise)).release();
-      }};
-      response = g.wait();
+      td::actor::create_actor<HttpQueryBlockView>("viewblock", opts, prefix, std::move(promise)).release();
     } else if (command == "account") {
-      HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-        td::actor::create_actor<HttpQueryViewAccount>("viewaccount", opts, prefix, std::move(promise)).release();
-      }};
-      response = g.wait();
+      td::actor::create_actor<HttpQueryViewAccount>("viewaccount", opts, prefix, std::move(promise)).release();
     } else if (command == "transaction") {
-      HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-        td::actor::create_actor<HttpQueryViewTransaction>("viewtransaction", opts, prefix, std::move(promise))
-            .release();
-      }};
-      response = g.wait();
+      td::actor::create_actor<HttpQueryViewTransaction>("viewtransaction", opts, prefix, std::move(promise)).release();
     } else if (command == "transaction2") {
-      HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-        td::actor::create_actor<HttpQueryViewTransaction2>("viewtransaction2", opts, prefix, std::move(promise))
-            .release();
-      }};
-      response = g.wait();
+      td::actor::create_actor<HttpQueryViewTransaction2>("viewtransaction2", opts, prefix, std::move(promise))
+          .release();
     } else if (command == "config") {
-      HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-        td::actor::create_actor<HttpQueryConfig>("getconfig", opts, prefix, std::move(promise)).release();
-      }};
-      response = g.wait();
+      td::actor::create_actor<HttpQueryConfig>("getconfig", opts, prefix, std::move(promise)).release();
     } else if (command == "send") {
-      HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-        td::actor::create_actor<HttpQuerySend>("send", opts, prefix, std::move(promise)).release();
-      }};
-      response = g.wait();
+      td::actor::create_actor<HttpQuerySend>("send", opts, prefix, std::move(promise)).release();
     } else if (command == "sendform") {
-      HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-        td::actor::create_actor<HttpQuerySendForm>("sendform", opts, prefix, std::move(promise)).release();
-      }};
-      response = g.wait();
+      td::actor::create_actor<HttpQuerySendForm>("sendform", opts, prefix, std::move(promise)).release();
     } else if (command == "runmethod") {
-      HttpQueryRunner g{[&](td::Promise<MHD_Response*> promise) {
-        td::actor::create_actor<HttpQueryRunMethod>("runmethod", opts, prefix, std::move(promise)).release();
-      }};
-      response = g.wait();
+      td::actor::create_actor<HttpQueryRunMethod>("runmethod", opts, prefix, std::move(promise)).release();
     } else {
-      ret = MHD_NO;
+      http::answer_error(http::status_not_found, "", std::move(promise));
     }
-    if (response) {
-      ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
-      MHD_destroy_response(response);
-    } else {
-      ret = MHD_NO;
+  }
+
+  class PostBodyReader : public http::HttpPayload::Callback {
+   public:
+    PostBodyReader(td::actor::ActorId<CoreActor> core, std::shared_ptr<http::HttpPayload> payload, std::string path,
+                   std::map<std::string, std::string> opts, http::ResponsePromise promise)
+        : core_(std::move(core))
+        , payload_(std::move(payload))
+        , path_(std::move(path))
+        , opts_(std::move(opts))
+        , promise_(std::move(promise)) {
     }
 
-    return ret;
-  }
+    static void attach(td::actor::ActorId<CoreActor> core, std::shared_ptr<http::HttpPayload> payload, std::string path,
+                       std::map<std::string, std::string> opts, http::ResponsePromise promise) {
+      auto cb = std::make_unique<PostBodyReader>(std::move(core), payload, std::move(path), std::move(opts),
+                                                 std::move(promise));
+      auto* raw = payload.get();
+      raw->add_callback(std::move(cb));
+      raw->run_callbacks();
+    }
+
+    void run(size_t ready_bytes) override {
+      if (errored_) {
+        return;
+      }
+      auto chunk = payload_->get_slice(ready_bytes);
+      payload_->slice_gc();
+      if (buffer_.size() + chunk.size() > max_post_size) {
+        errored_ = true;
+        http::answer_error(http::status_payload_too_large, "", std::move(promise_));
+        return;
+      }
+      buffer_.append(chunk.as_slice().begin(), chunk.size());
+    }
+
+    void completed() override {
+      if (errored_) {
+        return;
+      }
+      for (auto& kv : parse_query_string(buffer_)) {
+        opts_[kv.first] = std::move(kv.second);
+      }
+      td::actor::send_closure(core_, &CoreActor::dispatch, std::move(path_), std::move(opts_), std::move(promise_));
+    }
+
+   private:
+    td::actor::ActorId<CoreActor> core_;
+    std::shared_ptr<http::HttpPayload> payload_;
+    std::string path_;
+    std::map<std::string, std::string> opts_;
+    http::ResponsePromise promise_;
+    std::string buffer_;
+    bool errored_ = false;
+  };
+
+  class HttpServerCallback : public http::HttpServer::Callback {
+   public:
+    explicit HttpServerCallback(td::actor::ActorId<CoreActor> core) : core_(std::move(core)) {
+    }
+
+    void receive_request(std::unique_ptr<http::HttpRequest> request, std::shared_ptr<http::HttpPayload> payload,
+                         http::ResponsePromise promise) override {
+      const auto& method = request->method();
+      bool is_post = (method == "POST");
+      if (!is_post && method != "GET") {
+        http::answer_error(http::status_method_not_allowed, "", std::move(promise));
+        return;
+      }
+
+      auto url = request->url();
+      auto qpos = url.find('?');
+      std::string path = (qpos == std::string::npos) ? url : url.substr(0, qpos);
+      td::Slice qs = (qpos == std::string::npos) ? td::Slice{} : td::Slice{url}.substr(qpos + 1);
+      auto opts = parse_query_string(qs);
+
+      if (is_post) {
+        PostBodyReader::attach(core_, std::move(payload), std::move(path), std::move(opts), std::move(promise));
+      } else {
+        td::actor::send_closure(core_, &CoreActor::dispatch, std::move(path), std::move(opts), std::move(promise));
+      }
+    }
+
+   private:
+    td::actor::ActorId<CoreActor> core_;
+  };
 
   void run() {
     std::vector<liteclient::LiteServerConfig> servers;
@@ -457,10 +390,8 @@ class CoreActor : public CoreActorInterface {
     }
     n_servers_ = servers.size();
     client_ = liteclient::ExtClient::create(std::move(servers), make_callback(), true);
-    daemon_ = MHD_start_daemon(MHD_USE_SELECT_INTERNALLY, static_cast<td::uint16>(http_port_), nullptr, nullptr,
-                               &process_http_request, nullptr, MHD_OPTION_NOTIFY_COMPLETED, request_completed, nullptr,
-                               MHD_OPTION_THREAD_POOL_SIZE, 16, MHD_OPTION_END);
-    CHECK(daemon_ != nullptr);
+    http_server_ = http::HttpServer::create(static_cast<td::uint16>(http_port_),
+                                            std::make_shared<HttpServerCallback>(actor_id(this)));
   }
 };
 
@@ -648,7 +579,6 @@ int main(int argc, char* argv[]) {
   vm::init_vm().ensure();
 
   td::actor::Scheduler scheduler({2});
-  scheduler_ptr = &scheduler;
   scheduler.run_in_context([&] { x = td::actor::create_actor<CoreActor>("testnode"); });
 
   scheduler.run_in_context([&] { p.run(argc, argv).ensure(); });
