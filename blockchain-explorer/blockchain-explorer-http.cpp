@@ -33,14 +33,15 @@
 #include "td/utils/date.h"
 #include "ton/ton-shard.h"
 #include "vm/boc.h"
-#include "vm/cellops.h"
 #include "vm/cells/MerkleProof.h"
 
 #include "blockchain-explorer-http.hpp"
 
-bool local_scripts{false};
+namespace ton::be {
 
-static std::string time_to_human(unsigned ts) {
+namespace {
+
+std::string time_to_human(unsigned ts) {
   td::StringBuilder sb;
   sb << date::format("%F %T",
                      std::chrono::time_point<std::chrono::system_clock, std::chrono::seconds>{std::chrono::seconds(ts)})
@@ -67,6 +68,8 @@ static std::string time_to_human(unsigned ts) {
   }
   return sb.as_cslice().str();
 }
+
+}  // namespace
 
 HttpAnswer& HttpAnswer::operator<<(AddressCell addr_c) {
   ton::WorkchainId wc;
@@ -793,3 +796,5 @@ std::string HttpAnswer::finish() {
     return header() + "<div class=\"alert alert-danger\">" + error_.to_string() + "</div>" + footer();
   }
 }
+
+}  // namespace ton::be

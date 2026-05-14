@@ -36,6 +36,8 @@
 
 #include "blockchain-explorer.hpp"
 
+namespace ton::be {
+
 td::Result<ton::BlockIdExt> parse_block_id(std::map<std::string, std::string> &opts, bool allow_empty = false);
 td::Result<block::StdAddress> parse_account_addr(std::map<std::string, std::string> &opts);
 
@@ -334,3 +336,5 @@ class HttpQueryStatus : public HttpQueryCommon {
  private:
   CoreActorInterface::RemoteNodeStatusList results_;
 };
+
+}  // namespace ton::be

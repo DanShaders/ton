@@ -64,11 +64,13 @@
 #include <iostream>
 #include <sstream>
 
-int verbosity;
+namespace ton::be {
+
+namespace {
 
 td::actor::Scheduler* scheduler_ptr;
 
-static std::string urldecode(td::Slice from, bool decode_plus_sign_as_space) {
+std::string urldecode(td::Slice from, bool decode_plus_sign_as_space) {
   size_t to_i = 0;
 
   td::BufferSlice x{from.size()};
@@ -89,6 +91,8 @@ static std::string urldecode(td::Slice from, bool decode_plus_sign_as_space) {
 
   return to.truncate(to_i).str();
 }
+
+}  // namespace
 
 class HttpQueryRunner {
  public:
@@ -184,7 +188,7 @@ class CoreActor : public CoreActorInterface {
   std::mutex res_mutex_;
   std::map<td::int32, std::shared_ptr<RemoteNodeStatus>> results_;
   std::vector<std::string> addrs_;
-  static CoreActor* instance_;
+  inline static CoreActor* instance_ = nullptr;
   td::actor::ActorId<CoreActor> self_id_;
 
   void set_global_config(std::string str) {
@@ -265,7 +269,7 @@ class CoreActor : public CoreActorInterface {
                                    uint64_t off, size_t size) {
       auto ptr = static_cast<HttpRequestExtra*>(coninfo_cls);
       ptr->total_size += strlen(key) + size;
-      if (ptr->total_size > MAX_POST_SIZE) {
+      if (ptr->total_size > max_post_size) {
         return MHD_NO;
       }
       std::string k = key;
@@ -568,9 +572,11 @@ td::actor::ActorId<CoreActorInterface> CoreActorInterface::instance_actor_id() {
   return instance->self_id_;
 }
 
-CoreActor* CoreActor::instance_ = nullptr;
+}  // namespace ton::be
 
 int main(int argc, char* argv[]) {
+  using namespace ton::be;
+
   SET_VERBOSITY_LEVEL(verbosity_INFO);
   td::set_default_failure_signal_handler().ensure();
 
@@ -606,7 +612,7 @@ int main(int argc, char* argv[]) {
     return td::Status::OK();
   });
   p.add_checked_option('v', "verbosity", "set verbosity level", [&](td::Slice arg) {
-    verbosity = td::to_integer<int>(arg);
+    int verbosity = td::to_integer<int>(arg);
     SET_VERBOSITY_LEVEL(VERBOSITY_NAME(FATAL) + verbosity);
     return (verbosity >= 0 && verbosity <= 9) ? td::Status::OK() : td::Status::Error("verbosity must be 0..9");
   });

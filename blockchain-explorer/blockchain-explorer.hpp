@@ -34,8 +34,6 @@
 #include "td/utils/port/IPAddress.h"
 #include "ton/ton-types.h"
 
-#define MAX_POST_SIZE (64 << 10)
-
 // Beginning with v0.9.71, libmicrohttpd changed the return type of most
 // functions from int to enum MHD_Result
 // https://git.gnunet.org/gnunet.git/tree/src/include/gnunet_mhd_compat.h
@@ -47,7 +45,9 @@
 #define MHD_RESULT int
 #endif
 
-extern bool local_scripts_;
+namespace ton::be {
+
+constexpr size_t max_post_size = 64 << 10;
 
 class CoreActorInterface : public td::actor::Actor {
  public:
@@ -71,3 +71,5 @@ class CoreActorInterface : public td::actor::Actor {
 
   static td::actor::ActorId<CoreActorInterface> instance_actor_id();
 };
+
+}  // namespace ton::be

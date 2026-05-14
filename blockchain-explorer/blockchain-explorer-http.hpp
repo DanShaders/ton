@@ -28,12 +28,11 @@
 #pragma once
 
 #include "block/block.h"
-#include "td/utils/Random.h"
 #include "ton/ton-types.h"
-#include "vm/boc.h"
-#include "vm/cellops.h"
 
-extern bool local_scripts;
+namespace ton::be {
+
+inline bool local_scripts = false;
 
 class HttpAnswer {
  public:
@@ -248,3 +247,5 @@ inline HttpAnswer &HttpAnswer::operator<<(RawData<void> data) {
   vm::load_cell_slice(data.root).print_rec(outp);
   return *this << CodeBlock{outp.str()};
 }
+
+}  // namespace ton::be

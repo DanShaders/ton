@@ -48,6 +48,8 @@
 #include "blockchain-explorer-http.hpp"
 #include "blockchain-explorer-query.hpp"
 
+namespace ton::be {
+
 td::Result<ton::BlockIdExt> parse_block_id(std::map<std::string, std::string> &opts, bool allow_empty) {
   if (allow_empty) {
     if (opts.count("workchain") == 0 && opts.count("shard") == 0 && opts.count("seqno") == 0) {
@@ -1463,3 +1465,5 @@ void HttpQueryStatus::finish_query() {
   }
   stop();
 }
+
+}  // namespace ton::be
