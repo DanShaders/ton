@@ -377,7 +377,7 @@ void HttpPayload::add_trailer(HttpHeader header) {
   trailer_.push_back(std::move(header));
 }
 
-void HttpPayload::add_chunk(td::BufferSlice data) {
+void HttpPayload::add_chunk(td::Slice data) {
   //LOG(INFO) << "payload: added " << data.size() << " bytes";
   while (data.size() > 0) {
     if (!cur_chunk_size_) {
@@ -388,8 +388,8 @@ void HttpPayload::add_chunk(td::BufferSlice data) {
     if (S.size() > data.size()) {
       S.truncate(data.size());
     }
-    S.copy_from(data.as_slice().truncate(S.size()));
-    data.confirm_read(S.size());
+    S.copy_from(data.substr(0, S.size()));
+    data = data.substr(S.size());
     confirm_read(S.size());
   }
 }
@@ -912,6 +912,19 @@ void answer_error(HttpStatusCode code, std::string reason,
   response->add_header(HttpHeader{"Content-Length", "0"});
   response->complete_parse_header();
   auto payload = response->create_empty_payload().move_as_ok();
+  payload->complete_parse();
+  CHECK(payload->parse_completed());
+  promise.set_value(std::make_pair(std::move(response), std::move(payload)));
+}
+
+void answer_ok(td::Slice content, td::Slice content_type, ResponsePromise promise) {
+  auto response = HttpResponse::create("HTTP/1.1", status_ok, "OK", false, false).move_as_ok();
+  response->add_header(HttpHeader{"Content-Length", std::to_string(content.size())}).move_as_ok();
+  response->add_header(HttpHeader{"Content-Type", content_type.str()}).move_as_ok();
+  response->complete_parse_header();
+
+  auto payload = response->create_empty_payload().move_as_ok();
+  payload->add_chunk(content);
   payload->complete_parse();
   CHECK(payload->parse_completed());
   promise.set_value(std::make_pair(std::move(response), std::move(payload)));

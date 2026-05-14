@@ -131,7 +131,7 @@ class HttpPayload {
   td::MutableSlice get_read_slice();
   void confirm_read(size_t s);
   void add_trailer(HttpHeader header);
-  void add_chunk(td::BufferSlice data);
+  void add_chunk(td::Slice data);
   td::BufferSlice get_slice(size_t max_size);
   void slice_gc();
   HttpHeader get_header();
@@ -339,8 +339,11 @@ class HttpResponse {
   bool is_tunnel_ = false;
 };
 
-void answer_error(HttpStatusCode code, std::string reason,
-                  td::Promise<std::pair<std::unique_ptr<HttpResponse>, std::shared_ptr<HttpPayload>>> promise);
+using ResponsePair = std::pair<std::unique_ptr<HttpResponse>, std::shared_ptr<HttpPayload>>;
+using ResponsePromise = td::Promise<ResponsePair>;
+
+void answer_error(HttpStatusCode code, std::string reason, ResponsePromise promise);
+void answer_ok(td::Slice content, td::Slice content_type, ResponsePromise promise);
 
 }  // namespace http
 
