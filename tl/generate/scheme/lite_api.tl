@@ -71,8 +71,6 @@ liteServer.dispatchQueueMessage addr:int256 lt:long hash:int256 metadata:liteSer
 liteServer.dispatchQueueMessages mode:# id:tonNode.blockIdExt messages:(vector liteServer.dispatchQueueMessage) complete:Bool
     proof:mode.0?bytes messages_boc:mode.2?bytes = liteServer.DispatchQueueMessages;
 
-liteServer.debug.verbosity value:int = liteServer.debug.Verbosity;
-
 liteServer.nonfinal.candidateId block_id:tonNode.blockIdExt creator:int256 collated_data_hash:int256 = liteServer.nonfinal.CandidateId;
 liteServer.nonfinal.candidate id:liteServer.nonfinal.candidateId data:bytes collated_data:bytes = liteServer.nonfinal.Candidate;
 liteServer.nonfinal.candidateInfo id:liteServer.nonfinal.candidateId available:Bool approved_weight:long signed_weight:long total_weight:long = liteServer.nonfinal.CandidateInfo;
