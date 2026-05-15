@@ -94,6 +94,7 @@ add_library(tonlibjson_objects OBJECT
   tonlib/FFIEventLoop.cpp
   tonlib/tonlib_client_json.cpp
   tonlib/tonlib_engine_console.cpp
+  tonlib/tonlib_event_loop.cpp
 )
 target_link_libraries(tonlibjson_objects
   PRIVATE tonlibjson_private_interface
@@ -181,6 +182,7 @@ endif()
 set(TONLIB_JSON_HEADERS
   tonlib/tonlib_client_json.h
   tonlib/tonlib_engine_console.h
+  tonlib/tonlib_event_loop.h
 )
 
 install(FILES ${TONLIB_JSON_HEADERS} ${CMAKE_CURRENT_BINARY_DIR}/tonlib/tonlibjson_export.h DESTINATION include/tonlib/)
