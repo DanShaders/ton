@@ -102,27 +102,34 @@ class TonlibCDLL:
         response_get_response.argtypes = [ctypes.c_void_p]
         self.response_get_response = cast(Callable[[int], bytes], response_get_response)
 
-        client_json_create = tonlib.tonlib_client_json_create
-        client_json_create.restype = ctypes.c_void_p
-        client_json_create.argtypes = []
-        self.client_json_create = cast(Callable[[], int], client_json_create)
+        lite_client_create = tonlib.tonlib_lite_client_create
+        lite_client_create.restype = ctypes.c_void_p
+        lite_client_create.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        self.lite_client_create = cast(Callable[[int, bytes], int], lite_client_create)
 
-        client_json_send = tonlib.tonlib_client_json_send
-        client_json_send.restype = None
-        client_json_send.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-        self.client_json_send = cast(Callable[[int, bytes], None], client_json_send)
+        lite_client_destroy = tonlib.tonlib_lite_client_destroy
+        lite_client_destroy.restype = None
+        lite_client_destroy.argtypes = [ctypes.c_void_p]
+        self.lite_client_destroy = cast(Callable[[int], None], lite_client_destroy)
 
-        client_json_receive = tonlib.tonlib_client_json_receive
-        client_json_receive.restype = ctypes.c_char_p
-        client_json_receive.argtypes = [ctypes.c_void_p, ctypes.c_double]
-        self.client_json_receive = cast(Callable[[int, float], bytes | None], client_json_receive)
+        lite_client_is_error = tonlib.tonlib_lite_client_is_error
+        lite_client_is_error.restype = ctypes.c_bool
+        lite_client_is_error.argtypes = [ctypes.c_void_p]
+        self.lite_client_is_error = cast(Callable[[int], bool], lite_client_is_error)
 
-        client_json_cancel_requests = tonlib.tonlib_client_json_cancel_requests
-        client_json_cancel_requests.restype = None
-        client_json_cancel_requests.argtypes = [ctypes.c_void_p]
-        self.client_json_cancel_requests = cast(Callable[[int], None], client_json_cancel_requests)
+        lite_client_get_error_code = tonlib.tonlib_lite_client_get_error_code
+        lite_client_get_error_code.restype = ctypes.c_int
+        lite_client_get_error_code.argtypes = [ctypes.c_void_p]
+        self.lite_client_get_error_code = cast(Callable[[int], int], lite_client_get_error_code)
 
-        client_json_destroy = tonlib.tonlib_client_json_destroy
-        client_json_destroy.restype = None
-        client_json_destroy.argtypes = [ctypes.c_void_p]
-        self.client_json_destroy = cast(Callable[[int], None], client_json_destroy)
+        lite_client_get_error_message = tonlib.tonlib_lite_client_get_error_message
+        lite_client_get_error_message.restype = ctypes.c_char_p
+        lite_client_get_error_message.argtypes = [ctypes.c_void_p]
+        self.lite_client_get_error_message = cast(
+            Callable[[int], bytes], lite_client_get_error_message
+        )
+
+        lite_client_request = tonlib.tonlib_lite_client_request
+        lite_client_request.restype = ctypes.c_void_p
+        lite_client_request.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+        self.lite_client_request = cast(Callable[[int, bytes], int], lite_client_request)

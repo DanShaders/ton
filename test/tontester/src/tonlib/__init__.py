@@ -1,18 +1,20 @@
-from .client import TonlibClient, TonlibStateReader
+from .client import AccountState, BlockHeader, Shards, TonlibClient, TonlibStateReader
 from .engine_console import EngineConsoleClient
 from .errors import LocalError, RemoteError
 from .event_loop import TonlibEventLoop
+from .lite_client import LiteClient
 from .tonlib_cdll import TonlibCDLL
-from .tonlibjson import TonLib, TonlibError
 
 __all__ = [
+    "AccountState",
+    "BlockHeader",
     "EngineConsoleClient",
+    "LiteClient",
     "LocalError",
     "RemoteError",
-    "TonLib",
+    "Shards",
     "TonlibCDLL",
     "TonlibClient",
-    "TonlibError",
     "TonlibEventLoop",
     "TonlibStateReader",
 ]

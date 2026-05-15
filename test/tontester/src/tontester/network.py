@@ -19,7 +19,7 @@ from typing import Literal, final, override
 from tonapi import ton_api
 
 from tl import TLObject
-from tonlib import EngineConsoleClient, TonlibClient, TonlibError, TonlibEventLoop
+from tonlib import EngineConsoleClient, RemoteError, TonlibClient, TonlibEventLoop
 
 from .install import Install
 from .key import Key
@@ -379,23 +379,10 @@ class Network:
         while True:
             try:
                 mc_info = await client.get_masterchain_info()
-            except TonlibError as e:
+            except RemoteError:
                 # FIXME: We should really let node notify us that it is ready.
-                try:
-                    if (
-                        e.result.code == 500
-                        and (
-                            e.result.message
-                            == "LITE_SERVER_NETWORKtimeout for adnl query query"  # node is not synced yet
-                            or e.result.message
-                            == "LITE_SERVER_NETWORK"  # node is not listening the socket
-                        )
-                    ):
-                        await asyncio.sleep(0.2)
-                        continue
-                except Exception:
-                    pass
-                raise
+                await asyncio.sleep(0.2)
+                continue
 
             assert mc_info.last is not None
 
@@ -410,17 +397,9 @@ class Network:
         while True:
             try:
                 return await client.lookup_block(workchain=workchain, shard=shard, seqno=seqno)
-            except TonlibError as e:
-                try:
-                    if e.result.code == 500 and (
-                        "LITE_SERVER_UNKNOWN:" in e.result.message
-                        or "LITE_SERVER_NOTREADY:" in e.result.message
-                    ):
-                        await asyncio.sleep(0.2)
-                        continue
-                except Exception:
-                    pass
-                raise
+            except RemoteError:
+                await asyncio.sleep(0.2)
+                continue
 
 
 def _ip_to_tl(ip: IPv4Address) -> int:
@@ -660,9 +639,14 @@ class FullNode(Network.Node):
         if self._client:
             return self._client
 
-        self._client = TonlibClient(self._liteserver_config, self._tonlib)
-        await self._client.init()
-
+        self._client = TonlibClient(
+            ton_api.LiteClient_config(
+                address=self._liteserver_addr.address,
+                server_public_key=self._liteserver_key.public_key,
+            ),
+            self._tonlib,
+            self._tonlib_event_loop,
+        )
         return self._client
 
     @property
