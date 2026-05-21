@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: LGPL-2.0-or-later
  */
 
-#include "validator/consensus/test/chain.h"
-
 #include <utility>
 
 #include "auto/tl/ton_api.h"
 #include "common/checksum.h"
 #include "tl-utils/common-utils.hpp"
+#include "validator/consensus/test/chain.h"
 
 namespace ton::validator::consensus::test {
 
@@ -87,8 +86,7 @@ CandidateArtifact Chain::build_empty(td::uint32 slot, CandidateId parent, BlockI
   CandidateId id = CandidateHashData::create_empty(reference, parent).build_id_with(slot);
   td::BufferSlice signature = sign_id(*this, leader.idx, id);
 
-  auto candidate =
-      td::make_ref<Candidate>(id, ParentId{parent}, leader.idx, reference, signature.clone());
+  auto candidate = td::make_ref<Candidate>(id, ParentId{parent}, leader.idx, reference, signature.clone());
   auto wire = candidate->serialize();
 
   return CandidateArtifact{
@@ -136,8 +134,8 @@ template CertArtifact<simplex::NotarizeVote> Chain::make_cert<simplex::NotarizeV
     simplex::NotarizeVote, std::span<const PeerValidatorId>) const;
 template CertArtifact<simplex::FinalizeVote> Chain::make_cert<simplex::FinalizeVote>(
     simplex::FinalizeVote, std::span<const PeerValidatorId>) const;
-template CertArtifact<simplex::SkipVote> Chain::make_cert<simplex::SkipVote>(
-    simplex::SkipVote, std::span<const PeerValidatorId>) const;
+template CertArtifact<simplex::SkipVote> Chain::make_cert<simplex::SkipVote>(simplex::SkipVote,
+                                                                             std::span<const PeerValidatorId>) const;
 
 // ---------------------------------------------------------------------------
 // CandidateArtifact

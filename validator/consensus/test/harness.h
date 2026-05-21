@@ -20,6 +20,8 @@
 #include "td/utils/type_traits.h"
 #include "validator/consensus/bus.h"
 #include "validator/consensus/simplex/bus.h"
+#include "validator/consensus/test/chain-state.h"
+#include "validator/consensus/test/chain.h"
 #include "validator/consensus/test/equality.h"
 #include "validator/consensus/test/fixtures.h"
 
@@ -57,6 +59,12 @@ class SimplexTest : public td::Test {
   td::actor::TestScheduler ts_;
   td::actor::BusHandle<BusType> bh_;
   std::vector<PrivateKey> keys_;
+  std::vector<std::unique_ptr<Decryptor>> decryptors_;
+  Chain chain_;
+
+  Chain& chain() {
+    return chain_;
+  }
 
   virtual TestBusOptions options() const {
     return TestBusOptions{};
@@ -67,9 +75,18 @@ class SimplexTest : public td::Test {
 
   virtual td::actor::Task<> run_test() = 0;
 
-  template <td::actor::detail::ValidEventFor<consensus::simplex::Bus> E>
+  // Fire-and-forget publish. Accepts both pure events and Unit-returning
+  // requests; the latter's Task is started and detached. Anything with a
+  // non-Unit ReturnType must use send_request().
+  template <td::actor::detail::ValidPublishTargetFor<consensus::simplex::Bus> E>
   void send_event(E event) {
-    bh_.publish(std::make_shared<E>(std::move(event)));
+    if constexpr (requires { typename E::ReturnType; }) {
+      static_assert(std::is_same_v<typename E::ReturnType, td::Unit>,
+                    "send_event drops the return value; use send_request for non-Unit returns");
+      std::move(bh_.publish(std::make_shared<E>(std::move(event)))).start().detach();
+    } else {
+      bh_.publish(std::make_shared<E>(std::move(event)));
+    }
   }
 
   template <td::actor::detail::ValidRequestFor<consensus::simplex::Bus> R>
@@ -78,12 +95,11 @@ class SimplexTest : public td::Test {
   }
 
   template <td::In<typename Bus::Calls> R>
-  void returns(typename R::ReturnType value) {
+  void queue_result_of(typename R::ReturnType value) {
     std::get<td::IndexIn<R, typename Bus::Calls>>(bh_->results_).push_back({std::move(value), std::nullopt});
   }
 
-  template <td::In<typename Bus::Logs>... E>
-  void expect_events(const E&... e) {
+  void expect_events(std::initializer_list<std::variant<typename Bus::Logs>> e) {
     auto& es = bh_->events_;
     EXPECT_EQ(es.size(), sizeof...(E));
     if (es.size() == sizeof...(E)) {
@@ -128,6 +144,14 @@ class SimplexTest : public td::Test {
       auto bus = std::make_shared<BusType>();
       install_validators(*bus, keys_, options());
       bus->populate_collator_schedule();
+
+      decryptors_.clear();
+      decryptors_.reserve(keys_.size());
+      for (const auto& key : keys_) {
+        decryptors_.push_back(key.create_decryptor().move_as_ok());
+      }
+      chain_ = Chain{{}, bus.get(), decryptors_, zerostate(bus->shard)};
+
       configure(*bus);
 
       bh_ = runtime.start(std::move(bus));
