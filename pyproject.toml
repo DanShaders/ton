@@ -25,7 +25,7 @@ members = [
 
 [tool.ruff]
 line-length = 100
-include = ["test/integration/**/*.py", "test/tontester/**/*.py"]
+include = ["test/e2e/**/*.py", "test/tontester/**/*.py"]
 
 [tool.ruff.lint]
 # Default rules with isort
@@ -45,7 +45,7 @@ ignore = [
 ]
 
 [tool.pyright]
-include = ["test/integration", "test/tontester"]
+include = ["test/e2e", "test/tontester"]
 
 [tool.pytest]
-testpaths = ["test/tontester/tests"]
+testpaths = ["test/tontester/tests", "test/e2e"]

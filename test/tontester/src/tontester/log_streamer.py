@@ -8,6 +8,14 @@ from typing import final
 
 _IS_TERMINAL_INTERACTIVE = sys.stderr.isatty()
 
+_LEVEL_MAP = {
+    0: logging.CRITICAL,
+    1: logging.ERROR,
+    2: logging.WARNING,
+    3: logging.INFO,
+    4: logging.DEBUG,
+}
+
 
 @dataclass
 class _LogEntry:
@@ -38,7 +46,7 @@ class _LogEntry:
         else:
             slice_len = 0
 
-        line = f"[{self.level}][t {self.thread_id}][{self.filename}:{self.line_number}]{actor}{vlog} {message[:-slice_len]}"
+        line = f"[t {self.thread_id}]{actor}{vlog} {message[:-slice_len]}"
 
         if _IS_TERMINAL_INTERACTIVE and self.level in COLORS:
             line = f"{COLORS[self.level]}{line}\x1b[0m"
@@ -170,7 +178,16 @@ class LogStreamer:
     def _flush_entry(self):
         if self._current_entry is not None:
             if self._current_entry.level <= self._verbosity:
-                self._logger.info(self._current_entry.format())
+                record = self._logger.makeRecord(
+                    name=self._logger.name,
+                    level=_LEVEL_MAP.get(self._current_entry.level, logging.INFO),
+                    fn=self._current_entry.filename,
+                    lno=self._current_entry.line_number,
+                    msg=self._current_entry.format(),
+                    args=(),
+                    exc_info=None,
+                )
+                self._logger.handle(record)
             self._current_entry = None
 
     def _log_malformed(self, data: bytes):
