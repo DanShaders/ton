@@ -265,6 +265,29 @@ if (USE_QUIC)
   endif()
   set(OPENSSL_FOUND TRUE CACHE BOOL "OpenSSL found" FORCE)
 
+  # Optional BoringSSL backend for ngtcp2 (used by quic/ when USE_BORINGSSL is ON).
+  # Build BoringSSL out-of-tree (e.g. ~/code/ton/boringssl) with the matching
+  # symbol prefix and pass:
+  #   -DUSE_BORINGSSL=ON -DBORINGSSL_ROOT_DIR=$HOME/code/ton/boringssl -DBORINGSSL_PREFIX=qbssl
+  option(USE_BORINGSSL "Build ngtcp2's BoringSSL crypto backend alongside the OpenSSL one" OFF)
+  if (USE_BORINGSSL)
+    if (NOT BORINGSSL_ROOT_DIR)
+      message(FATAL_ERROR "USE_BORINGSSL=ON requires -DBORINGSSL_ROOT_DIR=<path>")
+    endif()
+    set(BORINGSSL_INCLUDE_DIR "${BORINGSSL_ROOT_DIR}/include" CACHE PATH "BoringSSL include dir" FORCE)
+    set(BORINGSSL_LIBRARIES "${BORINGSSL_ROOT_DIR}/build/libssl.a;${BORINGSSL_ROOT_DIR}/build/libcrypto.a"
+        CACHE STRING "BoringSSL libraries" FORCE)
+    set(ENABLE_BORINGSSL ON CACHE BOOL "ngtcp2: enable BoringSSL backend" FORCE)
+    if (NOT BORINGSSL_PREFIX)
+      message(FATAL_ERROR "USE_BORINGSSL=ON requires -DBORINGSSL_PREFIX=<prefix> matching the BoringSSL build (symbol prefix to avoid collision with the bundled OpenSSL).")
+    endif()
+    # The BoringSSL headers redefine every public symbol via #pragma redefine_extname
+    # when BORINGSSL_PREFIX is set. Any TU that includes BoringSSL headers must see
+    # this define so the symbol references line up with the prefixed binary.
+    add_definitions(-DBORINGSSL_PREFIX=${BORINGSSL_PREFIX})
+    message("Add BoringSSL from ${BORINGSSL_ROOT_DIR} with symbol prefix ${BORINGSSL_PREFIX}")
+  endif()
+
   function(ngtcp2_scope)
     set(BUILD_TESTING OFF)
     message("Add ngtcp2 with custom OpenSSL from ${OPENSSL_ROOT_DIR}")

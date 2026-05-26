@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <openssl/err.h>
 #include <openssl/ssl.h>
 
 #include "td/utils/Random.h"
@@ -79,6 +80,13 @@ td::Status QuicConnectionPImpl::finish_tls_setup(openssl_ptr<SSL, &SSL_free> ssl
   conn_ref_.user_data = this;
   SSL_set_app_data(ssl_ptr.get(), &conn_ref_);
 
+#ifdef NGTCP2_USE_BORINGSSL
+  // BoringSSL QUIC TLS plumbing happens at SSL_CTX creation time in
+  // init_tls_*_rpk; ngtcp2 binds to the SSL object via the conn_ref_ stored
+  // in SSL_set_app_data above. No per-session configure or extra ctx wrapper
+  // is needed (and there's no ngtcp2_crypto_ossl_ctx in the BoringSSL backend).
+  (void)is_client;
+#else
   if (is_client) {
     if (ngtcp2_crypto_ossl_configure_client_session(ssl_ptr.get()) != 0) {
       return td::Status::Error("ngtcp2_crypto_ossl_configure_client_session failed");
@@ -94,6 +102,7 @@ td::Status QuicConnectionPImpl::finish_tls_setup(openssl_ptr<SSL, &SSL_free> ssl
     return td::Status::Error("ngtcp2_crypto_ossl_ctx_new failed");
   }
   ossl_ctx_.reset(ossl_ctx);
+#endif
 
   ssl_ctx_ = std::move(ssl_ctx_ptr);
   ssl_ = std::move(ssl_ptr);
@@ -103,6 +112,50 @@ td::Status QuicConnectionPImpl::finish_tls_setup(openssl_ptr<SSL, &SSL_free> ssl
 static td::Status setup_rpk_context(SSL_CTX* ssl_ctx, const td::Ed25519::PrivateKey& key) {
   SSL_CTX_set_min_proto_version(ssl_ctx, TLS1_3_VERSION);
   SSL_CTX_set_max_proto_version(ssl_ctx, TLS1_3_VERSION);
+
+#ifdef NGTCP2_USE_BORINGSSL
+  // BoringSSL handles RPK via the "custom verify" callback path (X.509 verify
+  // doesn't run for non-X.509 cert types) and the SSL_CREDENTIAL API.
+  SSL_CTX_set_custom_verify(ssl_ctx, SSL_VERIFY_PEER,
+                            [](SSL*, uint8_t*) -> ssl_verify_result_t { return ssl_verify_ok; });
+
+  // BoringSSL's default TLS 1.3 sig-alg list does not include Ed25519, which
+  // makes Ed25519-only RPK handshakes fail with NO_COMMON_SIGNATURE_ALGORITHMS.
+  // Explicitly advertise Ed25519 for both signing and verification.
+  static const uint16_t sigalgs[] = {SSL_SIGN_ED25519};
+  if (!SSL_CTX_set_signing_algorithm_prefs(ssl_ctx, sigalgs, sizeof(sigalgs) / sizeof(sigalgs[0]))) {
+    return td::Status::Error("SSL_CTX_set_signing_algorithm_prefs failed");
+  }
+  if (!SSL_CTX_set_verify_algorithm_prefs(ssl_ctx, sigalgs, sizeof(sigalgs) / sizeof(sigalgs[0]))) {
+    return td::Status::Error("SSL_CTX_set_verify_algorithm_prefs failed");
+  }
+
+  static const uint8_t cert_types[] = {TLSEXT_cert_type_rpk};
+  if (!SSL_CTX_set1_accepted_peer_cert_types(ssl_ctx, cert_types, sizeof(cert_types))) {
+    return td::Status::Error("SSL_CTX_set1_accepted_peer_cert_types failed");
+  }
+  if (!SSL_CTX_set1_available_client_cert_types(ssl_ctx, cert_types, sizeof(cert_types))) {
+    return td::Status::Error("SSL_CTX_set1_available_client_cert_types failed");
+  }
+
+  auto key_bytes = key.as_octet_string();
+  EVP_PKEY* evp_key_raw =
+      EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, nullptr, key_bytes.as_slice().ubegin(), 32);
+  if (evp_key_raw == nullptr) {
+    return td::Status::Error("EVP_PKEY_new_raw_private_key failed");
+  }
+  openssl_ptr<EVP_PKEY, &EVP_PKEY_free> evp_key(evp_key_raw);
+
+  SSL_CREDENTIAL* cred = SSL_CREDENTIAL_new_raw_public_key(evp_key.get());
+  if (cred == nullptr) {
+    return td::Status::Error("SSL_CREDENTIAL_new_raw_public_key failed");
+  }
+  int add_ok = SSL_CTX_add1_credential(ssl_ctx, cred);
+  SSL_CREDENTIAL_free(cred);
+  if (!add_ok) {
+    return td::Status::Error("SSL_CTX_add1_credential failed");
+  }
+#else
   SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, [](int, X509_STORE_CTX*) { return 1; });
 
   static const unsigned char cert_types[] = {TLSEXT_cert_type_rpk};
@@ -115,6 +168,7 @@ static td::Status setup_rpk_context(SSL_CTX* ssl_ctx, const td::Ed25519::Private
   OPENSSL_MAKE_PTR(evp_key, EVP_PKEY_new_raw_private_key(EVP_PKEY_ED25519, nullptr, key_bytes.as_slice().ubegin(), 32),
                    EVP_PKEY_free, "Failed to create Ed25519 key from raw bytes");
   OPENSSL_CHECK_OK(SSL_CTX_use_PrivateKey(ssl_ctx, evp_key.get()), "Failed to set private key");
+#endif
   return td::Status::OK();
 }
 
@@ -133,7 +187,14 @@ int QuicConnectionPImpl::alpn_select_cb(SSL*, const unsigned char** out, unsigne
 td::Status QuicConnectionPImpl::init_tls_client_rpk(const td::Ed25519::PrivateKey& client_key, td::Slice alpn,
                                                     td::Slice sni) {
   OPENSSL_MAKE_PTR(ssl_ctx_ptr, SSL_CTX_new(TLS_client_method()), SSL_CTX_free, "Failed to create TLS client context");
+#ifdef NGTCP2_USE_BORINGSSL
+  if (ngtcp2_crypto_boringssl_configure_client_context(ssl_ctx_ptr.get()) != 0) {
+    return td::Status::Error("ngtcp2_crypto_boringssl_configure_client_context failed");
+  }
+#endif
   TRY_STATUS(setup_rpk_context(ssl_ctx_ptr.get(), client_key));
+  TRY_RESULT(pub, client_key.get_public_key());
+  local_pub_key_ = td::SecureString(pub.as_octet_string().as_slice());
   setup_alpn_wire(alpn);
 
   OPENSSL_MAKE_PTR(ssl_ptr, SSL_new(ssl_ctx_ptr.get()), SSL_free, "Failed to create SSL session");
@@ -203,14 +264,27 @@ td::Status QuicConnectionPImpl::init_tls_server_rpk(td::Ref<ServerIdentities> id
 
   const auto& default_entry = server_identities_->by_sni.at(*server_identities_->default_sni);
   OPENSSL_MAKE_PTR(ssl_ctx_ptr, SSL_CTX_new(TLS_server_method()), SSL_CTX_free, "Failed to create TLS server context");
+#ifdef NGTCP2_USE_BORINGSSL
+  if (ngtcp2_crypto_boringssl_configure_server_context(ssl_ctx_ptr.get()) != 0) {
+    return td::Status::Error("ngtcp2_crypto_boringssl_configure_server_context failed");
+  }
+#endif
   TRY_STATUS(setup_rpk_context(ssl_ctx_ptr.get(), default_entry.key));
+  TRY_RESULT(pub, default_entry.key.get_public_key());
+  local_pub_key_ = td::SecureString(pub.as_octet_string().as_slice());
   setup_alpn_wire(alpn);
 
   SSL_CTX_set_alpn_select_cb(ssl_ctx_ptr.get(), alpn_select_cb, &alpn_wire_);
 
   if (server_identities_->by_sni.size() > 1) {
+#ifdef NGTCP2_USE_BORINGSSL
+    // SNI dispatch with multiple identities would need SSL_CTX_set_select_certificate_cb
+    // and dynamic SSL_CREDENTIAL juggling — not implemented in this prototype.
+    return td::Status::Error("BoringSSL build does not implement multi-identity SNI dispatch yet");
+#else
     SSL_CTX_set_tlsext_servername_callback(ssl_ctx_ptr.get(), sni_select_cb);
     SSL_CTX_set_tlsext_servername_arg(ssl_ctx_ptr.get(), const_cast<ServerIdentities*>(server_identities_.get()));
+#endif
   }
 
   OPENSSL_MAKE_PTR(ssl_ptr, SSL_new(ssl_ctx_ptr.get()), SSL_free, "Failed to create SSL session");
@@ -269,7 +343,12 @@ void QuicConnectionPImpl::setup_ngtcp2_callbacks(ngtcp2_callbacks& callbacks, bo
 
 void QuicConnectionPImpl::finish_quic_init(const QuicConnectionId& scid) {
   primary_scid_ = scid;
+#ifdef NGTCP2_USE_BORINGSSL
+  // BoringSSL backend: ngtcp2 binds to the SSL object directly.
+  ngtcp2_conn_set_tls_native_handle(conn(), ssl_.get());
+#else
   ngtcp2_conn_set_tls_native_handle(conn(), ossl_ctx_.get());
+#endif
   ngtcp2_conn_set_keep_alive_timeout(conn(), options_.keep_alive_timeout);
 }
 
@@ -709,6 +788,9 @@ td::SecureString QuicConnectionPImpl::extract_peer_ed25519_key() const {
 }
 
 td::SecureString QuicConnectionPImpl::extract_local_ed25519_key() const {
+  if (!local_pub_key_.empty()) {
+    return td::SecureString(local_pub_key_.as_slice());
+  }
   // For the server side this reflects the post-SNI-dispatch key actually used in the handshake.
   // For the client side this is just the client's RPK.
   EVP_PKEY* local_pkey = SSL_get_privatekey(ssl_.get());

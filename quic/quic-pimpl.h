@@ -15,7 +15,11 @@
 #include "crypto/common/refcnt.hpp"
 #include "ngtcp2/ngtcp2.h"
 #include "ngtcp2/ngtcp2_crypto.h"
+#ifdef NGTCP2_USE_BORINGSSL
+#include "ngtcp2/ngtcp2_crypto_boringssl.h"
+#else
 #include "ngtcp2/ngtcp2_crypto_ossl.h"
+#endif
 #include "td/utils/Time.h"
 #include "td/utils/port/UdpSocketFd.h"
 
@@ -226,8 +230,12 @@ struct QuicConnectionPImpl {
   std::unique_ptr<Callback> callback_;
   QuicConnectionOptions options_;
 
-  QuicConnectionId primary_scid_{};
+  QuicConnectionId primary_scid_;
   std::string alpn_wire_;
+  // Local Ed25519 public key, stashed at TLS setup so handshake-complete
+  // doesn't have to query the SSL (BoringSSL's credential API doesn't expose
+  // privkey via the legacy SSL_get_privatekey getter).
+  td::SecureString local_pub_key_;
 
   struct OutboundStreamState {
     td::ChainBufferWriter writer_;
@@ -246,7 +254,11 @@ struct QuicConnectionPImpl {
 
   openssl_ptr<SSL_CTX, &SSL_CTX_free> ssl_ctx_;
   openssl_ptr<SSL, &SSL_free> ssl_;
+#ifndef NGTCP2_USE_BORINGSSL
+  // OpenSSL backend needs an extra ngtcp2_crypto_ossl_ctx wrapper around SSL.
+  // BoringSSL's QUIC TLS callbacks bind directly to the SSL object.
   openssl_ptr<ngtcp2_crypto_ossl_ctx, &ngtcp2_crypto_ossl_ctx_del> ossl_ctx_;
+#endif
   openssl_ptr<ngtcp2_conn, &ngtcp2_conn_del> conn_;
   ngtcp2_crypto_conn_ref conn_ref_{};
   bool local_cid_callbacks_enabled_{false};
