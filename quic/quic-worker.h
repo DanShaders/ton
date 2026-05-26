@@ -31,6 +31,7 @@
 
 struct io_uring;
 struct io_uring_cqe;
+struct io_uring_buf_ring;
 
 namespace ton::quic {
 
@@ -104,8 +105,12 @@ class QuicWorker {
 
   // io_uring fast-path resources
   constexpr static size_t kIoUringDepth = 1024;
-  constexpr static size_t kNumRecvSlots = 64;
+  constexpr static size_t kNumRecvBufs = 256;        // entries in provided buffer ring (must be pow2)
+  constexpr static size_t kRecvBufNamelen = 128;     // sockaddr_storage worth, padded
+  constexpr static size_t kRecvBufCmsglen = 64;      // GRO cmsg
+  constexpr static size_t kRecvBufPayloadCap = kMaxDatagram;
   constexpr static size_t kNumSendSlots = 256;
+  constexpr static int kRecvBufGroupId = 0;
 
   struct ConnectionState : td::HeapNode {
     QuicConnectionPImpl& impl() {
@@ -138,10 +143,12 @@ class QuicWorker {
   void drain_commands();
 
   // io_uring helpers (defined in quic-worker.cpp)
-  void uring_submit_recv(size_t slot_idx);
+  void uring_setup_recv_buf_ring();
+  void uring_submit_multishot_recv();
+  void uring_return_buffer(unsigned short buf_id);
   void uring_submit_send(size_t slot_idx);
   void uring_submit_poll_cmd();
-  void uring_handle_recv_cqe(int res, size_t slot_idx);
+  void uring_handle_recv_cqe(int res, unsigned flags);
   void uring_handle_send_cqe(int res, size_t slot_idx);
   void uring_handle_cmd_cqe(int res, unsigned flags);
   void uring_flush_egress();
@@ -197,15 +204,10 @@ class QuicWorker {
   std::vector<QuicConnectionId> to_erase_connections_;
   td::KHeap<double> timeout_heap_;
 
-  // io_uring recv slot pool. Each slot owns the buffers the kernel will fill
-  // for a single recvmsg SQE; the slot is resubmitted after we drain the CQE.
-  struct RecvSlot {
-    alignas(8) char payload[kMaxDatagram];
-    alignas(8) char control[64];
-    sockaddr_storage src;
-    iovec iov;
-    msghdr hdr;
-  };
+  // Per-buffer stride for the multishot recvmsg provided buffer ring. Layout:
+  //   [io_uring_recvmsg_out (16B)][sockaddr_storage padded][cmsg space][payload]
+  // Computed in run_loop() based on liburing's recvmsg-out struct size.
+  size_t recv_buf_stride_ = 0;
 
   // io_uring send slot pool. produce_egress writes directly into the slot's
   // payload buffer, which then stays alive until the send CQE arrives.
@@ -217,10 +219,15 @@ class QuicWorker {
     msghdr hdr;
   };
 
-  std::vector<RecvSlot> recv_slots_;  // size kNumRecvSlots
   std::vector<SendSlot> send_slots_;  // size kNumSendSlots
   std::vector<size_t> free_send_slots_;
   io_uring* ring_ = nullptr;
+  io_uring_buf_ring* recv_buf_ring_ = nullptr;
+  std::vector<char> recv_buf_storage_;
+  // Template msghdr passed to multishot recvmsg — only the namelen/controllen
+  // are consulted by the kernel (it uses the provided buffer ring for storage).
+  msghdr recv_msg_template_{};
+  bool multishot_recv_armed_ = false;
   int udp_fd_ = -1;
   int cmd_fd_ = -1;
   size_t pending_sqes_ = 0;

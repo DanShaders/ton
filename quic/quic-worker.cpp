@@ -769,23 +769,47 @@ void QuicWorker::drain_commands() {
 
 // --- io_uring fast path ---
 
-void QuicWorker::uring_submit_recv(size_t slot_idx) {
-  auto& s = recv_slots_[slot_idx];
-  s.iov.iov_base = s.payload;
-  s.iov.iov_len = sizeof(s.payload);
-  std::memset(&s.hdr, 0, sizeof(s.hdr));
-  s.hdr.msg_name = &s.src;
-  s.hdr.msg_namelen = sizeof(s.src);
-  s.hdr.msg_iov = &s.iov;
-  s.hdr.msg_iovlen = 1;
-  s.hdr.msg_control = s.control;
-  s.hdr.msg_controllen = sizeof(s.control);
+void QuicWorker::uring_setup_recv_buf_ring() {
+  // Per-buffer layout: io_uring_recvmsg_out + sockaddr + cmsg + payload.
+  recv_buf_stride_ = sizeof(io_uring_recvmsg_out) + kRecvBufNamelen + kRecvBufCmsglen + kRecvBufPayloadCap;
+  recv_buf_storage_.assign(kNumRecvBufs * recv_buf_stride_, 0);
 
+  int err = 0;
+  recv_buf_ring_ = io_uring_setup_buf_ring(ring_, static_cast<unsigned int>(kNumRecvBufs), kRecvBufGroupId, 0, &err);
+  if (recv_buf_ring_ == nullptr) {
+    LOG(FATAL) << "io_uring_setup_buf_ring failed: " << strerror(-err);
+  }
+  int mask = io_uring_buf_ring_mask(kNumRecvBufs);
+  for (size_t i = 0; i < kNumRecvBufs; ++i) {
+    io_uring_buf_ring_add(recv_buf_ring_, recv_buf_storage_.data() + i * recv_buf_stride_,
+                          static_cast<unsigned int>(recv_buf_stride_), static_cast<unsigned short>(i), mask,
+                          static_cast<int>(i));
+  }
+  io_uring_buf_ring_advance(recv_buf_ring_, static_cast<int>(kNumRecvBufs));
+
+  // The msghdr template carries only name/control length expectations — the
+  // kernel uses the buffer ring for actual storage.
+  std::memset(&recv_msg_template_, 0, sizeof(recv_msg_template_));
+  recv_msg_template_.msg_namelen = kRecvBufNamelen;
+  recv_msg_template_.msg_controllen = kRecvBufCmsglen;
+}
+
+void QuicWorker::uring_submit_multishot_recv() {
   auto* sqe = io_uring_get_sqe(ring_);
   CHECK(sqe != nullptr);
-  io_uring_prep_recvmsg(sqe, udp_fd_, &s.hdr, 0);
-  io_uring_sqe_set_data64(sqe, make_tag(kTagRecv, slot_idx));
+  io_uring_prep_recvmsg_multishot(sqe, udp_fd_, &recv_msg_template_, 0);
+  sqe->flags |= IOSQE_BUFFER_SELECT;
+  sqe->buf_group = kRecvBufGroupId;
+  io_uring_sqe_set_data64(sqe, kTagRecv);
   ++pending_sqes_;
+  multishot_recv_armed_ = true;
+}
+
+void QuicWorker::uring_return_buffer(unsigned short buf_id) {
+  int mask = io_uring_buf_ring_mask(kNumRecvBufs);
+  io_uring_buf_ring_add(recv_buf_ring_, recv_buf_storage_.data() + buf_id * recv_buf_stride_,
+                        static_cast<unsigned int>(recv_buf_stride_), buf_id, mask, 0);
+  io_uring_buf_ring_advance(recv_buf_ring_, 1);
 }
 
 void QuicWorker::uring_submit_send(size_t slot_idx) {
@@ -806,31 +830,64 @@ void QuicWorker::uring_submit_poll_cmd() {
   cmd_poll_armed_ = true;
 }
 
-void QuicWorker::uring_handle_recv_cqe(int res, size_t slot_idx) {
-  auto& s = recv_slots_[slot_idx];
+void QuicWorker::uring_handle_recv_cqe(int res, unsigned flags) {
   if (res <= 0) {
-    if (res < 0 && res != -EAGAIN && res != -EINTR) {
+    if (res < 0 && res != -EAGAIN && res != -EINTR && res != -ENOBUFS) {
       LOG(DEBUG) << "recvmsg cqe error: " << strerror(-res);
     }
-    uring_submit_recv(slot_idx);
+    // If the multishot terminated, we need to resubmit it after this loop.
+    if (!(flags & IORING_CQE_F_MORE)) {
+      multishot_recv_armed_ = false;
+    }
     return;
   }
-  ingress_stats_.syscalls++;
-  ingress_stats_.bytes += static_cast<td::uint64>(res);
+  if (!(flags & IORING_CQE_F_BUFFER)) {
+    LOG(WARNING) << "multishot recvmsg cqe missing buffer flag";
+    if (!(flags & IORING_CQE_F_MORE)) {
+      multishot_recv_armed_ = false;
+    }
+    return;
+  }
+  unsigned short buf_id = static_cast<unsigned short>(flags >> IORING_CQE_BUFFER_SHIFT);
+  void* buf = recv_buf_storage_.data() + buf_id * recv_buf_stride_;
+  bool last = !(flags & IORING_CQE_F_MORE);
 
-  // Resolve source address.
+  io_uring_recvmsg_out* o = io_uring_recvmsg_validate(buf, res, &recv_msg_template_);
+  if (o == nullptr) {
+    LOG(WARNING) << "recvmsg_validate failed";
+    uring_return_buffer(buf_id);
+    if (last) {
+      multishot_recv_armed_ = false;
+    }
+    return;
+  }
+  // Truncated by either name or control overflow — we sized the buffer to fit,
+  // but be defensive about kernel-truncation flags.
+  if (o->flags & (MSG_TRUNC | MSG_CTRUNC)) {
+    LOG(DEBUG) << "recvmsg truncated, flags=" << o->flags;
+  }
+
+  ingress_stats_.syscalls++;  // counts CQEs now, not actual syscalls
+  ingress_stats_.bytes += io_uring_recvmsg_payload_length(o, res, &recv_msg_template_);
+
+  // Source address.
   td::IPAddress src;
-  src.init_sockaddr(reinterpret_cast<sockaddr*>(&s.src), s.hdr.msg_namelen).ignore();
+  void* name = io_uring_recvmsg_name(o);
+  src.init_sockaddr(reinterpret_cast<sockaddr*>(name), o->namelen).ignore();
 
-  // GRO: extract segment size from cmsg.
+  // GRO segment size from cmsg.
   size_t gso_size = 0;
-  for (cmsghdr* cm = CMSG_FIRSTHDR(&s.hdr); cm != nullptr; cm = CMSG_NXTHDR(&s.hdr, cm)) {
+  for (cmsghdr* cm = io_uring_recvmsg_cmsg_firsthdr(o, &recv_msg_template_); cm != nullptr;
+       cm = io_uring_recvmsg_cmsg_nexthdr(o, &recv_msg_template_, cm)) {
     if (cm->cmsg_level == SOL_UDP && cm->cmsg_type == UDP_GRO) {
       uint16_t v = 0;
       std::memcpy(&v, CMSG_DATA(cm), sizeof(v));
       gso_size = v;
     }
   }
+
+  unsigned int payload_len = io_uring_recvmsg_payload_length(o, res, &recv_msg_template_);
+  char* payload = static_cast<char*>(io_uring_recvmsg_payload(o, &recv_msg_template_));
 
   auto handle_one = [&](td::MutableSlice slice) {
     ingress_stats_.packets++;
@@ -855,18 +912,21 @@ void QuicWorker::uring_handle_recv_cqe(int res, size_t slot_idx) {
     on_connection_updated(*state);
   };
 
-  if (gso_size > 0 && static_cast<size_t>(res) > gso_size) {
+  if (gso_size > 0 && payload_len > gso_size) {
     size_t offset = 0;
-    while (offset < static_cast<size_t>(res)) {
-      size_t len = std::min(gso_size, static_cast<size_t>(res) - offset);
-      handle_one(td::MutableSlice(s.payload + offset, len));
+    while (offset < payload_len) {
+      size_t len = std::min<size_t>(gso_size, payload_len - offset);
+      handle_one(td::MutableSlice(payload + offset, len));
       offset += len;
     }
   } else {
-    handle_one(td::MutableSlice(s.payload, static_cast<size_t>(res)));
+    handle_one(td::MutableSlice(payload, payload_len));
   }
 
-  uring_submit_recv(slot_idx);
+  uring_return_buffer(buf_id);
+  if (last) {
+    multishot_recv_armed_ = false;
+  }
 }
 
 void QuicWorker::uring_handle_send_cqe(int res, size_t slot_idx) {
@@ -988,7 +1048,6 @@ void QuicWorker::run_loop() {
   udp_fd_ = fd_.get_native_fd().fd();
   cmd_fd_ = cmd_queue_.reader_get_event_fd().get_poll_info().native_fd().fd();
 
-  recv_slots_.resize(kNumRecvSlots);
   send_slots_.resize(kNumSendSlots);
   free_send_slots_.clear();
   free_send_slots_.reserve(kNumSendSlots);
@@ -996,22 +1055,12 @@ void QuicWorker::run_loop() {
     free_send_slots_.push_back(kNumSendSlots - 1 - i);
   }
 
-  for (size_t i = 0; i < kNumRecvSlots; ++i) {
-    uring_submit_recv(i);
-  }
+  uring_setup_recv_buf_ring();
+  uring_submit_multishot_recv();
   uring_submit_poll_cmd();
   drain_commands();
 
   while (!stop_requested_.load(std::memory_order_relaxed)) {
-    // Push pending SQEs we accumulated before waiting.
-    if (pending_sqes_ > 0) {
-      int sret = io_uring_submit(ring_);
-      if (sret < 0) {
-        LOG(WARNING) << "io_uring_submit failed: " << strerror(-sret);
-      }
-      pending_sqes_ = 0;
-    }
-
     // Compute wait deadline from earliest QUIC timer.
     __kernel_timespec ts{};
     __kernel_timespec* ts_ptr = nullptr;
@@ -1038,19 +1087,27 @@ void QuicWorker::run_loop() {
       ts_ptr = &ts;
     }
 
-    io_uring_cqe* cqe = nullptr;
+    // Combine submit + wait into one syscall when possible. This pushes any
+    // pending recv/poll/send SQEs and blocks for at least one CQE (or returns
+    // immediately if some already arrived).
     if (ts_ptr && ts.tv_sec == 0 && ts.tv_nsec == 0) {
-      io_uring_peek_cqe(ring_, &cqe);
+      if (pending_sqes_ > 0) {
+        io_uring_submit(ring_);
+        pending_sqes_ = 0;
+      }
     } else {
-      int wret = io_uring_wait_cqe_timeout(ring_, &cqe, ts_ptr);
+      io_uring_cqe* unused_cqe = nullptr;
+      int wret = io_uring_submit_and_wait_timeout(ring_, &unused_cqe, 1, ts_ptr, nullptr);
+      pending_sqes_ = 0;
       if (wret < 0 && wret != -ETIME && wret != -EINTR) {
-        LOG(WARNING) << "io_uring_wait_cqe failed: " << strerror(-wret);
+        LOG(WARNING) << "io_uring_submit_and_wait_timeout failed: " << strerror(-wret);
       }
     }
 
     // Drain all available CQEs in one pass.
     unsigned head = 0;
     unsigned consumed = 0;
+    io_uring_cqe* cqe = nullptr;
     io_uring_for_each_cqe(ring_, head, cqe) {
       uint64_t tag = io_uring_cqe_get_data64(cqe);
       uint64_t kind = tag_kind(tag);
@@ -1058,7 +1115,7 @@ void QuicWorker::run_loop() {
       int res = cqe->res;
       unsigned flags = cqe->flags;
       if (kind == kTagRecv) {
-        uring_handle_recv_cqe(res, idx);
+        uring_handle_recv_cqe(res, flags);
       } else if (kind == kTagSend) {
         uring_handle_send_cqe(res, idx);
       } else if (kind == kTagPoll) {
@@ -1070,6 +1127,9 @@ void QuicWorker::run_loop() {
       io_uring_cq_advance(ring_, consumed);
     }
 
+    if (!multishot_recv_armed_) {
+      uring_submit_multishot_recv();
+    }
     if (!cmd_poll_armed_) {
       uring_submit_poll_cmd();
     }
@@ -1082,7 +1142,11 @@ void QuicWorker::run_loop() {
   // Drain any remaining commands one last time.
   drain_commands();
 
-  // Cancel any pending recv SQEs by closing the ring (queue_exit cancels in-flight).
+  if (recv_buf_ring_ != nullptr) {
+    io_uring_free_buf_ring(ring_, recv_buf_ring_, static_cast<unsigned int>(kNumRecvBufs), kRecvBufGroupId);
+    recv_buf_ring_ = nullptr;
+  }
+  // queue_exit cancels any in-flight SQEs (recv/poll) and unregisters resources.
   ring_ = nullptr;
   io_uring_queue_exit(&ring);
 }
