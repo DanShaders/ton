@@ -170,9 +170,31 @@ class Driver final : public td::actor::Actor {
       std::fprintf(stderr, "perf: disabling sampling\n");
       perf_.command("disable");
     }
+    co_await dump_quic_stats();
     std::fflush(stderr);
     td::rmrf(db_root_base_).ignore();
     _exit(0);
+  }
+
+  // Per-node QUIC stats: per-path bytes_tx/rx, mean_rtt, etc. Helps tell whether
+  // QUIC's the bottleneck (high unacked / low cwnd / high rtt) vs the actor system.
+  td::actor::Task<> dump_quic_stats() {
+    auto n = nodes_->size();
+    std::fprintf(stderr, "\n# ---- per-node QuicSender stats ----\n");
+    for (size_t i = 0; i < n; ++i) {
+      auto stats = co_await td::actor::ask((*nodes_)[i].quic.get(), &ton::quic::QuicSender::collect_stats);
+      std::fprintf(stderr, "node %zu (%s): conns=%zu  tx=%lld B  rx=%lld B  unacked=%lld B  lost=%lld B  open_sids=%lld  total_sids=%lld  mean_rtt=%.2f ms\n",
+                   i, (*nodes_)[i].adnl_short.bits256_value().to_hex().substr(0, 8).c_str(),
+                   stats.summary.server_stats.total_conns,
+                   (long long)stats.summary.server_stats.impl_stats.bytes_tx,
+                   (long long)stats.summary.server_stats.impl_stats.bytes_rx,
+                   (long long)stats.summary.server_stats.impl_stats.bytes_unacked,
+                   (long long)stats.summary.server_stats.impl_stats.bytes_lost,
+                   (long long)stats.summary.server_stats.impl_stats.open_sids,
+                   (long long)stats.summary.server_stats.impl_stats.total_sids,
+                   stats.summary.server_stats.impl_stats.mean_rtt * 1000.0);
+    }
+    co_return {};
   }
 
   // Send a query from every node to every other node via QuicSender; await all.

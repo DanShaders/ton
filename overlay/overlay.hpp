@@ -286,6 +286,8 @@ class OverlayImpl : public Overlay {
                                        td::Result<std::pair<td::BufferSlice, PublicKey>> &&R);
   void broadcast_twostep_signed_fec(BroadcastTwostepDataFec &&data,
                                     td::Result<std::pair<td::BufferSlice, PublicKey>> &&R);
+  void broadcast_twostep_signed_fec_bundle(BroadcastTwostepDataFecBundle &&data,
+                                           td::Result<std::pair<td::BufferSlice, PublicKey>> &&R);
 
   void update_peer_err_ctr(adnl::AdnlNodeIdShort peer_id, bool is_fec);
   std::vector<adnl::AdnlNodeIdShort> get_neighbours(td::uint32 max_size = 0) const;
@@ -401,6 +403,8 @@ class OverlayImpl : public Overlay {
                                       tl_object_ptr<ton_api::overlay_broadcastTwostepSimple> bcast);
   td::actor::Task<> process_broadcast(adnl::AdnlNodeIdShort message_from,
                                       tl_object_ptr<ton_api::overlay_broadcastTwostepFec> bcast);
+  td::actor::Task<> process_broadcast(adnl::AdnlNodeIdShort message_from,
+                                      tl_object_ptr<ton_api::overlay_broadcastTwostepFecBundle> bcast);
 
   td::Status validate_peer_certificate(const adnl::AdnlNodeIdShort &node, const OverlayMemberCertificate &cert,
                                        bool received_from_node = false);

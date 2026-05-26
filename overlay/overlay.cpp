@@ -279,6 +279,15 @@ td::actor::Task<> OverlayImpl::process_broadcast(adnl::AdnlNodeIdShort message_f
   co_return {};
 }
 
+td::actor::Task<> OverlayImpl::process_broadcast(adnl::AdnlNodeIdShort message_from,
+                                                 tl_object_ptr<ton_api::overlay_broadcastTwostepFecBundle> bcast) {
+  if (opts_.twostep_broadcast_sender_.empty()) {
+    co_return td::Status::Error("twostep broadcasts are not enabled");
+  }
+  co_await broadcasts_twostep_.process_broadcast(this, message_from, std::move(bcast));
+  co_return {};
+}
+
 void OverlayImpl::receive_message(adnl::AdnlNodeIdShort src, tl_object_ptr<ton_api::overlay_messageExtra> extra,
                                   td::BufferSlice data) {
   if (!check_src_peer(src, extra ? extra->certificate_.get() : nullptr)) {
@@ -657,6 +666,11 @@ void OverlayImpl::broadcast_twostep_signed_simple(BroadcastTwostepDataSimple &&d
 void OverlayImpl::broadcast_twostep_signed_fec(BroadcastTwostepDataFec &&data,
                                                td::Result<std::pair<td::BufferSlice, PublicKey>> &&R) {
   broadcasts_twostep_.signed_fec(this, std::move(data), std::move(R));
+}
+
+void OverlayImpl::broadcast_twostep_signed_fec_bundle(BroadcastTwostepDataFecBundle &&data,
+                                                      td::Result<std::pair<td::BufferSlice, PublicKey>> &&R) {
+  broadcasts_twostep_.signed_fec_bundle(this, std::move(data), std::move(R));
 }
 
 void OverlayImpl::deliver_broadcast(PublicKeyHash source, td::BufferSlice data, td::BufferSlice extra) {

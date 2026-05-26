@@ -41,6 +41,7 @@ class OverlayImpl;
 struct BroadcastTwostep;
 struct BroadcastTwostepDataSimple;
 struct BroadcastTwostepDataFec;
+struct BroadcastTwostepDataFecBundle;
 
 class BroadcastsTwostep {
  public:
@@ -51,10 +52,14 @@ class BroadcastsTwostep {
                      td::Result<std::pair<td::BufferSlice, PublicKey>> &&R);
   void signed_fec(OverlayImpl *overlay, BroadcastTwostepDataFec &&data,
                   td::Result<std::pair<td::BufferSlice, PublicKey>> &&R);
+  void signed_fec_bundle(OverlayImpl *overlay, BroadcastTwostepDataFecBundle &&data,
+                         td::Result<std::pair<td::BufferSlice, PublicKey>> &&R);
   td::actor::Task<> process_broadcast(OverlayImpl *overlay, adnl::AdnlNodeIdShort src_peer_id,
                                       tl_object_ptr<ton_api::overlay_broadcastTwostepSimple> broadcast);
   td::actor::Task<> process_broadcast(OverlayImpl *overlay, adnl::AdnlNodeIdShort src_peer_id,
                                       tl_object_ptr<ton_api::overlay_broadcastTwostepFec> broadcast);
+  td::actor::Task<> process_broadcast(OverlayImpl *overlay, adnl::AdnlNodeIdShort src_peer_id,
+                                      tl_object_ptr<ton_api::overlay_broadcastTwostepFecBundle> broadcast);
   void gc(OverlayImpl *overlay);
 
   void init_sender(td::actor::ActorId<adnl::AdnlSenderInterface> sender) {

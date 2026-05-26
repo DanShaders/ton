@@ -9,3 +9,15 @@ target_link_libraries(bench-broadcast-twostep PRIVATE
     dht
     keyring
 )
+
+add_executable(bench-quic-throughput bench-quic-throughput.cpp)
+target_link_libraries(bench-quic-throughput PRIVATE
+    overlay
+    tdutils
+    tdactor
+    adnl
+    quic
+    tl_api
+    dht
+    keyring
+)
