@@ -238,11 +238,16 @@ struct QuicConnectionPImpl {
   td::SecureString local_pub_key_;
 
   struct OutboundStreamState {
-    td::ChainBufferWriter writer_;
-    td::ChainBufferReader reader_{writer_.extract_reader()};
-    td::ChainBufferReader pin_{reader_.clone()};
-
-    uint64_t acked_prefix{};
+    // The new wire format guarantees exactly one buffer_stream() call per
+    // stream (whole message + fin), so we don't need a chain buffer — a
+    // single owned BufferSlice plus offset cursors is enough. The 4-byte
+    // length prefix lives outside the BufferSlice to avoid a 1.2 MiB memcpy
+    // for the prepend.
+    uint8_t prefix_[4]{};
+    td::BufferSlice data_;
+    uint32_t total_ = 0;     // 0 means buffer_stream hasn't been called yet
+    uint32_t sent_pos_ = 0;  // bytes ngtcp2 has consumed for tx (0..total_)
+    uint32_t acked_pos_ = 0; // bytes the peer has acked (<= sent_pos_)
 
     bool is_blocked = false;
     bool is_write_closed = false;
@@ -250,6 +255,22 @@ struct QuicConnectionPImpl {
     bool fin_submitted = false;
     bool fin_acked = false;
     bool in_ready_queue = false;
+
+    // Returns the slice of pending (not-yet-handed-to-ngtcp2) bytes for the
+    // first iov entry. Second iov entry follows when prefix and data straddle.
+    void unsent_vecs(std::vector<ngtcp2_vec>& out) const {
+      out.clear();
+      uint32_t pos = sent_pos_;
+      if (pos < 4) {
+        out.push_back({const_cast<uint8_t*>(prefix_ + pos), static_cast<size_t>(4 - pos)});
+        pos = 4;
+      }
+      if (pos < total_) {
+        uint32_t data_off = pos - 4;
+        out.push_back({reinterpret_cast<uint8_t*>(const_cast<char*>(data_.data() + data_off)),
+                       static_cast<size_t>(total_ - pos)});
+      }
+    }
   };
 
   openssl_ptr<SSL_CTX, &SSL_CTX_free> ssl_ctx_;

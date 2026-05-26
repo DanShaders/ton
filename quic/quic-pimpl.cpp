@@ -412,17 +412,11 @@ td::Status QuicConnectionPImpl::init_quic_server(const ServerInitialInfo& initia
 }
 
 void QuicConnectionPImpl::build_unsent_vecs(std::vector<ngtcp2_vec>& out, OutboundStreamState& st) {
-  out.clear();
-  auto it = st.reader_.clone();
-  while (!it.empty()) {
-    auto head = it.prepare_read();
-    out.push_back({.base = const_cast<td::uint8*>(head.ubegin()), .len = head.size()});
-    it.confirm_read(head.size());
-  }
+  st.unsent_vecs(out);
 }
 
 bool QuicConnectionPImpl::is_stream_ready(const OutboundStreamState& st) {
-  return !st.is_blocked && !st.is_write_closed && (!st.reader_.empty() || st.fin_pending);
+  return !st.is_blocked && !st.is_write_closed && (st.sent_pos_ < st.total_ || st.fin_pending);
 }
 
 void QuicConnectionPImpl::mark_stream_ready(QuicStreamID sid, OutboundStreamState& st) {
@@ -498,7 +492,7 @@ void QuicConnectionPImpl::prepare_stream_write(QuicStreamID sid, bool padding, S
 
   auto& st = it->second;
 
-  ctx.unsent_before = st.reader_.size();
+  ctx.unsent_before = st.total_ - st.sent_pos_;
   build_unsent_vecs(datav, st);
 
   if (st.fin_pending) {
@@ -517,7 +511,7 @@ void QuicConnectionPImpl::finish_stream_write(QuicStreamID sid, const StreamWrit
   auto& st = it->second;
 
   if (pdatalen > 0) {
-    st.reader_.advance(pdatalen);
+    st.sent_pos_ += static_cast<uint32_t>(pdatalen);
   }
 
   if ((ctx.flags & NGTCP2_WRITE_STREAM_FLAG_FIN) != 0 && pdatalen >= 0) {
@@ -707,13 +701,14 @@ td::Status QuicConnectionPImpl::buffer_stream(QuicStreamID sid, td::Slice prefix
   if (st.fin_pending || st.fin_submitted) {
     return td::Status::Error("stream already closed");
   }
-  if (!prefix.empty()) {
-    // Small (4-byte) append — copied into the writer's reserved tail.
-    st.writer_.append(prefix);
-  }
-  st.writer_.append(std::move(data));
-  st.reader_.sync_with_writer();
-  st.pin_.sync_with_writer();
+  // The simplified OutboundStreamState supports exactly one buffer_stream
+  // call per stream — the full message goes in here with fin=true. This
+  // matches the new wire format (4-byte length prefix + payload, single send).
+  CHECK(st.total_ == 0);
+  CHECK(prefix.size() == 4);
+  std::memcpy(st.prefix_, prefix.data(), 4);
+  st.data_ = std::move(data);
+  st.total_ = static_cast<uint32_t>(4 + st.data_.size());
   if (fin) {
     st.fin_pending = true;
   }
@@ -726,8 +721,8 @@ QuicConnectionStats QuicConnectionPImpl::get_stats() {
   ngtcp2_conn_get_conn_info(conn(), &info);
   size_t bytes_unacked = 0, bytes_unsent = 0;
   for (auto& [_, stream] : streams_) {
-    bytes_unacked += stream.pin_.size();
-    bytes_unsent += stream.reader_.size();
+    bytes_unacked += stream.sent_pos_ - stream.acked_pos_;
+    bytes_unsent += stream.total_ - stream.sent_pos_;
   }
   return {
       .bytes_rx = static_cast<int64_t>(info.bytes_recv),
@@ -853,10 +848,9 @@ int QuicConnectionPImpl::on_acked_stream_data_offset(int64_t stream_id, uint64_t
   }
   auto& st = it->second;
 
-  LOG_CHECK(offset == st.acked_prefix) << "acked_stream_data_offset gap for stream " << stream_id << ": got " << offset
-                                       << " expected " << st.acked_prefix;
-  st.acked_prefix = offset + datalen;
-  st.pin_.advance(datalen);
+  LOG_CHECK(offset == st.acked_pos_)
+      << "acked_stream_data_offset gap for stream " << stream_id << ": got " << offset << " expected " << st.acked_pos_;
+  st.acked_pos_ = static_cast<uint32_t>(offset + datalen);
 
   if (datalen == 0) {
     CHECK(st.fin_submitted);
