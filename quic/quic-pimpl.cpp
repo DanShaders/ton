@@ -619,7 +619,7 @@ td::Result<QuicStreamID> QuicConnectionPImpl::open_stream() {
   return sid;
 }
 
-td::Status QuicConnectionPImpl::buffer_stream(QuicStreamID sid, td::BufferSlice data, bool fin) {
+td::Status QuicConnectionPImpl::buffer_stream(QuicStreamID sid, td::Slice prefix, td::BufferSlice data, bool fin) {
   auto it = streams_.find(sid);
   if (it == streams_.end()) {
     return td::Status::Error("stream not opened");
@@ -627,6 +627,10 @@ td::Status QuicConnectionPImpl::buffer_stream(QuicStreamID sid, td::BufferSlice 
   auto& st = it->second;
   if (st.fin_pending || st.fin_submitted) {
     return td::Status::Error("stream already closed");
+  }
+  if (!prefix.empty()) {
+    // Small (4-byte) append — copied into the writer's reserved tail.
+    st.writer_.append(prefix);
   }
   st.writer_.append(std::move(data));
   st.reader_.sync_with_writer();
@@ -734,12 +738,15 @@ int QuicConnectionPImpl::on_handshake_completed() {
 }
 
 int QuicConnectionPImpl::on_recv_stream_data(uint32_t flags, int64_t stream_id, td::Slice data) {
+  // Zero-copy at this boundary: hand the slice directly to the callback. The
+  // callback owns the lifetime decision (copy into a per-stream growable
+  // buffer in PImplCallback).
   Callback::StreamDataEvent event{
-      .sid = stream_id, .data = td::BufferSlice{data}, .fin = (flags & NGTCP2_STREAM_DATA_FLAG_FIN) != 0};
+      .sid = stream_id, .data = data, .fin = (flags & NGTCP2_STREAM_DATA_FLAG_FIN) != 0};
 
   ngtcp2_conn_extend_max_offset(conn(), data.size());
 
-  auto status = callback_->on_stream_data(std::move(event));
+  auto status = callback_->on_stream_data(event);
   if (status.is_error()) {
     shutdown_stream(stream_id);
     return 0;

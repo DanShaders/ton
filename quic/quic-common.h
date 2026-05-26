@@ -3,6 +3,9 @@
 #include <compare>
 #include <cstdint>
 #include <cstring>
+#include <memory>
+#include <type_traits>
+#include <utility>
 
 #include "td/utils/Random.h"
 #include "td/utils/Slice.h"
@@ -12,6 +15,45 @@
 #include "td/utils/port/IPAddress.h"
 
 namespace ton::quic {
+
+// Minimal move-only std::function. std::function requires copy-constructible
+// callables; we need to capture move-only types (td::Promise, td::BufferSlice,
+// td::Ed25519::PrivateKey). std::move_only_function is C++23.
+class UniqueFn {
+ public:
+  UniqueFn() = default;
+  template <class F>
+    requires(!std::is_same_v<std::decay_t<F>, UniqueFn>)
+  UniqueFn(F&& f) : impl_(std::make_unique<Impl<std::decay_t<F>>>(std::forward<F>(f))) {
+  }
+  UniqueFn(UniqueFn&&) noexcept = default;
+  UniqueFn& operator=(UniqueFn&&) noexcept = default;
+  void operator()() {
+    impl_->call();
+  }
+  bool empty() const {
+    return !impl_;
+  }
+
+ private:
+  struct Base {
+    virtual ~Base() = default;
+    virtual void call() = 0;
+  };
+  template <class F>
+  struct Impl final : Base {
+    explicit Impl(F&& f) : f_(std::move(f)) {
+    }
+    explicit Impl(const F& f) : f_(f) {
+    }
+    void call() override {
+      f_();
+    }
+    F f_;
+  };
+  std::unique_ptr<Base> impl_;
+};
+
 using QuicStreamID = int64_t;
 
 struct QuicConnectionStats {

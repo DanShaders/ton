@@ -135,8 +135,12 @@ class QuicHttpServer : public td::actor::Actor {
     const auto &stored = responses_.back();
 
     LOG(INFO) << "request finished, replying on stream " << sid;
-    td::actor::send_closure(server_.get(), &ton::quic::QuicServer::send_stream_data, cid, sid, td::BufferSlice(stored));
-    td::actor::send_closure(server_.get(), &ton::quic::QuicServer::send_stream_end, cid, sid);
+    // send_stream_data + send_stream_end have been removed; send the whole
+    // response in a single send_stream call (the worker length-prefixes it).
+    td::actor::send_closure(server_.get(), &ton::quic::QuicServer::send_stream, cid,
+                            std::variant<ton::quic::QuicStreamID, ton::quic::StreamOptions>{sid},
+                            td::BufferSlice(stored), true,
+                            td::Promise<ton::quic::QuicStreamID>([](td::Result<ton::quic::QuicStreamID>) {}));
 
     while (responses_.size() > 1024) {
       responses_.pop_front();

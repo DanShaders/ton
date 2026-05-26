@@ -28,16 +28,19 @@ class QuicSender::ServerCallback final : public QuicServer::Callback {
   explicit ServerCallback(td::actor::ActorId<QuicSender> sender) : sender_(sender) {
   }
 
+  void set_server(td::actor::ActorId<QuicServer> server) {
+    server_ = server;
+  }
+
   td::Status on_connected(QuicConnectionId cid, td::SecureString local_public_key, td::SecureString peer_public_key,
                           bool is_outbound) override {
-    auto server = td::actor::actor_dynamic_cast<QuicServer>(td::actor::actor_id());
-    CHECK(!server.empty());
+    CHECK(!server_.empty());
     TRY_RESULT(peer_id, parse_peer_id(peer_public_key));
     TRY_RESULT(local_id, parse_peer_id(local_public_key));
     auto &conn = connections_[cid];
     conn.local_id = local_id;
     conn.peer_id = peer_id;
-    td::actor::send_closure(sender_, &QuicSender::on_connected, server, cid, local_id, peer_id, is_outbound);
+    td::actor::send_closure(sender_, &QuicSender::on_connected, server_, cid, local_id, peer_id, is_outbound);
     return td::Status::OK();
   }
 
@@ -160,6 +163,7 @@ class QuicSender::ServerCallback final : public QuicServer::Callback {
   };
 
   td::actor::ActorId<QuicSender> sender_;
+  td::actor::ActorId<QuicServer> server_;
 
   struct Connection {
     adnl::AdnlNodeIdShort local_id;
@@ -269,6 +273,7 @@ QuicSender::QuicSender(td::actor::ActorId<adnl::AdnlPeerTable> adnl, td::actor::
 }
 
 void QuicSender::send_message(adnl::AdnlNodeIdShort src, adnl::AdnlNodeIdShort dst, td::BufferSlice data) {
+  LOG(DEBUG) << "QUIC_TRACE send_message_enter src=" << src << " dst=" << dst << " bytes=" << data.size();
   send_message_coro(src, dst, std::move(data)).start_immediate().detach("quic:send_message");
 }
 
@@ -396,8 +401,12 @@ td::actor::Task<td::Unit> QuicSender::send_message_coro_inner(adnl::AdnlNodeIdSh
                                                               td::BufferSlice data) {
   auto conn = co_await find_or_create_connection({src, dst});
   td::BufferSlice wire_data = create_serialize_tl_object<ton_api::quic_message>(std::move(data));
-  co_await td::actor::ask(conn->server, &QuicServer::send_stream, conn->cid, StreamOptions{get_peer_mtu(src, dst)},
+  size_t wire_size = wire_data.size();
+  LOG(DEBUG) << "QUIC_TRACE send_stream_enter src=" << src << " dst=" << dst << " bytes=" << wire_size;
+  co_await td::actor::ask(conn->server, &QuicServer::send_stream, conn->cid,
+                          std::variant<QuicStreamID, StreamOptions>{StreamOptions{get_peer_mtu(src, dst)}},
                           std::move(wire_data), true);
+  LOG(DEBUG) << "QUIC_TRACE send_stream_done  src=" << src << " dst=" << dst << " bytes=" << wire_size;
   co_return td::Unit{};
 }
 
@@ -421,7 +430,8 @@ td::actor::Task<td::BufferSlice> QuicSender::send_query_coro(adnl::AdnlNodeIdSho
   auto [future, answer_promise] = td::actor::StartedTask<td::BufferSlice>::make_bridge();
   CHECK(conn->responses.emplace(stream_id, std::move(answer_promise)).second);
   conn = nullptr;  // don't keep connection, it may disconnect during our wait
-  co_await td::actor::ask(server, &QuicServer::send_stream, cid, stream_id, std::move(wire_data), true);
+  co_await td::actor::ask(server, &QuicServer::send_stream, cid,
+                          std::variant<QuicStreamID, StreamOptions>{stream_id}, std::move(wire_data), true);
   co_return co_await std::move(future);
 }
 
@@ -446,9 +456,12 @@ td::actor::Task<> QuicSender::add_local_id_coro(adnl::AdnlNodeIdShort local_id) 
   if (auto it = servers_by_port_.find(port); it != servers_by_port_.end()) {
     server = it->second.get();
   } else {
-    auto owned = co_await QuicServer::create(port, std::make_unique<ServerCallback>(actor_id(this)),
-                                             get_local_id_mtu(local_id), "ton", "0.0.0.0", server_options_);
+    auto cb = std::make_unique<ServerCallback>(actor_id(this));
+    auto* cb_raw = cb.get();
+    auto owned = co_await QuicServer::create(port, std::move(cb), get_local_id_mtu(local_id), "ton", "0.0.0.0",
+                                             server_options_);
     server = owned.get();
+    cb_raw->set_server(server);
     servers_by_port_[port] = std::move(owned);
   }
 
@@ -523,8 +536,8 @@ td::actor::Task<td::Unit> QuicSender::init_connection_inner(AdnlPath path, std::
 
   auto server = server_iter->second;
   auto sni = compute_sni_name(path.second);
-  auto connection_id = co_await ask(server, &QuicServer::connect, peer_host, peer_port, std::move(client_key),
-                                    td::Slice("ton"), td::Slice(sni))
+  auto connection_id = co_await ask(server, &QuicServer::connect, std::string(peer_host), peer_port,
+                                    std::move(client_key), std::string("ton"), std::move(sni))
                            .trace("connect");
   conn->cid = connection_id;
   conn->path = path;
@@ -610,6 +623,10 @@ void QuicSender::on_stream_complete(QuicConnectionId cid, QuicStreamID stream_id
     return;
   }
   auto connection = it->second;
+  if (r_data.is_ok()) {
+    LOG(DEBUG) << "QUIC_TRACE stream_complete local=" << connection->path.first << " peer=" << connection->path.second
+                 << " sid=" << stream_id << " bytes=" << r_data.ok().size();
+  }
 
   if (r_data.is_error()) {
     auto resp_it = connection->responses.find(stream_id);
@@ -690,8 +707,9 @@ void QuicSender::on_request(std::shared_ptr<Connection> connection, QuicStreamID
   td::actor::send_closure(adnl_, &adnl::AdnlPeerTable::deliver, connection->path.second, connection->path.first,
                           std::move(message.data_));
   // TODO: use unidirectional stream, so there will be no need to process result
-  td::actor::send_closure(connection->server, &QuicServer::send_stream, connection->cid, stream_id, td::BufferSlice{},
-                          true);
+  td::actor::send_closure(connection->server, &QuicServer::send_stream, connection->cid,
+                          std::variant<QuicStreamID, StreamOptions>{stream_id}, td::BufferSlice{}, true,
+                          td::Promise<QuicStreamID>([](td::Result<QuicStreamID>) {}));
 }
 
 td::actor::Task<> QuicSender::on_inbound_query(std::shared_ptr<Connection> connection, QuicStreamID stream_id,
@@ -699,8 +717,9 @@ td::actor::Task<> QuicSender::on_inbound_query(std::shared_ptr<Connection> conne
   auto answer = co_await td::actor::ask(adnl_, &adnl::AdnlPeerTable::deliver_query, connection->path.second,
                                         connection->path.first, std::move(query));
   td::BufferSlice wire_data = create_serialize_tl_object<ton_api::quic_answer>(std::move(answer));
-  td::actor::send_closure(connection->server, &QuicServer::send_stream, connection->cid, stream_id,
-                          std::move(wire_data), true);
+  td::actor::send_closure(connection->server, &QuicServer::send_stream, connection->cid,
+                          std::variant<QuicStreamID, StreamOptions>{stream_id}, std::move(wire_data), true,
+                          td::Promise<QuicStreamID>([](td::Result<QuicStreamID>) {}));
   co_return td::Unit{};
 }
 

@@ -84,15 +84,17 @@ class QuicTester : public td::actor::Actor {
       std::exit(1);
     }
 
-    send_closure(server_, &ton::quic::QuicServer::connect, host_.as_slice(), port_, client_key_copy_r.move_as_ok(),
-                 alpn_.as_slice(), td::Slice{});
+    send_closure(server_, &ton::quic::QuicServer::connect, host_.as_slice().str(), port_,
+                 client_key_copy_r.move_as_ok(), alpn_.as_slice().str(), std::string{},
+                 td::Promise<ton::quic::QuicConnectionId>([](td::Result<ton::quic::QuicConnectionId>) {}));
   }
 
   void on_connected(ton::quic::QuicConnectionId cid) {
     LOG(INFO) << "sending request";
     send_closure(server_, &ton::quic::QuicServer::send_stream, cid,
                  std::variant<ton::quic::QuicStreamID, ton::quic::StreamOptions>{ton::quic::StreamOptions{}},
-                 td::BufferSlice("GET /\r\n"), true);
+                 td::BufferSlice("GET /\r\n"), true,
+                 td::Promise<ton::quic::QuicStreamID>([](td::Result<ton::quic::QuicStreamID>) {}));
   }
 
   void on_closed(ton::quic::QuicConnectionId cid) {

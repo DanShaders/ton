@@ -154,7 +154,9 @@ struct QuicConnectionPImpl {
     };
     struct StreamDataEvent {
       QuicStreamID sid = 0;
-      td::BufferSlice data;
+      // Borrowed view into ngtcp2's receive buffer. Only valid for the duration
+      // of on_stream_data(); callbacks that need to retain the data MUST copy.
+      td::Slice data;
       bool fin = false;
     };
 
@@ -201,7 +203,10 @@ struct QuicConnectionPImpl {
   void set_stream_receive_credit_from_max_size(QuicStreamID sid, td::uint64 max_size);
 
   [[nodiscard]] td::Result<QuicStreamID> open_stream();
-  [[nodiscard]] td::Status buffer_stream(QuicStreamID sid, td::BufferSlice data, bool fin);
+  // `prefix` is appended into the stream buffer before `data` (cheap small copy);
+  // the worker uses this to insert a 4-byte length header at the start of each
+  // logical message so the receiver can pre-size its buffer exactly.
+  [[nodiscard]] td::Status buffer_stream(QuicStreamID sid, td::Slice prefix, td::BufferSlice data, bool fin);
   [[nodiscard]] ngtcp2_conn_info get_conn_info() const;
   [[nodiscard]] size_t get_last_packet_streams() const {
     return last_packet_streams_;
