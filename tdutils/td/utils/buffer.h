@@ -370,7 +370,7 @@ struct ChainBufferNode {
     return WriterPtr(ptr);
   }
   static ReaderPtr make_reader_ptr(ChainBufferNode *ptr) {
-    ptr->ref_cnt_.fetch_add(1, std::memory_order_relaxed);
+    ptr->ref_cnt_.fetch_add(1, std::memory_order_acq_rel);
     return ReaderPtr(ptr);
   }
 

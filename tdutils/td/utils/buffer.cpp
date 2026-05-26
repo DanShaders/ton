@@ -16,12 +16,9 @@
 
     Copyright 2017-2020 Telegram Systems LLP
 */
-#include <array>
 #include <cstddef>
 #include <new>
-#include <vector>
 
-#include "td/utils/SpinLock.h"
 #include "td/utils/buffer.h"
 #include "td/utils/port/thread_local.h"
 
@@ -33,47 +30,6 @@
 #endif
 
 namespace td {
-
-namespace {
-// Prototype-only: pool large BufferRaws by size bucket to avoid the page-fault
-// tax from constantly allocating fresh OS pages. Same-process worker threads
-// hand BufferSlices between each other (alloc on QUIC worker, free on actor),
-// so the pool has to be cross-thread safe — single SpinLock per bucket is
-// cheap relative to the page faults we're avoiding (~3% of receiver thread).
-//
-// Round size up to nearest power of two starting at kBucketMinShift (= 16 KiB),
-// so a 1.2 MiB receive buffer always reuses the 2 MiB bucket.
-constexpr size_t kBucketMinShift = 14;  // 16 KiB
-constexpr size_t kBucketCount = 16;     // up to 2^(14+15) = 512 MiB
-constexpr size_t kPerBucketCap = 1024;  // large enough to keep ~all in-flight
-                                        // 2 MiB buffers cached between messages
-
-struct BufferRawBucketPool {
-  SpinLock lock;
-  std::vector<char *> free_list;
-};
-
-BufferRawBucketPool &bucket(size_t shift) {
-  static std::array<BufferRawBucketPool, kBucketCount> pools;
-  return pools[shift - kBucketMinShift];
-}
-
-// Returns SIZE_MAX if size is too small to pool. Otherwise returns the
-// shift index (so pool size = 1 << shift).
-size_t bucket_shift_for(size_t data_size) {
-  if (data_size < (size_t(1) << kBucketMinShift)) {
-    return SIZE_MAX;
-  }
-  size_t shift = kBucketMinShift;
-  while ((size_t(1) << shift) < data_size) {
-    ++shift;
-    if (shift >= kBucketMinShift + kBucketCount) {
-      return SIZE_MAX;  // too big — skip the pool
-    }
-  }
-  return shift;
-}
-}  // namespace
 
 TD_THREAD_LOCAL BufferAllocator::BufferRawTls *BufferAllocator::buffer_raw_tls;  // static zero-initialized
 
@@ -121,70 +77,33 @@ BufferAllocator::ReaderPtr BufferAllocator::create_reader_fast(size_t size) {
     buffer_raw_tls->buffer_raw = std::unique_ptr<BufferRaw, BufferAllocator::BufferRawDeleter>(buffer_raw);
   }
   buffer_raw->end_.fetch_add(size, std::memory_order_relaxed);
-  buffer_raw->ref_cnt_.fetch_add(1, std::memory_order_relaxed);
+  buffer_raw->ref_cnt_.fetch_add(1, std::memory_order_acq_rel);
   return ReaderPtr(buffer_raw);
 }
 
 BufferAllocator::ReaderPtr BufferAllocator::create_reader(const WriterPtr &raw) {
   raw->was_reader_ = true;
-  raw->ref_cnt_.fetch_add(1, std::memory_order_relaxed);
+  raw->ref_cnt_.fetch_add(1, std::memory_order_acq_rel);
   return ReaderPtr(raw.get());
 }
 
 BufferAllocator::ReaderPtr BufferAllocator::create_reader(const ReaderPtr &raw) {
-  raw->ref_cnt_.fetch_add(1, std::memory_order_relaxed);
+  raw->ref_cnt_.fetch_add(1, std::memory_order_acq_rel);
   return ReaderPtr(raw.get());
 }
 
 void BufferAllocator::dec_ref_cnt(BufferRaw *ptr) {
-  // Standard refcount pattern: release on dec, acquire fence before destroy.
-  // Cheaper than acq_rel on every decrement.
-  int left = ptr->ref_cnt_.fetch_sub(1, std::memory_order_release);
+  int left = ptr->ref_cnt_.fetch_sub(1, std::memory_order_acq_rel);
   if (left == 1) {
-    std::atomic_thread_fence(std::memory_order_acquire);
-    size_t data_size = ptr->data_size_;
-    ptr->~BufferRaw();
-    size_t shift = bucket_shift_for(data_size);
-    if (shift != SIZE_MAX && data_size == (size_t(1) << shift)) {
-      auto &pool = bucket(shift);
-      auto lk = pool.lock.lock();
-      if (pool.free_list.size() < kPerBucketCap) {
-        pool.free_list.push_back(reinterpret_cast<char *>(ptr));
-        return;
-      }
-    }
-    auto buf_size = max(sizeof(BufferRaw), TD_OFFSETOF(BufferRaw, data_) + data_size);
+    auto buf_size = max(sizeof(BufferRaw), TD_OFFSETOF(BufferRaw, data_) + ptr->data_size_);
     buffer_mem -= buf_size;
-    delete[] reinterpret_cast<char *>(ptr);
+    ptr->~BufferRaw();
+    delete[] ptr;
   }
 }
 
 BufferRaw *BufferAllocator::create_buffer_raw(size_t size) {
   size = (size + 7) & -8;
-
-  // Try to satisfy from the bucket pool (round up to power-of-two bucket).
-  size_t shift = bucket_shift_for(size);
-  if (shift != SIZE_MAX) {
-    size_t bucket_size = size_t(1) << shift;
-    auto &pool = bucket(shift);
-    char *mem = nullptr;
-    {
-      auto lk = pool.lock.lock();
-      if (!pool.free_list.empty()) {
-        mem = pool.free_list.back();
-        pool.free_list.pop_back();
-      }
-    }
-    if (mem != nullptr) {
-      auto *buffer_raw = reinterpret_cast<BufferRaw *>(mem);
-      // Memory already counted in buffer_mem at original allocation; don't
-      // double-count on reuse.
-      return new (buffer_raw) BufferRaw(bucket_size);
-    }
-    // Pool empty — fall through and allocate at bucket size so the next free
-    // returns the right shape.
-    size = bucket_size;
-  }
 
   auto buf_size = TD_OFFSETOF(BufferRaw, data_) + size;
   if (buf_size < sizeof(BufferRaw)) {

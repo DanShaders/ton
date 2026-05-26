@@ -79,6 +79,7 @@ endif()
 option(TON_USE_ROCKSDB "Use \"ON\" to enable RocksDb." ${NOT_TON_ONLY_TONLIB})
 option(TON_USE_ABSEIL "Use \"ON\" to enable Abseil." ${NOT_TON_ONLY_TONLIB})
 option(TON_USE_JEMALLOC "Use \"ON\" to enable JeMalloc." OFF)
+option(TON_USE_MIMALLOC "Use \"ON\" to enable mimalloc." OFF)
 #END internal
 
 option(TONLIB_ENABLE_JNI "Use \"ON\" to enable JNI-compatible TonLib API.")
@@ -375,6 +376,12 @@ endif()
 
 if (TON_USE_JEMALLOC)
   find_package(jemalloc REQUIRED)
+endif()
+
+if (TON_USE_MIMALLOC)
+  find_library(MIMALLOC_LIBRARY NAMES mimalloc REQUIRED)
+  find_path(MIMALLOC_INCLUDE_DIR mimalloc.h REQUIRED)
+  message(STATUS "Using mimalloc ${MIMALLOC_LIBRARY}")
 endif()
 
 if (NIX)
