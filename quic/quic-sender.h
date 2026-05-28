@@ -45,7 +45,12 @@ class QuicSender : public adnl::AdnlSenderEx, public virtual metrics::AsyncColle
     };
 
     Entry summary = {.server_stats = {.total_conns = 0}};
-    std::map<AdnlPath, Entry> per_path;
+    // Keyed by (path, is_outbound). For the same peer pair (local, peer) we
+    // can hold *two* live connections — one we initiated (is_outbound=true)
+    // and one the peer initiated to us (is_outbound=false). Without the
+    // direction bit the second overwrites the first in this map, hiding
+    // half the traffic; keep both rows.
+    std::map<std::pair<AdnlPath, bool>, Entry> per_path;
 
     [[nodiscard]] std::vector<metrics::MetricFamily> dump() const;
   };

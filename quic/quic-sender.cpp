@@ -323,10 +323,12 @@ std::vector<metrics::MetricFamily> QuicSender::Stats::Entry::dump() const {
 std::vector<metrics::MetricFamily> QuicSender::Stats::dump() const {
   auto summary_set = metrics::MetricSet{.families = summary.dump()};
   auto whole_per_path_set = metrics::MetricSet{};
-  for (const auto &[path, entry] : per_path) {
+  for (const auto &[path_dir, entry] : per_path) {
+    const auto &[path, is_outbound] = path_dir;
     auto path_set = metrics::MetricSet{.families = entry.dump()};
     auto src_v = PSTRING() << path.first, dst_v = PSTRING() << path.second;
-    auto label_set = metrics::LabelSet{.labels = {{"src", src_v}, {"dst", dst_v}}};
+    auto label_set = metrics::LabelSet{
+        .labels = {{"src", src_v}, {"dst", dst_v}, {"direction", is_outbound ? "outbound" : "inbound"}}};
     whole_per_path_set = std::move(whole_per_path_set).join(std::move(path_set).label(label_set));
   }
   return std::move(summary_set).wrap("summary").join(std::move(whole_per_path_set).wrap("per_path")).families;
@@ -338,9 +340,10 @@ td::actor::Task<QuicSender::Stats> QuicSender::collect_stats() {
     auto serv_stats = co_await td::actor::ask(server, &QuicServer::collect_stats);
     stats.summary = stats.summary + Stats::Entry{.server_stats = serv_stats.summary};
     for (auto &[id, conn_stats] : serv_stats.per_conn) {
-      if (!by_cid_.contains(id))
-        continue;
-      stats.per_path[by_cid_[id]->path] = Stats::Entry{.server_stats = conn_stats};
+      auto it = by_cid_.find(id);
+      if (it == by_cid_.end()) continue;
+      stats.per_path[{it->second->path, it->second->is_outbound}] =
+          Stats::Entry{.server_stats = conn_stats};
     }
   }
   co_return stats;

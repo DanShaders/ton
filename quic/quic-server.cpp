@@ -74,6 +74,24 @@ td::Result<td::actor::ActorOwn<QuicServer>> QuicServer::create(int port, std::un
 
   TRY_RESULT(fd, td::UdpSocketFd::open(local_addr));
 
+  // Default kernel UDP buffers (~208 KB on Linux) overflow trivially under
+  // burst load — at 1 Gbps that's ~1.7 ms of buffering, less than one actor
+  // hop. Bump to whatever the kernel allows (capped by net.core.{rmem,wmem}_max,
+  // typically 4 MB). Loss inside the kernel UDP queue then shows up as
+  // ngtcp2-reported "lost" bytes, even on loopback.
+  auto rcv = fd.maximize_rcv_buffer();
+  if (rcv.is_error()) {
+    LOG(WARNING) << "QuicServer: maximize_rcv_buffer failed: " << rcv.error();
+  } else {
+    LOG(INFO) << "QuicServer: udp rcv buffer set to " << rcv.ok() << " bytes";
+  }
+  auto snd = fd.maximize_snd_buffer();
+  if (snd.is_error()) {
+    LOG(WARNING) << "QuicServer: maximize_snd_buffer failed: " << snd.error();
+  } else {
+    LOG(INFO) << "QuicServer: udp snd buffer set to " << snd.ok() << " bytes";
+  }
+
   auto name = PSTRING() << "QUIC:" << local_addr;
   return td::actor::create_actor<QuicServer>(td::actor::ActorOptions().with_name(name), std::move(fd), default_mtu,
                                              td::BufferSlice(alpn), std::move(callback), options);
