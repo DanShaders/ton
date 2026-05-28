@@ -22,6 +22,12 @@ target_link_libraries(bench-quic-throughput PRIVATE
     keyring
 )
 
+add_executable(bench-fec-split bench-fec-split.cpp)
+target_link_libraries(bench-fec-split PRIVATE
+    tdfec
+    tdutils
+)
+
 # When TON_USE_MIMALLOC=ON, link mimalloc FIRST so its malloc/free override
 # the libc ones for the QUIC benches. (For broader use, mimalloc would need
 # to be wired into every binary; here we only care about the benches.)
