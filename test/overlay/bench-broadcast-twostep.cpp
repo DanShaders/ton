@@ -11,8 +11,10 @@
  */
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -140,18 +142,38 @@ class PerfCtl {
   std::string ack_path_;
 };
 
+// One snapshot of per-connection QUIC state captured during the broadcast
+// window. We index by [(local_id, peer_id) -> sample at time t], so we can
+// dump a per-conn timeline of cwnd / bytes_sent / loss over the lifetime of
+// the one measured broadcast.
+struct ConnSample {
+  double t_ms = 0;             // ms since broadcast start
+  int64_t bytes_tx = 0;
+  int64_t bytes_rx = 0;
+  int64_t bytes_lost = 0;
+  int64_t bytes_unacked = 0;
+  double smoothed_rtt_ms = 0;  // ngtcp2 smoothed_rtt converted to ms
+};
+struct NodeSampleSeries {
+  // Keyed by "local_hex_prefix>remote_hex_prefix" so outbound and inbound for
+  // the same peer pair both show up as distinct rows.
+  std::map<std::string, std::vector<ConnSample>> by_peer;
+};
+
 // Driver actor: owns the coroutine that runs warmup + measurement.
 class Driver final : public td::actor::Actor {
  public:
   Driver(std::vector<Node> *nodes, std::vector<PerReceiver> *per_receiver, double *broadcast_start,
-         OverlayIdShort overlay, size_t payload_size, std::string db_root_base, PerfCtl perf)
+         OverlayIdShort overlay, size_t payload_size, std::string db_root_base, PerfCtl perf,
+         double sample_period_ms)
       : nodes_(nodes)
       , per_receiver_(per_receiver)
       , broadcast_start_(broadcast_start)
       , overlay_(overlay)
       , payload_size_(payload_size)
       , db_root_base_(std::move(db_root_base))
-      , perf_(std::move(perf)) {
+      , perf_(std::move(perf))
+      , sample_period_ms_(sample_period_ms) {
   }
 
   void start_up() override {
@@ -192,7 +214,8 @@ class Driver final : public td::actor::Actor {
                    (long long)stats.summary.server_stats.impl_stats.bytes_lost,
                    (long long)stats.summary.server_stats.impl_stats.open_sids,
                    (long long)stats.summary.server_stats.impl_stats.total_sids,
-                   stats.summary.server_stats.impl_stats.mean_rtt * 1000.0);
+                   // mean_rtt is ngtcp2 smoothed_rtt in nanoseconds.
+                   stats.summary.server_stats.impl_stats.mean_rtt / 1e6);
     }
     co_return {};
   }
@@ -248,6 +271,79 @@ class Driver final : public td::actor::Actor {
     co_return {};
   }
 
+  // Fire-and-forget coroutine: every `sample_period_ms_` ms snapshot
+  // per-connection QUIC stats from every node into samples_. Stops as soon
+  // as `sampling_done_` flips to true (set by measure_one_broadcast right
+  // after the last per-receiver promise resolves).
+  td::actor::Task<> sample_quic_during_broadcast() {
+    if (sample_period_ms_ <= 0) {
+      co_return {};
+    }
+    while (!sampling_done_.load(std::memory_order_acquire)) {
+      double t_ms = (td::Time::now() - *broadcast_start_) * 1000.0;
+      auto n = nodes_->size();
+      for (size_t i = 0; i < n; ++i) {
+        auto stats = co_await td::actor::ask((*nodes_)[i].quic.get(), &ton::quic::QuicSender::collect_stats);
+        for (const auto &[path_dir, entry] : stats.per_path) {
+          const auto &[path, is_outbound] = path_dir;
+          const auto &impl = entry.server_stats.impl_stats;
+          std::string peer_key = path.first.bits256_value().to_hex().substr(0, 8) + (is_outbound ? ">" : "<") +
+                                 path.second.bits256_value().to_hex().substr(0, 8);
+          samples_[i].by_peer[peer_key].push_back(ConnSample{
+              .t_ms = t_ms,
+              .bytes_tx = impl.bytes_tx,
+              .bytes_rx = impl.bytes_rx,
+              .bytes_lost = impl.bytes_lost,
+              .bytes_unacked = impl.bytes_unacked,
+              .smoothed_rtt_ms = impl.mean_rtt / 1e6,
+          });
+        }
+      }
+      co_await td::actor::coro_sleep(td::Timestamp::in(sample_period_ms_ / 1000.0));
+    }
+    co_return {};
+  }
+
+  // Print one row per (node, peer) showing how bytes_tx and bytes_lost grew
+  // across the snapshots, plus the per-window MB/s. The first sample is t≈0.
+  void dump_samples() {
+    std::fprintf(stderr, "\n# ---- node short-id map (first 8 hex chars) ----\n");
+    for (size_t i = 0; i < nodes_->size(); ++i) {
+      std::fprintf(stderr, "  node %zu = %s\n", i,
+                   (*nodes_)[i].adnl_short.bits256_value().to_hex().substr(0, 8).c_str());
+    }
+    std::fprintf(stderr, "\n# ---- QUIC per-connection timeline (one row per snapshot per pair) ----\n");
+    std::fprintf(stderr, "# %-4s %-18s %-8s %-12s %-12s %-10s %-10s %-10s\n", "node", "src>dst", "t_ms",
+                 "tx_total_B", "rx_total_B", "lost_B", "unacked_B", "rtt_ms");
+    for (size_t i = 0; i < samples_.size(); ++i) {
+      for (auto &[peer, series] : samples_[i].by_peer) {
+        for (auto &s : series) {
+          std::fprintf(stderr, "  %-4zu %-18s %-8.1f %-12lld %-12lld %-10lld %-10lld %-10.2f\n", i, peer.c_str(), s.t_ms,
+                       (long long)s.bytes_tx, (long long)s.bytes_rx, (long long)s.bytes_lost,
+                       (long long)s.bytes_unacked, s.smoothed_rtt_ms);
+        }
+      }
+    }
+    // Compact rate summary: for each (node, peer) pair show the max single-window MB/s.
+    std::fprintf(stderr, "\n# ---- max single-window tx-rate per (node, peer) ----\n");
+    std::fprintf(stderr, "# %-4s %-18s  %-12s  %-10s\n", "node", "src>dst", "max_MB_per_s", "samples");
+    for (size_t i = 0; i < samples_.size(); ++i) {
+      for (auto &[peer, series] : samples_[i].by_peer) {
+        double max_rate = 0;
+        for (size_t k = 1; k < series.size(); ++k) {
+          double dt = (series[k].t_ms - series[k - 1].t_ms) / 1000.0;
+          if (dt <= 0) continue;
+          double db = static_cast<double>(series[k].bytes_tx - series[k - 1].bytes_tx);
+          double rate_MBs = db / dt / (1024.0 * 1024.0);
+          max_rate = std::max(max_rate, rate_MBs);
+        }
+        if (series.size() >= 2) {
+          std::fprintf(stderr, "  %-4zu %-18s  %-12.1f  %zu\n", i, peer.c_str(), max_rate, series.size());
+        }
+      }
+    }
+  }
+
   td::actor::Task<> measure_one_broadcast() {
     td::BufferSlice payload(payload_size_);
     for (size_t i = 0; i < payload_size_; ++i) {
@@ -267,6 +363,9 @@ class Driver final : public td::actor::Actor {
 
     std::fprintf(stderr, "broadcasting %zu B from node 0...\n", payload_size_);
     *broadcast_start_ = td::Time::now();
+    samples_.assign(n, NodeSampleSeries{});
+    sampling_done_.store(false, std::memory_order_release);
+    auto sampler_task = sample_quic_during_broadcast().start_immediate();
     td::actor::send_closure((*nodes_)[0].overlays, &ton::overlay::Overlays::send_broadcast_fec_ex,
                             (*nodes_)[0].adnl_short, overlay_, (*nodes_)[0].adnl_short.pubkey_hash(),
                             td::uint32{0}, std::move(payload));
@@ -281,6 +380,8 @@ class Driver final : public td::actor::Actor {
       }
     }
     double finish_time = td::Time::now();
+    sampling_done_.store(true, std::memory_order_release);
+    co_await std::move(sampler_task).wrap();
 
     std::fprintf(stderr,
                  "\n# broadcast timing — %zu nodes, payload=%zu B (%.2f MB), QUIC on 127.0.0.1:%u..\n",
@@ -318,6 +419,7 @@ class Driver final : public td::actor::Actor {
     } else {
       std::fprintf(stderr, "\n# summary: delivered=0/%d (all timed out)\n", target);
     }
+    dump_samples();
     co_return {};
   }
 
@@ -328,6 +430,9 @@ class Driver final : public td::actor::Actor {
   size_t payload_size_;
   std::string db_root_base_;
   PerfCtl perf_;
+  double sample_period_ms_;
+  std::atomic<bool> sampling_done_{false};
+  std::vector<NodeSampleSeries> samples_;
 };
 
 }  // namespace
@@ -339,6 +444,7 @@ int main(int argc, char *argv[]) {
   int verbosity = 0;
   std::string perf_ctl;
   std::string perf_ack;
+  double sample_period_ms = 0;
 
   td::OptionParser p;
   p.add_option('n', "nodes", "number of overlay nodes (default 8)",
@@ -353,6 +459,9 @@ int main(int argc, char *argv[]) {
                [&](td::Slice s) { perf_ctl = s.str(); });
   p.add_option('\0', "perf-ack", "perf ack fifo path (reads ack lines)",
                [&](td::Slice s) { perf_ack = s.str(); });
+  p.add_option('\0', "sample-period-ms",
+               "if >0, sample per-conn QUIC stats every N ms during the broadcast and dump a timeline at end",
+               [&](td::Slice s) { sample_period_ms = std::stod(s.str()); });
   auto S = p.run(argc, argv);
   if (S.is_error()) {
     std::fprintf(stderr, "%s\n", S.error().message().c_str());
@@ -472,7 +581,7 @@ int main(int argc, char *argv[]) {
   // Hand off to the coroutine driver.
   scheduler.run_in_context([&] {
     td::actor::create_actor<Driver>("driver", &nodes, &per_receiver, &broadcast_start_time, overlay_short, payload_size,
-                                    db_root_base, PerfCtl{perf_ctl, perf_ack})
+                                    db_root_base, PerfCtl{perf_ctl, perf_ack}, sample_period_ms)
         .release();
   });
   scheduler.run();  // driver _exit(0)s when done

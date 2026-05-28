@@ -11,9 +11,12 @@ Usage:
   python3 test/overlay/render-waterfall.py bench.log [out.html]
 
 Filled rectangles span ENCODE_BEGIN→ENCODE_END (sender) and DECODE_BEGIN→DECODE_END
-(receiver) — wall-clock cost of the RaptorQ encode/decode call.
-Dots: orange = sender events (START, SEND_CHUNK), blue = receiver events (START,
-RECV_CHUNK), green = FINISH. Hover any dot for seqno / from / to.
+(receiver) — wall-clock cost of the RaptorQ encode/decode call. A second teal
+rect on the sender row shows PRECALC_BEGIN→PRECALC_END — the gauss-elim work the
+two-step optimization pushes onto a separate worker actor.
+Dots: orange = sender events (START, SEND_CHUNK, SEND_BUNDLE), blue = receiver
+events (START, RECV_CHUNK, RECV_BUNDLE), green = FINISH. Hover any dot for
+seqno / from / to.
 """
 
 import re
@@ -101,12 +104,19 @@ for evs in per_node:
     enc_end = find_one(evs, event="ENCODE_END")
     dec_begin = find_one(evs, event="DECODE_BEGIN")
     dec_end = find_one(evs, event="DECODE_END")
+    pre_begin = find_one(evs, event="PRECALC_BEGIN")
+    pre_end = find_one(evs, event="PRECALC_END")
     if start_send or enc_begin:
         s["role"] = "sender"
         if enc_begin and enc_end:
             s["work_start"] = enc_begin["t_ms"]
             s["work_end"] = enc_end["t_ms"]
             s["work_label"] = "encode"
+        # Precalc runs on a separate worker actor; capture it so it renders
+        # as a second rect on the sender row, parallel to the ENCODE band.
+        if pre_begin and pre_end:
+            s["precalc_start"] = pre_begin["t_ms"]
+            s["precalc_end"] = pre_end["t_ms"]
     if start_recv:
         s["role"] = "receiver"
         if dec_begin and dec_end:
@@ -136,15 +146,20 @@ def sx(t):
 def color_for_event(e):
     if e["event"] == "START" and e["role"] == "sender":
         return "#ffb454"
-    if e["event"] == "SEND_CHUNK":
+    if e["event"] in ("SEND_CHUNK", "SEND_BUNDLE"):
         return "#ffb454"
     if e["event"] == "START" and e["role"] == "receiver":
         return "#6aa9ff"
-    if e["event"] == "RECV_CHUNK":
+    if e["event"] in ("RECV_CHUNK", "RECV_BUNDLE"):
         return "#6aa9ff"
     if e["event"] == "FINISH":
         return "#5dd39e"
-    if e["event"] in ("ENCODE_BEGIN", "ENCODE_END", "DECODE_BEGIN", "DECODE_END"):
+    # Rect-bounded events have no dot (rects render the duration instead).
+    if e["event"] in (
+        "ENCODE_BEGIN", "ENCODE_END",
+        "DECODE_BEGIN", "DECODE_END",
+        "PRECALC_BEGIN", "PRECALC_END",
+    ):
         return None
     return "#8a93a8"
 
@@ -190,21 +205,41 @@ for i in range(n_nodes):
     )
 
 for i, s in enumerate(summaries):
-    if "work_start" not in s:
-        continue
     y_mid = PAD_T + i * ROW_H + ROW_H / 2
-    rect_y = y_mid - 9
-    rect_h = 18
-    color = "#ffb454" if s["role"] == "sender" else "#6aa9ff"
-    x1, x2 = sx(s["work_start"]), sx(s["work_end"])
-    dur = s["work_end"] - s["work_start"]
-    svg.append(
-        f'<rect x="{x1}" y="{rect_y}" width="{max(x2-x1, 2)}" height="{rect_h}" '
-        f'fill="{color}" fill-opacity="0.55" stroke="{color}" stroke-opacity="0.9"/>'
-    )
-    svg.append(
-        f'<text x="{x1+3}" y="{rect_y-3}" fill="{color}" font-size="9">{s["work_label"]} ({dur:.1f}ms)</text>'
-    )
+    has_work = "work_start" in s
+    has_precalc = "precalc_start" in s
+    # Sender row may have both encode + precalc. Halve the row when both are
+    # present so they stack instead of overdrawing.
+    if has_work and has_precalc:
+        rect_h = 9
+        work_rect_y = y_mid - 9
+        precalc_rect_y = y_mid
+    else:
+        rect_h = 18
+        work_rect_y = y_mid - 9
+        precalc_rect_y = y_mid - 9
+    if has_work:
+        color = "#ffb454" if s["role"] == "sender" else "#6aa9ff"
+        x1, x2 = sx(s["work_start"]), sx(s["work_end"])
+        dur = s["work_end"] - s["work_start"]
+        svg.append(
+            f'<rect x="{x1}" y="{work_rect_y}" width="{max(x2-x1, 2)}" height="{rect_h}" '
+            f'fill="{color}" fill-opacity="0.55" stroke="{color}" stroke-opacity="0.9"/>'
+        )
+        svg.append(
+            f'<text x="{x1+3}" y="{work_rect_y-3}" fill="{color}" font-size="9">{s["work_label"]} ({dur:.1f}ms)</text>'
+        )
+    if has_precalc:
+        color = "#5dd39e"
+        x1, x2 = sx(s["precalc_start"]), sx(s["precalc_end"])
+        dur = s["precalc_end"] - s["precalc_start"]
+        svg.append(
+            f'<rect x="{x1}" y="{precalc_rect_y}" width="{max(x2-x1, 2)}" height="{rect_h}" '
+            f'fill="{color}" fill-opacity="0.45" stroke="{color}" stroke-opacity="0.8"/>'
+        )
+        svg.append(
+            f'<text x="{x1+3}" y="{precalc_rect_y+rect_h+9}" fill="{color}" font-size="9">precalc ({dur:.1f}ms)</text>'
+        )
 
 for i, evs in enumerate(per_node):
     y = PAD_T + i * ROW_H + ROW_H / 2
@@ -230,9 +265,9 @@ lx = PAD_L
 ly = H - 4
 svg.append('<g font-size="10">')
 for color, label in [
-    ("#ffb454", "sender: START / SEND_CHUNK (filled = encode)"),
-    ("#6aa9ff", "receiver: START / RECV_CHUNK (filled = decode)"),
-    ("#5dd39e", "FINISH"),
+    ("#ffb454", "sender: START / SEND_CHUNK / SEND_BUNDLE (rect = encode)"),
+    ("#6aa9ff", "receiver: START / RECV_CHUNK / RECV_BUNDLE (rect = decode)"),
+    ("#5dd39e", "FINISH · precalc rect (worker actor)"),
 ]:
     svg.append(f'<circle cx="{lx}" cy="{ly}" r="4" fill="{color}"/>')
     svg.append(f'<text x="{lx+10}" y="{ly+3}" fill="#8a93a8">{label}</text>')

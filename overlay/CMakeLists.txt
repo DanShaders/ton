@@ -23,4 +23,8 @@ target_include_directories(overlay PUBLIC
   ${OPENSSL_INCLUDE_DIR}
 )
 target_link_libraries(overlay PRIVATE tdutils tdactor adnl tl_api dht fec)
+# TODO(danklishch): vendor BLAKE3 under third-party/ before merging. For now,
+# rely on the system libblake3 (Arch package `libblake3`) — used to hash
+# two-step broadcast bundles in place of SHA-256.
+target_link_libraries(overlay PRIVATE blake3)
 

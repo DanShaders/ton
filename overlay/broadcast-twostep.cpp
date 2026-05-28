@@ -17,6 +17,8 @@
     Copyright 2017-2020 Telegram Systems LLP
 */
 
+#include <blake3.h>
+
 #include <map>
 #include <memory>
 #include <set>
@@ -50,6 +52,50 @@ constexpr int VERBOSITY_NAME(TWOSTEP_DEBUG) = verbosity_DEBUG;
 
 static constexpr size_t FEC_MIN_BYTES = 513;
 static constexpr size_t FEC_MIN_OTHER_NODES = 5;
+
+// Hash bundle parts with BLAKE3 instead of SHA-256. BLAKE3's SIMD backend
+// runs ~5-8 GB/s on x86 vs OpenSSL's SHA-256 at ~1.85 GB/s, cutting per-bundle
+// hash cost from ~2.5 ms to ~0.5 ms for a 2.4 MB bundle. Wire format
+// unchanged (still a 32-byte digest in the same TL field). Sender and
+// receiver MUST agree; this is a breaking change wired only into the
+// twostep-bundle path.
+static td::Bits256 blake3_bits256(td::Slice data) {
+  blake3_hasher h;
+  blake3_hasher_init(&h);
+  blake3_hasher_update(&h, data.data(), data.size());
+  td::Bits256 out;
+  blake3_hasher_finalize(&h, out.as_slice().ubegin(), 32);
+  return out;
+}
+
+// FEC data_hash used in broadcast_id derivation. Instead of an extra
+// sha256(data) pass (~4 ms for 8 MB), we hash the K systematic ESIs as they
+// stream out of the encoder during immediate-bundle generation — that's
+// exactly the original data plus zero padding to K * part_size. Receiver
+// reproduces this by BLAKE3'ing R.data || zeros after decode.
+//
+// Cheap reusable zero-page for padding the last symbol.
+static constexpr std::array<uint8_t, 4096> kBlake3PadZeros{};
+
+static void blake3_padded_finish(blake3_hasher *h, size_t pad_bytes, td::Bits256 *out) {
+  while (pad_bytes > 0) {
+    size_t chunk = std::min(pad_bytes, kBlake3PadZeros.size());
+    blake3_hasher_update(h, kBlake3PadZeros.data(), chunk);
+    pad_bytes -= chunk;
+  }
+  blake3_hasher_finalize(h, out->as_slice().ubegin(), 32);
+}
+
+static td::Bits256 blake3_padded(td::Slice data, size_t k, size_t part_size) {
+  blake3_hasher h;
+  blake3_hasher_init(&h);
+  blake3_hasher_update(&h, data.data(), data.size());
+  size_t total = k * part_size;
+  size_t pad = total > data.size() ? total - data.size() : 0;
+  td::Bits256 out;
+  blake3_padded_finish(&h, pad, &out);
+  return out;
+}
 
 // PoC: split each broadcast into FEC_K_MULTIPLIER more chunks than the original
 // (N-1)/2 design. With ~8 nodes that pushes K from 3 to ~192, which lands in
@@ -108,7 +154,17 @@ struct BroadcastTwostep : td::ListNode {
   std::unique_ptr<td::raptorq::Decoder> decoder;
   bool delivered = false;
   bool rebroadcasted_part = false;
+  bool decode_dispatched = false;  // worker actor took the decoder
   std::set<td::uint32> seen_parts = {};
+  // Cached raw systematic parts (id < k) indexed by ESI. As soon as all k of
+  // them have arrived we can reconstruct the data with a pure memcpy and skip
+  // the ~20 ms FEC solver entirely. Each entry is a refcounted clone of the
+  // wire BufferSlice — practically free.
+  std::vector<td::BufferSlice> systematic_parts;
+  size_t systematic_filled = 0;
+  size_t k = 0;
+  size_t part_size = 0;
+  size_t data_size = 0;
   BroadcastTwostepDebugInfo debug;
 };
 
@@ -161,10 +217,150 @@ BroadcastsTwostep::BroadcastsTwostep() = default;
 
 BroadcastsTwostep::~BroadcastsTwostep() = default;
 
+namespace {
+
+// One bundle to be transmitted to one peer. Either contains only systematic
+// ESIs (id < K, gen_symbol just memcpys from data_) or only repair ESIs
+// (id >= K, requires precalc to have run). Mixed peer ranges are split at
+// K into two BundlePlans so we can ship the systematic half immediately.
+struct BundlePlan {
+  adnl::AdnlNodeIdShort dst;
+  size_t seqno_from;
+  size_t count;
+};
+
+// Stuff that's identical across every bundle for a single broadcast — kept
+// in one struct so the worker actor only carries one heap of state.
+struct BundleContext {
+  td::actor::ActorId<OverlayImpl> overlay_actor;
+  td::actor::ActorId<keyring::Keyring> keyring_actor;
+  PublicKeyHash send_as;
+  td::Bits256 broadcast_id;
+  td::Bits256 data_hash;
+  td::uint32 data_size;
+  td::uint32 part_size;
+  td::uint32 flags;
+  td::uint32 date;
+  adnl::AdnlNodeIdShort src;
+  td::BufferSlice extra;
+};
+
+// Generate one bundle's worth of symbols from `encoder`, hash the parts,
+// build the sign request, and dispatch to keyring. The signed-callback
+// continues into OverlayImpl::broadcast_twostep_signed_fec_bundle which
+// runs the existing serialize+send path. Returns true on success.
+bool dispatch_fec_bundle(td::raptorq::Encoder *encoder, const BundleContext &ctx, const BundlePlan &plan) {
+  td::BufferSlice parts(ctx.part_size * plan.count);
+  for (size_t j = 0; j < plan.count; ++j) {
+    td::Status S = encoder->gen_symbol(static_cast<td::uint32>(plan.seqno_from + j),
+                                       parts.as_slice().substr(j * ctx.part_size, ctx.part_size));
+    if (S.is_error()) {
+      VLOG(TWOSTEP_WARNING) << "cannot generate symbol: " << S;
+      return false;
+    }
+  }
+  td::Bits256 parts_hash = blake3_bits256(parts.as_slice());
+  td::BufferSlice to_sign = create_serialize_tl_object<ton_api::overlay_broadcastTwostepFecBundle_toSign>(
+      ctx.broadcast_id, static_cast<std::int32_t>(plan.seqno_from), td::BufferSlice(parts_hash.as_slice()));
+  BroadcastTwostepDataFecBundle passdata{
+      .broadcast_id = ctx.broadcast_id,
+      .flags = ctx.flags,
+      .date = ctx.date,
+      .src = ctx.src,
+      .dst = plan.dst,
+      .data_hash = ctx.data_hash,
+      .data_size = ctx.data_size,
+      .part_size = ctx.part_size,
+      .seqno_from = static_cast<td::uint32>(plan.seqno_from),
+      .parts = std::move(parts),
+      .extra = ctx.extra.clone(),
+  };
+  auto P = td::PromiseCreator::lambda([overlay = ctx.overlay_actor, data = std::move(passdata)](
+                                          td::Result<std::pair<td::BufferSlice, PublicKey>> R) mutable {
+    td::actor::send_closure(overlay, &OverlayImpl::broadcast_twostep_signed_fec_bundle, std::move(data), std::move(R));
+  });
+  td::actor::send_closure(ctx.keyring_actor, &keyring::Keyring::sign_add_get_public_key, ctx.send_as,
+                          std::move(to_sign), std::move(P));
+  return true;
+}
+
+// One-shot actor: owns the encoder + the bundle plans whose ESIs include
+// repair symbols. start_up() runs precalc() (the ~22 ms gauss elim) on this
+// actor's worker thread instead of the overlay's, then dispatches each
+// deferred bundle through the normal sign+send path and stops itself. By
+// the time precalc finishes, the systematic-only bundles sent from
+// BroadcastsTwostep::send have already started flying.
+class TwostepPrecalcWorker final : public td::actor::Actor {
+ public:
+  TwostepPrecalcWorker(std::unique_ptr<td::raptorq::Encoder> encoder, std::vector<BundlePlan> deferred,
+                       BundleContext ctx)
+      : encoder_(std::move(encoder)), deferred_(std::move(deferred)), ctx_(std::move(ctx)) {
+  }
+
+ private:
+  void start_up() override {
+    // Include local= so render-waterfall.py attributes these events to the
+    // sender's row. The worker actor lives outside the overlay, so the only
+    // handle to the sender's adnl id is via ctx_.src (which equals overlay's
+    // local_id since we're broadcasting from this node).
+    VLOG(TWOSTEP_INFO) << "twostep PRECALC_BEGIN sender broadcast_id=" << ctx_.broadcast_id.to_hex()
+                       << " local=" << ctx_.src;
+    encoder_->precalc();
+    VLOG(TWOSTEP_INFO) << "twostep PRECALC_END sender broadcast_id=" << ctx_.broadcast_id.to_hex()
+                       << " repair_bundles=" << deferred_.size() << " local=" << ctx_.src;
+    for (auto &plan : deferred_) {
+      dispatch_fec_bundle(encoder_.get(), ctx_, plan);
+    }
+    stop();
+  }
+
+  std::unique_ptr<td::raptorq::Encoder> encoder_;
+  std::vector<BundlePlan> deferred_;
+  BundleContext ctx_;
+};
+
+// One-shot actor that runs the FEC decoder's try_decode() off the receiver
+// actor. While it works, the receiver actor keeps draining new bundles —
+// if all K systematic parts arrive in the meantime, the fast-path in
+// process_broadcast delivers via memcpy and this worker's result is just
+// discarded.
+class TwostepDecodeWorker final : public td::actor::Actor {
+ public:
+  TwostepDecodeWorker(std::unique_ptr<td::raptorq::Decoder> decoder,
+                      td::actor::StartedTask<td::BufferSlice>::ExternalPromise promise,
+                      td::Bits256 broadcast_id, adnl::AdnlNodeIdShort local_id)
+      : decoder_(std::move(decoder))
+      , promise_(std::move(promise))
+      , broadcast_id_(broadcast_id)
+      , local_id_(local_id) {
+  }
+
+ private:
+  void start_up() override {
+    VLOG(TWOSTEP_INFO) << "twostep DECODE_BEGIN receiver broadcast_id=" << broadcast_id_.to_hex()
+                       << " local=" << local_id_;
+    auto R = decoder_->try_decode(false);
+    VLOG(TWOSTEP_INFO) << "twostep DECODE_END receiver broadcast_id=" << broadcast_id_.to_hex()
+                       << " local=" << local_id_;
+    if (R.is_error()) {
+      promise_.set_error(R.move_as_error());
+    } else {
+      promise_.set_value(std::move(R.move_as_ok().data));
+    }
+    stop();
+  }
+
+  std::unique_ptr<td::raptorq::Decoder> decoder_;
+  td::actor::StartedTask<td::BufferSlice>::ExternalPromise promise_;
+  td::Bits256 broadcast_id_;
+  adnl::AdnlNodeIdShort local_id_;
+};
+
+}  // namespace
+
 void BroadcastsTwostep::send(OverlayImpl *overlay, PublicKeyHash send_as, td::BufferSlice data, td::BufferSlice extra,
                              td::uint32 flags) {
   size_t data_size = data.size();
-  td::Bits256 data_hash = sha256_bits256(data.as_slice());
   td::uint32 date = static_cast<td::uint32>(td::Clocks::system());
   std::vector<adnl::AdnlNodeIdShort> other_nodes;
   overlay->iterate_all_peers([&](const adnl::AdnlNodeIdShort &peer_id, OverlayPeer &peer) {
@@ -173,42 +369,73 @@ void BroadcastsTwostep::send(OverlayImpl *overlay, PublicKeyHash send_as, td::Bu
     }
   });
   td::Bits256 broadcast_id;
+  td::Bits256 data_hash;
   bool use_fec = data_size >= FEC_MIN_BYTES && other_nodes.size() >= FEC_MIN_OTHER_NODES;
   if (use_fec) {
     size_t k = fec_k(other_nodes.size());
     size_t part_size = (data_size + k - 1) / k;
     CHECK(part_size < data_size);
-    broadcast_id = get_tl_object_sha_bits256(create_tl_object<ton_api::overlay_broadcastTwostep_id>(
-        flags, date, send_as.bits256_value(), overlay->local_id().bits256_value(), data_hash,
-        static_cast<td::int32>(data_size), static_cast<td::int32>(part_size), extra.clone()));
-    VLOG(TWOSTEP_INFO) << "twostep START sender broadcast_id=" << broadcast_id.to_hex()
-                       << " data_hash=" << data_hash.to_hex() << " data_size=" << data_size
-                       << " recipients=" << other_nodes.size() << " mode=FEC"
-                       << " local=" << overlay->local_id();
-    VLOG(TWOSTEP_INFO) << "twostep ENCODE_BEGIN sender broadcast_id=" << broadcast_id.to_hex()
-                       << " local=" << overlay->local_id();
+    VLOG(TWOSTEP_INFO) << "twostep ENCODE_BEGIN sender data_size=" << data_size << " k=" << k
+                       << " part_size=" << part_size << " local=" << overlay->local_id();
     auto R = td::raptorq::Encoder::create(part_size, data.clone());
     if (R.is_error()) {
       VLOG(TWOSTEP_WARNING) << "cannot create FEC encoder: " << R.move_as_error();
       return;
     }
     auto encoder = R.move_as_ok();
-    encoder->precalc();
     size_t total_chunks = fec_total_chunks(other_nodes.size());
     // Block distribution: peer p gets contiguous ESIs [p*chunks_per_peer, ...).
     size_t n_peers = other_nodes.size();
     size_t chunks_per_peer = (total_chunks + n_peers - 1) / n_peers;
+
+    // Split each peer's ESI range at the systematic/repair boundary (id=K).
+    // Symbols with id<K are systematic — gen_symbol is a memcpy from data,
+    // no precalc needed, so we dispatch those bundles immediately. Anything
+    // touching id>=K requires precalc (~22 ms gauss elim) and is deferred
+    // to a worker actor so the systematic sends start hitting the wire
+    // while precalc runs in parallel.
+    std::vector<BundlePlan> immediate_plans;
+    std::vector<BundlePlan> deferred_plans;
+    immediate_plans.reserve(n_peers);
+    deferred_plans.reserve(n_peers);
     for (size_t p = 0; p < n_peers; p++) {
       size_t seqno_from = p * chunks_per_peer;
       size_t seqno_end = std::min(seqno_from + chunks_per_peer, total_chunks);
       if (seqno_from >= seqno_end) {
         break;
       }
-      size_t count = seqno_end - seqno_from;
-      td::BufferSlice parts(part_size * count);
+      size_t cut = std::clamp<size_t>(k, seqno_from, seqno_end);
+      if (cut > seqno_from) {
+        immediate_plans.push_back({.dst = other_nodes[p], .seqno_from = seqno_from, .count = cut - seqno_from});
+      }
+      if (seqno_end > cut) {
+        deferred_plans.push_back({.dst = other_nodes[p], .seqno_from = cut, .count = seqno_end - cut});
+      }
+    }
+
+    // Phase 1: generate the systematic bundles up-front. While we copy each
+    // chunk into its parts buffer we also stream the bytes through one
+    // shared BLAKE3 hasher; once the loop finishes that hasher's output is
+    // exactly BLAKE3(data || zero-padding) = our new data_hash. This
+    // replaces the separate sha256(data) pass that used to cost ~4 ms for
+    // 8 MB. immediate_plans iterate peer-by-peer over disjoint ESI ranges
+    // that together exactly cover [0, K), so we feed the systematic data in
+    // ESI order — the same order the receiver will reconstruct after decode.
+    struct PreparedBundle {
+      BundlePlan plan;
+      td::BufferSlice parts;
+      td::Bits256 parts_hash;
+    };
+    std::vector<PreparedBundle> prepared_immediate;
+    prepared_immediate.reserve(immediate_plans.size());
+
+    blake3_hasher data_hasher;
+    blake3_hasher_init(&data_hasher);
+    for (auto &plan : immediate_plans) {
+      td::BufferSlice parts(part_size * plan.count);
       bool ok = true;
-      for (size_t j = 0; j < count; j++) {
-        td::Status S = encoder->gen_symbol(static_cast<td::uint32>(seqno_from + j),
+      for (size_t j = 0; j < plan.count; ++j) {
+        td::Status S = encoder->gen_symbol(static_cast<td::uint32>(plan.seqno_from + j),
                                            parts.as_slice().substr(j * part_size, part_size));
         if (S.is_error()) {
           VLOG(TWOSTEP_WARNING) << "cannot generate symbol: " << S;
@@ -217,40 +444,74 @@ void BroadcastsTwostep::send(OverlayImpl *overlay, PublicKeyHash send_as, td::Bu
         }
       }
       if (!ok) continue;
-      // PoC: sign over sha256(parts) instead of parts. ed25519-sign/verify
-      // internally SHA-512s the message; on this CPU SHA-512 has no HW accel
-      // (~30% of perf samples) while SHA-256 hits SHA-NI (~10 GB/s). Hashing
-      // once with the fast SHA-256 and signing only the 32-byte digest cuts
-      // crypto from ~3 ms/bundle to ~0.1 ms/bundle. The `parts:bytes` field
-      // in the TL is reused — receiver does the same sha256 to rebuild the
-      // signed object before verifying.
-      td::Bits256 parts_hash = td::sha256_bits256(parts.as_slice());
+      blake3_hasher_update(&data_hasher, parts.as_slice().ubegin(), parts.size());
+      td::Bits256 parts_hash = blake3_bits256(parts.as_slice());
+      prepared_immediate.push_back({plan, std::move(parts), parts_hash});
+    }
+    blake3_hasher_finalize(&data_hasher, data_hash.as_slice().ubegin(), 32);
+
+    broadcast_id = get_tl_object_sha_bits256(create_tl_object<ton_api::overlay_broadcastTwostep_id>(
+        flags, date, send_as.bits256_value(), overlay->local_id().bits256_value(), data_hash,
+        static_cast<td::int32>(data_size), static_cast<td::int32>(part_size), extra.clone()));
+
+    VLOG(TWOSTEP_INFO) << "twostep START sender broadcast_id=" << broadcast_id.to_hex()
+                       << " data_hash=" << data_hash.to_hex() << " data_size=" << data_size
+                       << " recipients=" << other_nodes.size() << " mode=FEC"
+                       << " local=" << overlay->local_id();
+
+    BundleContext ctx{
+        .overlay_actor = actor_id(overlay),
+        .keyring_actor = overlay->keyring(),
+        .send_as = send_as,
+        .broadcast_id = broadcast_id,
+        .data_hash = data_hash,
+        .data_size = static_cast<td::uint32>(data_size),
+        .part_size = static_cast<td::uint32>(part_size),
+        .flags = flags,
+        .date = date,
+        .src = adnl::AdnlNodeIdShort(send_as),
+        .extra = extra.clone(),
+    };
+
+    // Phase 2: dispatch sign+send for each pre-generated immediate bundle.
+    for (auto &pb : prepared_immediate) {
       td::BufferSlice to_sign = create_serialize_tl_object<ton_api::overlay_broadcastTwostepFecBundle_toSign>(
-          broadcast_id, static_cast<std::int32_t>(seqno_from), td::BufferSlice(parts_hash.as_slice()));
+          broadcast_id, static_cast<std::int32_t>(pb.plan.seqno_from), td::BufferSlice(pb.parts_hash.as_slice()));
       BroadcastTwostepDataFecBundle passdata{
           .broadcast_id = broadcast_id,
           .flags = flags,
           .date = date,
-          .src = adnl::AdnlNodeIdShort(send_as),
-          .dst = other_nodes[p],
+          .src = ctx.src,
+          .dst = pb.plan.dst,
           .data_hash = data_hash,
           .data_size = static_cast<td::uint32>(data_size),
           .part_size = static_cast<td::uint32>(part_size),
-          .seqno_from = static_cast<td::uint32>(seqno_from),
-          .parts = std::move(parts),
+          .seqno_from = static_cast<td::uint32>(pb.plan.seqno_from),
+          .parts = std::move(pb.parts),
           .extra = extra.clone(),
       };
-      auto P = td::PromiseCreator::lambda([overlay = actor_id(overlay), data = std::move(passdata)](
+      auto P = td::PromiseCreator::lambda([overlay = ctx.overlay_actor, d = std::move(passdata)](
                                               td::Result<std::pair<td::BufferSlice, PublicKey>> R) mutable {
-        td::actor::send_closure(overlay, &OverlayImpl::broadcast_twostep_signed_fec_bundle, std::move(data),
+        td::actor::send_closure(overlay, &OverlayImpl::broadcast_twostep_signed_fec_bundle, std::move(d),
                                 std::move(R));
       });
-      td::actor::send_closure(overlay->keyring(), &keyring::Keyring::sign_add_get_public_key, send_as,
+      td::actor::send_closure(ctx.keyring_actor, &keyring::Keyring::sign_add_get_public_key, send_as,
                               std::move(to_sign), std::move(P));
     }
     VLOG(TWOSTEP_INFO) << "twostep ENCODE_END sender broadcast_id=" << broadcast_id.to_hex()
-                       << " local=" << overlay->local_id();
+                       << " systematic_bundles=" << prepared_immediate.size()
+                       << " repair_bundles=" << deferred_plans.size() << " local=" << overlay->local_id();
+    if (!deferred_plans.empty()) {
+      // Worker actor runs precalc on its own scheduler thread and then
+      // sign+sends the repair bundles; it owns the encoder and stops itself
+      // when done. The overlay actor returns control to the scheduler
+      // immediately — it doesn't block on precalc.
+      td::actor::create_actor<TwostepPrecalcWorker>("twostep-precalc", std::move(encoder), std::move(deferred_plans),
+                                                    std::move(ctx))
+          .release();
+    }
   } else {
+    data_hash = blake3_bits256(data.as_slice());
     broadcast_id = get_tl_object_sha_bits256(create_tl_object<ton_api::overlay_broadcastTwostep_id>(
         flags, date, send_as.bits256_value(), overlay->local_id().bits256_value(), data_hash,
         static_cast<std::int32_t>(data_size), static_cast<std::int32_t>(data_size), extra.clone()));
@@ -399,7 +660,7 @@ td::actor::Task<> BroadcastsTwostep::process_broadcast(
   PublicKey src_key(broadcast->src_);
   PublicKeyHash src_keyhash(src_key.compute_short_id());
   adnl::AdnlNodeIdShort bcast_src_adnl_id{broadcast->src_adnl_id_};
-  td::Bits256 data_hash = sha256_bits256(broadcast->data_.as_slice());
+  td::Bits256 data_hash = blake3_bits256(broadcast->data_.as_slice());
   td::Bits256 broadcast_id = get_tl_object_sha_bits256(create_tl_object<ton_api::overlay_broadcastTwostep_id>(
       broadcast->flags_, broadcast->date_, src_keyhash.bits256_value(), bcast_src_adnl_id.bits256_value(), data_hash,
       static_cast<std::int32_t>(broadcast->data_.size()), static_cast<std::int32_t>(broadcast->data_.size()),
@@ -514,6 +775,11 @@ td::actor::Task<> BroadcastsTwostep::process_broadcast(OverlayImpl *overlay, adn
         new BroadcastTwostep{.broadcast_id = broadcast_id,
                              .date = date,
                              .decoder = R.move_as_ok(),
+                             // Single-chunk Fec path doesn't use the fast-path
+                             // / off-actor decode optimizations — it only ever
+                             // adds one symbol per message, so the systematic
+                             // bookkeeping below stays zero.
+                             .systematic_parts = {},
                              .debug = {.src_adnl_id = bcast_src_adnl_id,
                                        .data_hash = broadcast->data_hash_,
                                        .data_size = static_cast<td::uint32>(data_size),
@@ -554,7 +820,9 @@ td::actor::Task<> BroadcastsTwostep::process_broadcast(OverlayImpl *overlay, adn
                        << " local=" << overlay->local_id();
     bcast->delivered = true;
     bcast->decoder = {};
-    if (broadcast->data_hash_ != td::sha256_bits256(R.data)) {
+    // Match the sender's incremental BLAKE3 over (data || zero-padding-to-K*part_size).
+    size_t k = (data_size + part_size - 1) / part_size;
+    if (broadcast->data_hash_ != blake3_padded(R.data.as_slice(), k, part_size)) {
       co_return td::Status::Error(ErrorCode::protoviolation, "broadcast data hash mismatch");
     }
     co_await check_and_deliver(overlay, src_keyhash, check_result, std::move(R.data), std::move(broadcast->extra_));
@@ -593,7 +861,7 @@ td::actor::Task<> BroadcastsTwostep::process_broadcast(
   }
 
   // Match the sender's "sign sha256(parts)" trick (see signed_fec_bundle).
-  td::Bits256 parts_hash = td::sha256_bits256(broadcast->parts_.as_slice());
+  td::Bits256 parts_hash = blake3_bits256(broadcast->parts_.as_slice());
   td::BufferSlice to_sign = create_serialize_tl_object<ton_api::overlay_broadcastTwostepFecBundle_toSign>(
       broadcast_id, static_cast<std::int32_t>(seqno_from), td::BufferSlice(parts_hash.as_slice()));
   auto cert = CO_TRY(Certificate::create(broadcast->certificate_));
@@ -620,19 +888,23 @@ td::actor::Task<> BroadcastsTwostep::process_broadcast(
   if (it == broadcasts_.end()) {
     CO_TRY(overlay->get_broadcasts_limiter(src_keyhash, cert.get()).try_register_broadcast(data_size));
     td::Result<std::unique_ptr<td::raptorq::Decoder>> R;
-    if ((R = td::raptorq::Decoder::create({(data_size + part_size - 1) / part_size, part_size, data_size})).is_error()) {
+    size_t k = (data_size + part_size - 1) / part_size;
+    if ((R = td::raptorq::Decoder::create({k, part_size, data_size})).is_error()) {
       co_return td::Status::Error(ErrorCode::protoviolation, "invalid FEC parameters");
     }
-    td::uint32 symbols_needed = static_cast<td::uint32>((data_size + part_size - 1) / part_size);
     std::unique_ptr<BroadcastTwostep> bcast(
         new BroadcastTwostep{.broadcast_id = broadcast_id,
                              .date = date,
                              .decoder = R.move_as_ok(),
+                             .systematic_parts = std::vector<td::BufferSlice>(k),
+                             .k = k,
+                             .part_size = part_size,
+                             .data_size = data_size,
                              .debug = {.src_adnl_id = bcast_src_adnl_id,
                                        .data_hash = broadcast->data_hash_,
                                        .data_size = static_cast<td::uint32>(data_size),
                                        .symbols_received = 0,
-                                       .symbols_needed = symbols_needed,
+                                       .symbols_needed = static_cast<td::uint32>(k),
                                        .timestamp = td::Timestamp::now(),
                                        .chunk_senders = {}}});
     lru_.put(bcast.get());
@@ -658,26 +930,82 @@ td::actor::Task<> BroadcastsTwostep::process_broadcast(
     }
     bcast->seen_parts.insert(esi);
     td::BufferSlice part = broadcast->parts_.from_slice(broadcast->parts_.as_slice().substr(j * part_size, part_size));
-    CO_TRY(bcast->decoder->add_symbol({esi, std::move(part)}));
+    // Stash systematic parts (id < k) so we can short-circuit decoding if all
+    // K arrive. Clone is refcounted — cheap.
+    if (esi < bcast->k && bcast->systematic_parts[esi].empty()) {
+      bcast->systematic_parts[esi] = part.clone();
+      bcast->systematic_filled++;
+    }
+    // After dispatching to the decode worker we no longer own the decoder.
+    // Remaining bundles still help the fast path; skip the decoder feed.
+    if (bcast->decoder) {
+      CO_TRY(bcast->decoder->add_symbol({esi, std::move(part)}));
+    }
     bcast->debug.symbols_received++;
   }
   VLOG(TWOSTEP_INFO) << "twostep RECV_BUNDLE receiver " << *bcast << " seqno_from=" << seqno_from
                      << " seqno_count=" << seqno_count << " from=" << src_peer_id
-                     << " will_rebroadcast=" << will_rebroadcast << " local=" << overlay->local_id();
-  if (bcast->decoder->may_try_decode()) {
-    VLOG(TWOSTEP_INFO) << "twostep DECODE_BEGIN receiver broadcast_id=" << broadcast_id.to_hex()
-                       << " local=" << overlay->local_id();
-    auto R = CO_TRY(bcast->decoder->try_decode(false));
-    VLOG(TWOSTEP_INFO) << "twostep DECODE_END receiver broadcast_id=" << broadcast_id.to_hex()
-                       << " local=" << overlay->local_id();
-    VLOG(TWOSTEP_INFO) << "twostep FINISH receiver " << *bcast << " decoded=true elapsed=" << bcast->debug.elapsed()
-                       << " local=" << overlay->local_id();
+                     << " will_rebroadcast=" << will_rebroadcast
+                     << " systematic=" << bcast->systematic_filled << "/" << bcast->k
+                     << " local=" << overlay->local_id();
+
+  // Fast path: all K systematic parts in hand → reconstruct via memcpy and
+  // deliver without the ~20 ms FEC solver. The decode worker, if already
+  // running, will see bcast->delivered when it finishes and discard.
+  if (bcast->systematic_filled == bcast->k && !bcast->delivered) {
+    td::BufferSlice data(bcast->data_size);
+    for (size_t i = 0; i < bcast->k; ++i) {
+      size_t offset = i * bcast->part_size;
+      size_t len = std::min(bcast->part_size, bcast->data_size - offset);
+      std::memcpy(data.as_slice().begin() + offset, bcast->systematic_parts[i].as_slice().begin(), len);
+    }
+    if (broadcast->data_hash_ != blake3_padded(data.as_slice(), bcast->k, bcast->part_size)) {
+      co_return td::Status::Error(ErrorCode::protoviolation, "broadcast data hash mismatch (fast-path)");
+    }
     bcast->delivered = true;
     bcast->decoder = {};
-    if (broadcast->data_hash_ != td::sha256_bits256(R.data)) {
+    bcast->systematic_parts.clear();
+    VLOG(TWOSTEP_INFO) << "twostep FINISH receiver " << *bcast << " decoded=fast elapsed=" << bcast->debug.elapsed()
+                       << " local=" << overlay->local_id();
+    co_await check_and_deliver(overlay, src_keyhash, check_result, std::move(data), std::move(broadcast->extra_));
+    co_return {};
+  }
+
+  // Slow path: enough symbols for the solver but no full systematic set yet.
+  // Move the decoder onto a worker actor; this coroutine suspends waiting on
+  // its result while the receiver actor keeps processing more bundles. If a
+  // later bundle completes the systematic set, the fast path above wins and
+  // we drop the worker's result when this coroutine resumes.
+  if (bcast->decoder && !bcast->decode_dispatched && bcast->decoder->may_try_decode()) {
+    bcast->decode_dispatched = true;
+    auto [task, promise] = td::actor::StartedTask<td::BufferSlice>::make_bridge();
+    td::actor::create_actor<TwostepDecodeWorker>("twostep-decode", std::move(bcast->decoder), std::move(promise),
+                                                 broadcast_id, overlay->local_id())
+        .release();
+    auto R = co_await std::move(task).wrap();
+
+    // Re-check existence: gc only runs after 25 s and decode is ~20 ms, but
+    // be defensive in case future code changes that.
+    auto it2 = broadcasts_.find(broadcast_id);
+    if (it2 == broadcasts_.end()) {
+      co_return {};
+    }
+    auto bcast2 = it2->second.get();
+    if (bcast2->delivered) {
+      co_return {};
+    }
+    if (R.is_error()) {
+      co_return R.move_as_error();
+    }
+    auto data = R.move_as_ok();
+    if (broadcast->data_hash_ != blake3_padded(data.as_slice(), bcast2->k, bcast2->part_size)) {
       co_return td::Status::Error(ErrorCode::protoviolation, "broadcast data hash mismatch");
     }
-    co_await check_and_deliver(overlay, src_keyhash, check_result, std::move(R.data), std::move(broadcast->extra_));
+    bcast2->delivered = true;
+    bcast2->systematic_parts.clear();
+    VLOG(TWOSTEP_INFO) << "twostep FINISH receiver " << *bcast2 << " decoded=true elapsed=" << bcast2->debug.elapsed()
+                       << " local=" << overlay->local_id();
+    co_await check_and_deliver(overlay, src_keyhash, check_result, std::move(data), std::move(broadcast->extra_));
   }
   co_return {};
 }
