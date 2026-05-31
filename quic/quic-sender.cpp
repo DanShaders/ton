@@ -310,45 +310,23 @@ void QuicSender::log_stats(std::string reason) {
   }
 }
 
-td::actor::Task<QuicSender::Stats> QuicSender::collect_stats() {
-  Stats stats;
-  for (auto &[_, server] : servers_by_port_) {
-    auto serv_stats = co_await td::actor::ask(server, &QuicServer::collect_stats);
-    stats.summary = stats.summary + Stats::Entry{.server_stats = serv_stats.summary};
-    for (auto &[id, conn_stats] : serv_stats.per_conn) {
-      if (!by_cid_.contains(id))
-        continue;
-      stats.per_path[by_cid_[id]->path] = Stats::Entry{.server_stats = conn_stats};
+td::actor::Task<> QuicSender::collect(metrics::Context ctx) {
+  std::vector<td::actor::StartedTask<ServerStats>> drains;
+  for (const auto &[_, server] : servers_by_port_) {
+    drains.push_back(td::actor::ask(server, &QuicServer::collect));
+  }
+  auto stats = co_await td::actor::all_wrap(std::move(drains));
+
+  ServerStats result;
+  for (const auto &stat_or_error : stats) {
+    if (stat_or_error.is_ok()) {
+      result.combine(stat_or_error.ok());
     }
   }
-  co_return stats;
-}
-
-// TODO(avevad): remove obsolete Stats and collect metrics directly
-td::actor::Task<> QuicSender::collect(metrics::Context ctx) {
-  Stats stats = co_await collect_stats();
-  const auto &s = stats.summary.server_stats;
 
   auto quic = ctx.with_name("quic");
-  auto transport = quic.with_name("transport");
-
-  metrics::Labeled<metrics::Counter<"bytes">, metrics::Direction> bytes;
-  bytes.at(metrics::Direction::in).inc(s.impl_stats.bytes_rx);
-  bytes.at(metrics::Direction::out).inc(s.impl_stats.bytes_tx);
-  transport.collect(bytes);
-
-  metrics::Counter<"bytes_lost"> bytes_lost;
-  bytes_lost.inc(s.impl_stats.bytes_lost);
-  transport.collect(bytes_lost);
-
-  metrics::Gauge<"connections"> connections;
-  connections.set(static_cast<double>(s.total_conns));
-  transport.collect(connections);
-
-  metrics::Gauge<"open_streams"> open_streams;
-  open_streams.set(static_cast<double>(s.impl_stats.open_sids));
-  transport.collect(open_streams);
-
+  quic.collect(result);
+  quic.collect(app_);
   co_return {};
 }
 
@@ -397,6 +375,7 @@ td::actor::Task<td::Unit> QuicSender::send_message_coro(adnl::AdnlNodeIdShort sr
 
 td::actor::Task<td::Unit> QuicSender::send_message_coro_inner(adnl::AdnlNodeIdShort src, adnl::AdnlNodeIdShort dst,
                                                               td::BufferSlice data) {
+  app_->record(metrics::Kind::message, metrics::Direction::out, data.as_slice());
   auto conn = co_await find_or_create_connection({src, dst});
   td::BufferSlice wire_data = create_serialize_tl_object<ton_api::quic_message>(std::move(data));
   co_await td::actor::ask(conn->server, &QuicServer::send_stream, conn->cid, StreamOptions{get_peer_mtu(src, dst)},
@@ -407,6 +386,7 @@ td::actor::Task<td::Unit> QuicSender::send_message_coro_inner(adnl::AdnlNodeIdSh
 td::actor::Task<td::BufferSlice> QuicSender::send_query_coro(adnl::AdnlNodeIdShort src, adnl::AdnlNodeIdShort dst,
                                                              std::string name, td::Timestamp timeout,
                                                              td::BufferSlice data, std::optional<td::uint64> limit) {
+  app_->record(metrics::Kind::query, metrics::Direction::out, data.as_slice());
   auto conn = co_await find_or_create_connection({src, dst});
   auto query_size = data.size();
   auto query_magic = get_magic(data);
@@ -691,11 +671,13 @@ void QuicSender::on_closed(QuicConnectionId cid) {
 
 void QuicSender::on_request(std::shared_ptr<Connection> connection, QuicStreamID stream_id,
                             ton_api::quic_query &query) {
+  app_->record(metrics::Kind::query, metrics::Direction::in, query.data_.as_slice());
   on_inbound_query(connection, stream_id, std::move(query.data_)).start_immediate().detach();
 }
 
 void QuicSender::on_request(std::shared_ptr<Connection> connection, QuicStreamID stream_id,
                             ton_api::quic_message &message) {
+  app_->record(metrics::Kind::message, metrics::Direction::in, message.data_.as_slice());
   td::actor::send_closure(adnl_, &adnl::AdnlPeerTable::deliver, connection->path.second, connection->path.first,
                           std::move(message.data_));
   // TODO: use unidirectional stream, so there will be no need to process result
@@ -707,6 +689,7 @@ td::actor::Task<> QuicSender::on_inbound_query(std::shared_ptr<Connection> conne
                                                td::BufferSlice query) {
   auto answer = co_await td::actor::ask(adnl_, &adnl::AdnlPeerTable::deliver_query, connection->path.second,
                                         connection->path.first, std::move(query));
+  app_->record(metrics::Kind::answer, metrics::Direction::out, answer.as_slice());
   td::BufferSlice wire_data = create_serialize_tl_object<ton_api::quic_answer>(std::move(answer));
   td::actor::send_closure(connection->server, &QuicServer::send_stream, connection->cid, stream_id,
                           std::move(wire_data), true);
@@ -719,6 +702,7 @@ void QuicSender::on_answer(Connection &connection, QuicStreamID stream_id, ton_a
     LOG(ERROR) << "Answer from unknown stream_id";
     return;
   }
+  app_->record(metrics::Kind::answer, metrics::Direction::in, answer.data_.as_slice());
   it->second.set_result(std::move(answer.data_));
   connection.responses.erase(it);
 }

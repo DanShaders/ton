@@ -43,8 +43,8 @@ static void apply_platform_pmtu_policy(ngtcp2_settings& settings) {
 td::Result<std::unique_ptr<QuicConnectionPImpl>> QuicConnectionPImpl::create_client(
     const td::IPAddress& local_address, const td::IPAddress& remote_address, const td::Ed25519::PrivateKey& client_key,
     td::Slice alpn, td::Slice sni, std::unique_ptr<Callback> callback, QuicConnectionOptions options) {
-  auto p_impl =
-      std::make_unique<QuicConnectionPImpl>(PrivateTag{}, local_address, remote_address, std::move(callback), options);
+  auto p_impl = std::make_unique<QuicConnectionPImpl>(td::Badge<QuicConnectionPImpl>{}, local_address, remote_address,
+                                                      std::move(callback), options);
 
   TRY_STATUS(p_impl->init_tls_client_rpk(client_key, alpn, sni));
   TRY_STATUS(p_impl->init_quic_client());
@@ -61,8 +61,8 @@ td::Result<std::unique_ptr<QuicConnectionPImpl>> QuicConnectionPImpl::create_ser
   CHECK(identities.not_null());
   CHECK(identities->has_default());
 
-  auto p_impl =
-      std::make_unique<QuicConnectionPImpl>(PrivateTag{}, local_address, remote_address, std::move(callback), options);
+  auto p_impl = std::make_unique<QuicConnectionPImpl>(td::Badge<QuicConnectionPImpl>{}, local_address, remote_address,
+                                                      std::move(callback), options);
 
   TRY_STATUS(p_impl->init_tls_server_rpk(std::move(identities), alpn));
   TRY_STATUS(p_impl->init_quic_server(initial));
@@ -699,23 +699,34 @@ td::Status QuicConnectionPImpl::buffer_stream(QuicStreamID sid, td::BufferSlice 
   return td::Status::OK();
 }
 
-QuicConnectionStats QuicConnectionPImpl::get_stats() {
+ConnectionStats QuicConnectionPImpl::get_stats(TransportStats& transport_stats) {
   ngtcp2_conn_info info;
   ngtcp2_conn_get_conn_info(conn(), &info);
+
+  if (info.pkt_discarded > last_pkt_discarded_) {
+    transport_stats.dropped.at(metrics::Direction::in, metrics::Reason::invalid)
+        .inc(info.pkt_discarded - last_pkt_discarded_);
+    last_pkt_discarded_ = info.pkt_discarded;
+  }
+
   size_t bytes_unacked = 0, bytes_unsent = 0;
   for (auto& [_, stream] : streams_) {
     bytes_unacked += stream.pin_.size();
     bytes_unsent += stream.reader_.size();
   }
+
   return {
-      .bytes_rx = info.bytes_recv,
-      .bytes_tx = info.bytes_sent,
+      .bytes = {{.in = info.bytes_recv, .out = info.bytes_sent}},
+      .packets = {{.in = info.pkt_recv, .out = info.pkt_sent}},
+      .stream_bytes = stream_bytes_,
       .bytes_lost = info.bytes_lost,
+      .packets_lost = info.pkt_lost,
+      .bytes_in_flight = info.bytes_in_flight,
       .bytes_unacked = bytes_unacked,
       .bytes_unsent = bytes_unsent,
-      .total_sids = sids_encountered,
-      .open_sids = streams_.size(),
-      .mean_rtt = static_cast<double>(info.smoothed_rtt),
+      .sids = sids_encountered,
+      .sids_current = streams_.size(),
+      .mean_rtt = {to_chrono(info.smoothed_rtt)},
   };
 }
 
@@ -795,6 +806,7 @@ int QuicConnectionPImpl::on_handshake_completed() {
 }
 
 int QuicConnectionPImpl::on_recv_stream_data(uint32_t flags, int64_t stream_id, td::Slice data) {
+  stream_bytes_.at(metrics::Direction::in).inc(data.size());
   Callback::StreamDataEvent event{
       .sid = stream_id, .data = td::BufferSlice{data}, .fin = (flags & NGTCP2_STREAM_DATA_FLAG_FIN) != 0};
 
@@ -829,6 +841,7 @@ int QuicConnectionPImpl::on_acked_stream_data_offset(int64_t stream_id, uint64_t
                                        << " expected " << st.acked_prefix;
   st.acked_prefix = offset + datalen;
   st.pin_.advance(datalen);
+  stream_bytes_.at(metrics::Direction::out).inc(datalen);
 
   if (datalen == 0) {
     CHECK(st.fin_submitted);
