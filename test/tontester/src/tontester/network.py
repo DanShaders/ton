@@ -619,6 +619,9 @@ class FullNode(Network.Node):
             _ = stack.callback(lambda: os.close(ready_r))
             _ = stack.callback(lambda: os.close(ready_w) if not closed else None)
 
+            exporter_address = self._new_network_address().address
+            print("address::::", exporter_address)
+
             options, install = _get_install_and_options(
                 options,
                 self._network.install,
@@ -631,6 +634,8 @@ class FullNode(Network.Node):
                     "-1",
                     "--console-ready-fd",
                     str(ready_w),
+                    "--exporter-address",
+                    exporter_address,
                 ),
                 (ready_w,),
             )

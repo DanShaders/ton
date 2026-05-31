@@ -2172,8 +2172,6 @@ void ValidatorEngine::start() {
   load_shard_block_verifier_config();
   load_noncritical_params_overrides();
   read_config_ = true;
-  td::actor::send_closure(exporter_.get(), &ton::PrometheusExporter::register_collector<ton::PrometheusExporter>,
-                          exporter_.get());
   start_adnl();
 }
 
@@ -2270,8 +2268,8 @@ void ValidatorEngine::start_rldp() {
   CHECK(!keyring_.empty());
   quic_ = td::actor::create_actor<ton::quic::QuicSender>("QuicSender", peer_table, keyring_.get());
   td::actor::send_closure(quic_.get(), &ton::quic::QuicSender::set_quic_options, quic_options_);
-  td::actor::send_closure(exporter_.get(), &ton::PrometheusExporter::register_collector<ton::quic::QuicSender>,
-                          quic_.get());
+  td::actor::send_closure(exporter_.get(), &ton::PrometheusExporter::add<ton::quic::QuicSender>, quic_.get(),
+                          &ton::quic::QuicSender::collect);
   td::actor::send_closure(rldp_, &ton::rldp::Rldp::set_default_mtu, 2048);
   td::actor::send_closure(rldp2_, &ton::rldp2::Rldp::set_default_mtu, 2048);
   started_rldp();
