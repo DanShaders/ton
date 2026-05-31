@@ -90,14 +90,22 @@ void AdnlNetworkManagerImpl::add_self_addr(td::IPAddress addr, AdnlCategoryMask 
 
 void AdnlNetworkManagerImpl::receive_udp_message(td::UdpMessage message, size_t idx) {
   if (!callback_) {
+    metrics_.record_dropped(metrics::Direction::in, metrics::Reason::internal);
     LOG(ERROR) << this << ": dropping IN message [?->?]: peer table unitialized";
     return;
   }
   if (message.error.is_error()) {
+    metrics_.record_dropped(metrics::Direction::in, metrics::Reason::internal);
     VLOG(ADNL_WARNING) << this << ": dropping ERROR message: " << message.error;
     return;
   }
+  // TODO: count udp_syscalls for ADNL. The recv/send syscalls happen inside td::UdpServer /
+  // UdpSocketFd, which expose no stats; surfacing them needs a tdnet change. ADNL is legacy, so this
+  // is left at 0 for now (the metric exists for parity with QUIC's wire tier).
+  metrics_.dir.at(metrics::Direction::in).bytes.inc(message.data.size());
+  metrics_.dir.at(metrics::Direction::in).packets.inc();
   if (message.data.size() < 32) {
+    metrics_.record_dropped(metrics::Direction::in, metrics::Reason::invalid);
     VLOG(ADNL_WARNING) << this << ": received too small packet of size " << message.data.size();
     return;
   }
@@ -107,6 +115,7 @@ void AdnlNetworkManagerImpl::receive_udp_message(td::UdpMessage message, size_t 
   CHECK(idx < udp_sockets_.size());
   auto &socket = udp_sockets_[idx];
   if (socket.in_desc == std::numeric_limits<size_t>::max()) {
+    metrics_.record_dropped(metrics::Direction::in, metrics::Reason::internal);
     VLOG(ADNL_WARNING) << this << ": received packet to port without InDesc";
     return;
   }
@@ -127,12 +136,14 @@ void AdnlNetworkManagerImpl::send_udp_packet(AdnlNodeIdShort src_id, AdnlNodeIdS
                                              td::uint32 priority, td::BufferSlice data) {
   auto it = adnl_id_2_cat_.find(src_id);
   if (it == adnl_id_2_cat_.end()) {
+    metrics_.record_dropped(metrics::Direction::out, metrics::Reason::internal);
     VLOG(ADNL_WARNING) << this << ": dropping OUT message [" << src_id << "->" << dst_id << "]: unknown src";
     return;
   }
 
   auto out = choose_out_iface(it->second, priority);
   if (!out) {
+    metrics_.record_dropped(metrics::Direction::out, metrics::Reason::internal);
     VLOG(ADNL_WARNING) << this << ": dropping OUT message [" << src_id << "->" << dst_id << "]: no out rules";
     return;
   }
@@ -146,7 +157,15 @@ void AdnlNetworkManagerImpl::send_udp_packet(AdnlNodeIdShort src_id, AdnlNodeIdS
 
   CHECK(M.data.size() <= get_mtu());
 
+  metrics_.dir.at(metrics::Direction::out).bytes.inc(M.data.size());
+  metrics_.dir.at(metrics::Direction::out).packets.inc();
   td::actor::send_closure(socket.server, &td::UdpServer::send, std::move(M));
+}
+
+td::actor::Task<> AdnlNetworkManagerImpl::collect(metrics::Context ctx) {
+  metrics_.listening_sockets.set(static_cast<double>(udp_sockets_.size()));
+  ctx.with_name("adnl").with_name("wire").collect(metrics_);
+  co_return {};
 }
 
 }  // namespace adnl
