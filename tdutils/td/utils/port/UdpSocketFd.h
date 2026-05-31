@@ -60,6 +60,10 @@ class UdpSocketFd {
   Result<uint32> maximize_snd_buffer(uint32 max_buffer_size = 0);
   Result<uint32> maximize_rcv_buffer(uint32 max_buffer_size = 0);
 
+  // Total datagrams dropped by the kernel on a full receive queue since the socket was opened
+  // (via SO_RXQ_OVFL). Monotonic; always 0 where the option is unsupported.
+  uint64 get_rx_queue_drops() const;
+
   static Result<UdpSocketFd> open(const IPAddress &address) TD_WARN_UNUSED_RESULT;
   static bool is_gso_supported();
   static bool has_pmtudisc_probe();
@@ -88,6 +92,9 @@ class UdpSocketFd {
     MutableSlice data;
     Status *error;
     size_t gso_size{0};
+    // Cumulative count of datagrams the kernel dropped on a full receive queue, as of this datagram
+    // (from the SO_RXQ_OVFL control message). 0 when unsupported / option disabled.
+    size_t queue_overflow{0};
   };
 
   Status send_message(const OutboundMessage &message, bool &is_sent) TD_WARN_UNUSED_RESULT;
