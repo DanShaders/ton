@@ -6,6 +6,7 @@ from pathlib import Path
 from contract import WalletV1Blueprint, ton
 from tontester.install import Install
 from tontester.network import FullNode, Network
+from tontester.zerostate import SimplexConsensusConfig
 
 
 async def main():
@@ -27,6 +28,7 @@ async def main():
         dht = network.create_dht_node()
 
         network.config.shard_validators = 2
+        network.config.shard_consensus = SimplexConsensusConfig(use_quic=True)
 
         nodes: list[FullNode] = []
         for _ in range(2):
@@ -63,6 +65,8 @@ async def main():
 
         wallet_state = await main_wallet.current
         assert wallet_state.seqno == 1
+
+        await asyncio.Future()
 
 
 if __name__ == "__main__":
