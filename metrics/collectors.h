@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -20,6 +21,7 @@
 #include "td/utils/check.h"
 #include "td/utils/int_types.h"
 #include "td/utils/logging.h"
+#include "td/utils/type_traits.h"
 
 #include "types.h"
 
@@ -104,9 +106,9 @@ inline constexpr auto label_domain = ton_metric_label(L{});
   }                                                                                                    \
   template <class T>                                                                                   \
   struct Type##Axis {                                                                                  \
-    LIST(TON_METRIC_LABEL_FIELD_)                                                                       \
+    LIST(TON_METRIC_LABEL_FIELD_)                                                                      \
     ::std::array<T, (0 LIST(TON_METRIC_LABEL_COUNT_))> as_array() && {                                 \
-      return {{LIST(TON_METRIC_LABEL_MOVE_)}};                                                          \
+      return {{LIST(TON_METRIC_LABEL_MOVE_)}};                                                         \
     }                                                                                                  \
   };                                                                                                   \
   template <class T>                                                                                   \
@@ -514,8 +516,13 @@ class Gauge {
   }
 
   void collect(td::Badge<Context>, Context ctx) const {
-    ctx.open_family("gauge");
-    ctx.push(static_cast<double>(value_));
+    if constexpr (td::IsSpecializationOf<T, std::chrono::duration>) {
+      ctx.open_family("gauge", "seconds");
+      ctx.push(std::chrono::duration<double>(value_).count());
+    } else {
+      ctx.open_family("gauge");
+      ctx.push(static_cast<double>(value_));
+    }
   }
 
  private:

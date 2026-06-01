@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: LGPL-2.0-or-later
  */
 
+#include <chrono>
+
 #include "td/utils/tests.h"
 
 #include "metrics/collectors.h"
@@ -68,4 +70,33 @@ TEST(Metrics, LabeledDefaultConstructsAndMutates) {
   ASSERT_EQ(0, m.at(Direction::in, Kind::message).v);
   m.at(Direction::out, Kind::query).v = 7;
   ASSERT_EQ(7, m.at(Direction::out, Kind::query).v);
+}
+
+TEST(Metrics, DurationGaugeStoresWithoutCast) {
+  // A duration-typed gauge holds the duration directly — no double cast at set()/add().
+  Gauge<"latency", std::chrono::nanoseconds> g;
+  g.set(std::chrono::milliseconds(1500));  // ms -> ns widening, no cast
+  ASSERT_EQ(std::chrono::nanoseconds(std::chrono::milliseconds(1500)).count(), g.value().count());
+  g.add(std::chrono::milliseconds(500));
+  ASSERT_EQ(std::chrono::nanoseconds(std::chrono::seconds(2)).count(), g.value().count());
+}
+
+TEST(Metrics, DurationGaugeRendersSecondsSuffix) {
+  Sink sink;
+  Context ctx(sink);
+  Gauge<"latency", std::chrono::milliseconds> g{std::chrono::milliseconds(1500)};
+  ctx.collect(g);
+  auto out = std::move(sink).build().render();
+  // _seconds suffix on the sample line; 1500ms rendered as 1.5 seconds.
+  EXPECT_EQ("# TYPE latency gauge\nlatency_seconds 1.500000\n", out);
+}
+
+TEST(Metrics, PlainGaugeHasNoSecondsSuffix) {
+  Sink sink;
+  Context ctx(sink);
+  Gauge<"ratio"> g{0.25};
+  ctx.collect(g);
+  auto out = std::move(sink).build().render();
+  // Plain double gauge: bare name, no _seconds suffix.
+  EXPECT_EQ("# TYPE ratio gauge\nratio 0.250000\n", out);
 }
