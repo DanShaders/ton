@@ -88,13 +88,66 @@ inline constexpr auto label_domain = ton_metric_label(L{});
 #define TON_METRIC_LABEL_ENUMERATOR_(name) name,
 #define TON_METRIC_LABEL_COUNT_(name) +1
 #define TON_METRIC_LABEL_NAME_(name) ::std::string_view{#name},
+#define TON_METRIC_LABEL_FIELD_(name) T name{};
+#define TON_METRIC_LABEL_MOVE_(name) ::std::move(name),
 
+// Defines a contiguous, zero-based label enum plus:
+//   - ton_metric_label(Type): the LabelEnum descriptor (key + enumerator names),
+//   - Type##Axis<T>: an aggregate with one `T` member per enumerator, and ton_metric_axis(Type, ...),
+//     which together let Labeled<Inner, Type, ...> be built from nested designated initializers
+//     (e.g. Labeled<Foo, Direction, Kind>{{.in = {.message = a, .query = b}}}).
 #define TON_METRIC_DEFINE_LABEL(Type, KeyStr, LIST)                                                    \
   enum class Type : ::size_t { LIST(TON_METRIC_LABEL_ENUMERATOR_) };                                   \
   [[maybe_unused]] inline constexpr ::ton::metrics::LabelEnum<Type, (0 LIST(TON_METRIC_LABEL_COUNT_))> \
   ton_metric_label(Type) {                                                                             \
     return {::std::string_view{KeyStr}, {{LIST(TON_METRIC_LABEL_NAME_)}}};                             \
+  }                                                                                                    \
+  template <class T>                                                                                   \
+  struct Type##Axis {                                                                                  \
+    LIST(TON_METRIC_LABEL_FIELD_)                                                                       \
+    ::std::array<T, (0 LIST(TON_METRIC_LABEL_COUNT_))> as_array() && {                                 \
+      return {{LIST(TON_METRIC_LABEL_MOVE_)}};                                                          \
+    }                                                                                                  \
+  };                                                                                                   \
+  template <class T>                                                                                   \
+  Type##Axis<T> ton_metric_axis(Type, ::ton::metrics::AxisTag<T>);
+
+// Carries the (inner) cell type to the ADL ton_metric_axis hook above.
+template <class T>
+struct AxisTag {};
+
+// LabelAxisT<Inner, L0, L1, ...> = <L0>Axis<<L1>Axis<...<Inner>>>: the nested designated-init
+// aggregate accepted by Labeled's converting constructor (innermost leaf is Inner itself).
+template <class Inner, BoundedLabel... Labels>
+struct LabelAxis {
+  using type = Inner;
+};
+template <class Inner, BoundedLabel L0, BoundedLabel... Ls>
+struct LabelAxis<Inner, L0, Ls...> {
+  using type = decltype(ton_metric_axis(L0{}, AxisTag<typename LabelAxis<Inner, Ls...>::type>{}));
+};
+template <class Inner, BoundedLabel... Labels>
+using LabelAxisT = typename LabelAxis<Inner, Labels...>::type;
+
+// Flattens a nested axis aggregate into a row-major cell block (first label most significant), exactly
+// matching Labeled::flat_index.
+template <class Inner, BoundedLabel... Labels>
+struct LabelScatter {  // leaf: no labels left, the axis node is the cell value itself
+  static void run(Inner *out, Inner &&value) {
+    *out = std::move(value);
   }
+};
+template <class Inner, BoundedLabel L0, BoundedLabel... Ls>
+struct LabelScatter<Inner, L0, Ls...> {
+  static constexpr size_t block = (size_t{1} * ... * LabelDomainOf<Ls>::size);
+  template <class Axis>
+  static void run(Inner *out, Axis &&axis) {
+    auto cells = std::move(axis).as_array();
+    for (size_t i = 0; i < LabelDomainOf<L0>::size; ++i) {
+      LabelScatter<Inner, Ls...>::run(out + i * block, std::move(cells[i]));
+    }
+  }
+};
 
 // ===== Sink / Context =====
 class Sink {
@@ -273,6 +326,17 @@ class Labeled {
   static constexpr size_t cells = (size_t{1} * ... * LabelDomainOf<Labels>::size);
 
  public:
+  Labeled() = default;
+
+  // Construct from nested designated initializers, one brace level per label:
+  //   Labeled<Foo, Direction, Kind>{{.in = {.message = a, .query = b}}}
+  // Omitted cells are value-initialized. Templated with a defaulted axis type so it is instantiated
+  // only when actually used, keeping Labeled usable with label kinds that provide no axis aggregate.
+  template <class Axis = LabelAxisT<Inner, Labels...>>
+  Labeled(Axis axis) {
+    LabelScatter<Inner, Labels...>::run(cells_.data(), std::move(axis));
+  }
+
   Inner &at(Labels... vs) & {
     return cells_[flat_index(vs...)];
   }
@@ -354,6 +418,11 @@ class DynLabel {
 template <FixedString Name, Collectable Inner>
 class Prefixed {
  public:
+  Prefixed() = default;
+
+  Prefixed(const Inner &inner) : inner_(inner) {
+  }
+
   Inner *operator->() & {
     return &inner_;
   }
@@ -391,6 +460,10 @@ class Prefixed {
 template <FixedString Name>
 class Counter {
  public:
+  Counter() = default;
+  Counter(td::uint64 value) : value_(value) {
+  }
+
   void inc(td::uint64 delta = 1) {
     value_ += delta;
   }
@@ -420,6 +493,10 @@ class Counter {
 template <FixedString Name, typename T = double>
 class Gauge {
  public:
+  Gauge() = default;
+  Gauge(T value) : value_(value) {
+  }
+
   void set(T value) {
     value_ = value;
   }
