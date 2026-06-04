@@ -4,8 +4,15 @@ import shutil
 from pathlib import Path
 
 from contract import WalletV1Blueprint, ton
+from tonapi import ton_api
 from tontester.install import Install
 from tontester.network import FullNode, Network
+from tontester.zerostate import SimplexConsensusConfig
+
+
+async def _add_custom_overlay(node: FullNode, overlay: ton_api.Engine_validator_customOverlay):
+    request = ton_api.Engine_validator_addCustomOverlayRequest(overlay=overlay)
+    _ = await node.engine_console.request(request)
 
 
 async def main():
@@ -27,11 +34,13 @@ async def main():
         dht = network.create_dht_node()
 
         network.config.shard_validators = 2
+        network.config.shard_consensus = SimplexConsensusConfig(use_quic=True)
 
         nodes: list[FullNode] = []
-        for _ in range(2):
+        for i in range(3):
             node = network.create_full_node()
-            node.make_initial_validator()
+            if i != 0:
+                node.make_initial_validator()
             node.announce_to(dht)
             nodes.append(node)
 
@@ -63,6 +72,37 @@ async def main():
 
         wallet_state = await main_wallet.current
         assert wallet_state.seqno == 1
+
+        # After ~10 masterchain blocks, wire up a custom overlay between
+        # node 0 (non-validator) and node 2 (validator). Node 2 is a block
+        # producer, so it acts as the block sender; node 0 only receives.
+        await network.wait_mc_block(seqno=10)
+
+        overlay = ton_api.Engine_validator_customOverlay(
+            name="test-basic-custom",
+            nodes=[
+                ton_api.Engine_validator_customOverlayNode(
+                    adnl_id=nodes[0].fullnode_key.id,
+                    msg_sender=False,
+                    msg_sender_priority=0,
+                    block_sender=False,
+                ),
+                ton_api.Engine_validator_customOverlayNode(
+                    adnl_id=nodes[2].fullnode_key.id,
+                    msg_sender=False,
+                    msg_sender_priority=0,
+                    block_sender=True,
+                ),
+            ],
+            sender_shards=[],
+            skip_public_msg_send=False,
+            use_quic=False,
+        )
+
+        await _add_custom_overlay(nodes[0], overlay)
+        await _add_custom_overlay(nodes[2], overlay)
+
+        await asyncio.Future()
 
 
 if __name__ == "__main__":
