@@ -137,7 +137,7 @@ class SimplexConsensusConfig:
     slots_per_leader_window: int = 4
     first_block_timeout_ms: int = 700
     use_quic: bool = True
-    enable_block_observers: bool = True
+    protocol_version: int = 2
 
 
 @dataclass
@@ -577,7 +577,7 @@ def _build_config_params(
     def convert_simplex_config(config: SimplexConsensusConfig) -> simplex_config_v2:
         return simplex_config_v2(
             flags=0,
-            enable_block_observers=config.enable_block_observers,
+            protocol_version=config.protocol_version,
             use_quic=config.use_quic,
             slots_per_leader_window=config.slots_per_leader_window,
             noncritical_params={
