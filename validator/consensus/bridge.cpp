@@ -282,26 +282,30 @@ class BridgeImpl final : public IValidatorGroup {
     bus->stop_promise = std::move(stop_promise);
 
     td::actor::Runtime runtime;
-    if (params_.identity.is_validator()) {
-      bus->db = std::make_unique<DbImpl>(db_path());
 
+    bus->db = std::make_unique<DbImpl>(db_path());
+    simplex::Db::register_in(runtime);
+    simplex::Pool::register_in(runtime);
+
+    if (bus->is_validator()) {
       BlockAccepter::register_in(runtime);
       BlockProducer::register_in(runtime);
       BlockValidator::register_in(runtime);
-      PrivateOverlay::register_in(runtime);
       TraceCollector::register_in(runtime);
       simplex::CandidateResolver::register_in(runtime);
       simplex::Consensus::register_in(runtime);
-      simplex::Db::register_in(runtime);
-      simplex::Pool::register_in(runtime);
       simplex::StateResolver::register_in(runtime);
-    } else {
-      CHECK(params_.config.enable_block_sync());
-      runtime.register_actor<BlockSyncObserver>("BlockSyncObserver");
+    }
+
+    if (bus->is_validator() || bus->config.observers_in_private_overlay()) {
+      PrivateOverlay::register_in(runtime);
     }
 
     if (params_.config.enable_block_sync()) {
       BlockSyncOverlay::register_in(runtime);
+      if (!bus->is_validator()) {
+        runtime.register_actor<BlockSyncObserver>("BlockSyncObserver");
+      }
     }
 
     bus_ = runtime.start(bus, name_);
@@ -318,7 +322,7 @@ class BridgeImpl final : public IValidatorGroup {
       bus_ = {};
       co_await std::move(stop_waiter_.value());
       LOG(INFO) << "Consensus bus stopped";
-      if (params_.identity.is_validator()) {
+      if (bus_->db) {
         auto path = db_path();
         auto S = td::RocksDb::destroy(path);
 
