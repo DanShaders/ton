@@ -33,20 +33,6 @@ class QuicSender : public adnl::AdnlSenderEx {
   void add_id(adnl::AdnlNodeIdShort local_id) override;
   void log_stats(std::string reason = "stats");
 
-  struct Stats {
-    struct Entry {
-      QuicServer::Stats::Entry server_stats = {};
-
-      Entry operator+(const Entry& other) const {
-        return {.server_stats = server_stats + other.server_stats};
-      }
-    };
-
-    Entry summary = {.server_stats = {.total_conns = 0}};
-    std::map<AdnlPath, Entry> per_path;
-  };
-
-  td::actor::Task<Stats> collect_stats();
   td::actor::Task<> collect(metrics::Context ctx);
 
  protected:
@@ -83,6 +69,9 @@ class QuicSender : public adnl::AdnlSenderEx {
   std::map<int, td::actor::ActorOwn<QuicServer>> servers_by_port_;
   std::map<adnl::AdnlNodeIdShort, td::actor::ActorId<QuicServer>> servers_by_id_;
   std::map<adnl::AdnlNodeIdShort, td::Ed25519::PrivateKey> local_keys_;
+
+  metrics::TransferStats transfers_;
+  metrics::App app_;
 
   void start_up() override;
 

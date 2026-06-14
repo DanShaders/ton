@@ -13,6 +13,7 @@
 #include "adnl/adnl-node-id.hpp"
 #include "adnl/utils.hpp"
 #include "crypto/common/refcnt.hpp"
+#include "metrics/well-known.h"
 #include "td/actor/ActorOwn.h"
 #include "td/actor/core/Actor.h"
 #include "td/utils/Heap.h"
@@ -115,28 +116,6 @@ class QuicServer : public td::actor::Actor, public td::ObserverBase {
   static td::Result<td::actor::ActorOwn<QuicServer>> create(int port, std::unique_ptr<Callback> callback,
                                                             td::uint64 default_mtu, ServerIdentity identity,
                                                             td::Slice alpn, td::Slice bind_host, Options options);
-
-  struct Stats {
-    struct Entry {
-      size_t total_conns = 1;
-      QuicConnectionStats impl_stats = {};
-
-      Entry operator+(const Entry &other) const {
-        Entry res = {.total_conns = total_conns + other.total_conns, .impl_stats = impl_stats + other.impl_stats};
-        auto tc = total_conns + other.total_conns;
-        if (tc > 0)
-          res.impl_stats.mean_rtt = (static_cast<double>(total_conns) * impl_stats.mean_rtt +
-                                     static_cast<double>(other.total_conns) * other.impl_stats.mean_rtt) /
-                                    static_cast<double>(tc);
-        return res;
-      }
-    };
-
-    Entry summary = {.total_conns = 0};
-    std::unordered_map<QuicConnectionId, Entry> per_conn = {};
-  };
-
-  void collect_stats(td::Promise<Stats> P);
 
  protected:
   void start_up() override;
@@ -256,13 +235,7 @@ class QuicServer : public td::actor::Actor, public td::ObserverBase {
   size_t pending_batch_sent_ = 0;
 
   // UDP-level stats
-  struct UdpStats {
-    td::uint64 syscalls = 0;
-    td::uint64 packets = 0;
-    td::uint64 bytes = 0;
-  };
-  UdpStats ingress_stats_;
-  UdpStats egress_stats_;
+  metrics::UdpWireStats udp_stats_;
 
   std::map<adnl::AdnlNodeIdShort, td::uint64> default_mtu_by_local_id_;
   std::map<std::pair<adnl::AdnlNodeIdShort, adnl::AdnlNodeIdShort>, td::uint64> peers_mtu_;

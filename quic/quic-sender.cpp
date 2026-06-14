@@ -276,6 +276,7 @@ QuicSender::QuicSender(td::actor::ActorId<adnl::AdnlPeerTable> adnl, td::actor::
 }
 
 void QuicSender::send_message(adnl::AdnlNodeIdShort src, adnl::AdnlNodeIdShort dst, td::BufferSlice data) {
+  app_.at(metrics::Kind::message, metrics::Direction::out).account(data);
   send_message_coro(src, dst, std::move(data)).start_immediate().detach("quic:send_message");
 }
 
@@ -307,20 +308,6 @@ void QuicSender::log_stats(std::string reason) {
   for (auto &it : servers_by_port_) {
     td::actor::send_closure(it.second.get(), &QuicServer::log_stats, reason);
   }
-}
-
-td::actor::Task<QuicSender::Stats> QuicSender::collect_stats() {
-  Stats stats;
-  for (auto &[_, server] : servers_by_port_) {
-    auto serv_stats = co_await td::actor::ask(server, &QuicServer::collect_stats);
-    stats.summary = stats.summary + Stats::Entry{.server_stats = serv_stats.summary};
-    for (auto &[id, conn_stats] : serv_stats.per_conn) {
-      if (!by_cid_.contains(id))
-        continue;
-      stats.per_path[by_cid_[id]->path] = Stats::Entry{.server_stats = conn_stats};
-    }
-  }
-  co_return stats;
 }
 
 td::actor::Task<> QuicSender::collect(metrics::Context ctx) {
@@ -383,6 +370,7 @@ td::actor::Task<td::Unit> QuicSender::send_message_coro_inner(adnl::AdnlNodeIdSh
 td::actor::Task<td::BufferSlice> QuicSender::send_query_coro(adnl::AdnlNodeIdShort src, adnl::AdnlNodeIdShort dst,
                                                              std::string name, td::Timestamp timeout,
                                                              td::BufferSlice data, std::optional<td::uint64> limit) {
+  app_.at(metrics::Kind::query, metrics::Direction::out).account(data);
   auto conn = co_await find_or_create_connection({src, dst});
   auto query_size = data.size();
   auto query_magic = get_magic(data);

@@ -316,15 +316,16 @@ td::Status QuicServer::send_stateless_datagram(td::Slice packet_kind, const td::
   td::UdpSocketFd::OutboundMessage message{.to = &remote_address, .data = data, .gso_size = 0};
   bool is_sent = false;
   auto status = fd_.send_message(message, is_sent);
-  egress_stats_.syscalls++;
+  auto &egress = udp_stats_.dir.at(metrics::Direction::out);
+  egress.syscalls.inc();
   if (is_sent) {
-    egress_stats_.packets++;
-    egress_stats_.bytes += data.size();
+    egress.data.record(data.size());
   }
   if (status.is_error()) {
     return status;
   }
   if (!is_sent) {
+    egress.dropped.inc();
     LOG(DEBUG) << "dropping stateless " << packet_kind << " to " << remote_address << ": send_message blocked";
     return td::Status::OK();
   }
@@ -436,13 +437,7 @@ void QuicServer::shutdown_stream(QuicConnectionId cid, QuicStreamID sid) {
 }
 
 void QuicServer::collect_stats(td::Promise<Stats> P) {
-  Stats stats;
-  for (auto &[id, conn] : connections_) {
-    Stats::Entry entry{.total_conns = 1, .impl_stats = conn->impl_->get_stats()};
-    stats.summary = stats.summary + entry;
-    stats.per_conn[id] = entry;
-  }
-  return P.set_value(std::move(stats));
+  // TODO
 }
 
 void QuicServer::on_connection_closed(QuicConnectionId cid) {
@@ -496,10 +491,12 @@ void QuicServer::erase_pending_connections() {
 }
 
 void QuicServer::log_stats(std::string reason) {
-  LOG(INFO) << "quic stats (" << reason << "): udp ingress{syscalls=" << ingress_stats_.syscalls
-            << " packets=" << ingress_stats_.packets << " bytes=" << ingress_stats_.bytes
-            << "} egress{syscalls=" << egress_stats_.syscalls << " packets=" << egress_stats_.packets
-            << " bytes=" << egress_stats_.bytes << "}";
+  auto &ingress = udp_stats_.dir.at(metrics::Direction::in);
+  auto &egress = udp_stats_.dir.at(metrics::Direction::out);
+  LOG(INFO) << "quic stats (" << reason << "): udp ingress{syscalls=" << ingress.syscalls.value()
+            << " packets=" << ingress.data.packets.value() << " bytes=" << ingress.data.bytes.value()
+            << "} egress{syscalls=" << egress.syscalls.value() << " packets=" << egress.data.packets.value()
+            << " bytes=" << egress.data.bytes.value() << "}";
   if (connections_.empty()) {
     return;
   }
@@ -687,7 +684,8 @@ void QuicServer::drain_ingress() {
       }
       break;
     }
-    ingress_stats_.syscalls++;
+    auto &ingress = udp_stats_.dir.at(metrics::Direction::in);
+    ingress.syscalls.inc();
 
     // Debug: log recvmmsg batch details periodically
     static std::atomic<size_t> ingress_log_counter = 0;
@@ -726,11 +724,11 @@ void QuicServer::drain_ingress() {
         continue;
       }
       ingress_msg_[i].storage = ingress_messages_[i].data;
-      ingress_stats_.bytes += ingress_msg_[i].storage.size();
+      ingress.data.bytes.inc(ingress_msg_[i].storage.size());
       const size_t segment_size = ingress_messages_[i].gso_size;
 
       auto handle_packet = [&](UdpMessageBuffer &packet) {
-        ingress_stats_.packets++;
+        ingress.data.packets.inc();
         auto R = get_or_create_connection(packet);
         if (R.is_error()) {
           LOG(WARNING) << "dropping inbound packet from " << packet.address << ": " << R.error();
