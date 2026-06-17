@@ -64,6 +64,13 @@ struct ResolveCandidate {
   std::string contents_to_string() const;
 };
 
+struct RehydrateCandidate {
+  using ReturnType = CandidateRef;
+
+  CandidateId id;
+  std::string contents_to_string() const;
+};
+
 struct StoreCandidate {
   using ReturnType = td::Unit;
 
@@ -96,13 +103,15 @@ struct SaveCertificate {
 class Bus : public consensus::Bus {
  public:
   using Parent = consensus::Bus;
-  using Events = td::TypeList<BroadcastVote, NotarizationObserved, FinalizationObserved, LeaderWindowObserved,
-                              WaitForParent, ResolveCandidate, StoreCandidate, ResolveState, SaveCertificate>;
+  using Events =
+      td::TypeList<BroadcastVote, NotarizationObserved, FinalizationObserved, LeaderWindowObserved, WaitForParent,
+                   ResolveCandidate, StoreCandidate, ResolveState, SaveCertificate, RehydrateCandidate>;
 
   Bus() = default;
 
   std::vector<CertificateRef<Vote>> bootstrap_certificates;
   std::vector<Vote> bootstrap_votes;
+  std::vector<CandidateId> bootstrap_candidates;
 
   td::uint32 first_nonannounced_window = 0;
 };

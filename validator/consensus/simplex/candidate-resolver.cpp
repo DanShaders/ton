@@ -19,15 +19,6 @@ using CandidateAndCertRef = tl_object_ptr<candidateAndCert>;
 using requestCandidate = ton_api::consensus_simplex_requestCandidate;
 using RequestCandidateRef = tl_object_ptr<requestCandidate>;
 
-using db_key_candidateResolver_candidateInfo = ton_api::consensus_simplex_db_key_candidateResolver_candidateInfo;
-using db_key_candidateResolver_candidateInfoRef = tl_object_ptr<db_key_candidateResolver_candidateInfo>;
-
-using db_candidateResolver_candidateInfo = ton_api::consensus_simplex_db_candidateResolver_candidateInfo;
-using db_candidateResolver_candidateInfoRef = tl_object_ptr<db_candidateResolver_candidateInfo>;
-
-using db_key_candidate = ton_api::consensus_simplex_db_key_candidate;
-using db_key_candidateRef = tl_object_ptr<db_key_candidate>;
-
 }  // namespace tl
 
 namespace {
@@ -241,7 +232,6 @@ class CandidateResolverImpl : public td::actor::SpawnsWith<Bus>, public td::acto
     auto &bus = *owning_bus();
 
     size_t notar_certs_count = 0;
-    size_t candidate_count = 0;
 
     // Load all notarization certificates we have.
     for (auto cert : bus.bootstrap_certificates) {
@@ -256,33 +246,22 @@ class CandidateResolverImpl : public td::actor::SpawnsWith<Bus>, public td::acto
     }
 
     // Load all candidate metadata entries we have.
-    auto candidates = bus.db->get_by_prefix(tl::db_key_candidateResolver_candidateInfo::ID);
-    for (auto &[key_str, value_str] : candidates) {
-      auto key = fetch_tl_object<tl::db_key_candidateResolver_candidateInfo>(key_str, true).move_as_ok();
-      CandidateId id = CandidateId::from_tl(key->candidateId_);
-      auto &state = state_[id];
-
-      if (value_str.empty()) {
-        ++candidate_count;
-        state.candidate_in_db = true;
-      }
+    for (auto id : bus.bootstrap_candidates) {
+      state_[id].candidate_in_db = true;
     }
 
-    LOG(INFO) << "Loaded " << notar_certs_count << " notarization certificates and " << candidate_count
+    LOG(INFO) << "Loaded " << notar_certs_count << " notarization certificates and " << bus.bootstrap_candidates.size()
               << " candidates metadata entries from db";
   }
 
   td::actor::Task<bool> try_load_candidate_data_from_db(CandidateId id, CandidateState &state) {
-    auto &bus = *owning_bus();
-
     if (state.candidate_and_cert.candidate.has_value()) {
       co_return true;
     }
 
     if (state.candidate_in_db) {
-      auto contents_key = create_serialize_tl_object<tl::db_key_candidate>(id.to_tl());
-      auto data = bus.db->get(std::move(contents_key)).value();
-      state.candidate_and_cert.candidate = Candidate::deserialize(data, bus).move_as_ok();
+      state.candidate_and_cert.candidate = co_await owning_bus().publish<RehydrateCandidate>(id);
+      co_return true;
     }
 
     co_return false;

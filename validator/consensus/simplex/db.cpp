@@ -30,11 +30,11 @@ using db_key_poolStateRef = tl_object_ptr<db_key_poolState>;
 using db_poolState = ton_api::consensus_simplex_db_poolState;
 using db_poolStateRef = tl_object_ptr<db_poolState>;
 
-using db_key_candidateResolver_notarCert = ton_api::consensus_simplex_db_key_candidateResolver_notarCert;
-using db_key_candidateResolver_notarCertRef = tl_object_ptr<db_key_candidateResolver_notarCert>;
+using db_key_candidateResolver_candidateInfo = ton_api::consensus_simplex_db_key_candidateResolver_candidateInfo;
+using db_key_candidateResolver_candidateInfoRef = tl_object_ptr<db_key_candidateResolver_candidateInfo>;
 
-using db_candidateResolver_notarCert = ton_api::consensus_simplex_db_candidateResolver_notarCert;
-using db_candidateResolver_notarCertRef = tl_object_ptr<db_candidateResolver_notarCert>;
+using db_key_candidate = ton_api::consensus_simplex_db_key_candidate;
+using db_key_candidateRef = tl_object_ptr<db_key_candidate>;
 
 }  // namespace tl
 
@@ -47,6 +47,7 @@ class DbImpl : public td::actor::SpawnsWith<Bus>, public td::actor::ConnectsTo<B
   DbImpl(Bus& bus) {
     init_pool_state(bus);
     init_votes(bus);
+    init_candidate_index(bus);
   }
 
   template <>
@@ -105,6 +106,39 @@ class DbImpl : public td::actor::SpawnsWith<Bus>, public td::actor::ConnectsTo<B
     co_return result;
   }
 
+  template <>
+  td::actor::Task<CandidateRef> process(BusHandle, std::shared_ptr<RehydrateCandidate> event) {
+    auto& bus = *owning_bus();
+
+    CHECK(saved_candidates_.contains(event->id));
+    auto contents_key = create_serialize_tl_object<tl::db_key_candidate>(event->id.to_tl());
+    auto data = bus.db->get(std::move(contents_key)).value();
+
+    co_return Candidate::deserialize(data, bus).move_as_ok();
+  }
+
+  template <>
+  td::actor::Task<> process(BusHandle, std::shared_ptr<StoreCandidate> request) {
+    auto id = request->candidate->id;
+
+    if (saved_candidates_.contains(id)) {
+      co_return {};
+    }
+    saved_candidates_.insert(id);
+
+    auto contents_key = create_serialize_tl_object<tl::db_key_candidate>(id.to_tl());
+    auto result1 = co_await owning_bus()->db->set(std::move(contents_key), request->candidate->serialize()).wrap();
+    CHECK(result1.is_ok() || result1.error().code() == cancelled);
+    if (!result1.is_ok()) {
+      co_return result1;
+    }
+
+    auto index_key = create_serialize_tl_object<tl::db_key_candidateResolver_candidateInfo>(id.to_tl());
+    auto result2 = co_await owning_bus()->db->set(std::move(index_key), td::BufferSlice()).wrap();
+    CHECK(result2.is_ok() || result2.error().code() == cancelled);
+    co_return result2;
+  }
+
  private:
   void init_pool_state(Bus& bus) {
     auto pool_state_str = bus.db->get(pool_state_key);
@@ -154,8 +188,19 @@ class DbImpl : public td::actor::SpawnsWith<Bus>, public td::actor::ConnectsTo<B
     bus.bootstrap_votes = td::transform(our_votes, [](const OurVote& v) { return v.vote; });
   }
 
+  void init_candidate_index(Bus& bus) {
+    auto candidates = bus.db->get_by_prefix(tl::db_key_candidateResolver_candidateInfo::ID);
+    for (auto& [key_str, value_str] : candidates) {
+      auto key = fetch_tl_object<tl::db_key_candidateResolver_candidateInfo>(key_str, true).move_as_ok();
+      CandidateId id = CandidateId::from_tl(key->candidateId_);
+      bus.bootstrap_candidates.push_back(id);
+      saved_candidates_.insert(id);
+    }
+  }
+
   const td::BufferSlice pool_state_key = create_serialize_tl_object<tl::db_key_poolState>();
   std::set<Bits256> saved_votes;
+  std::set<CandidateId> saved_candidates_;
   td::uint32 first_nonannounced_window_ = 0;
   td::int64 next_seqno_ = 0;
 };
