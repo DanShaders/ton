@@ -2,7 +2,6 @@ import hashlib
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Never, override
 
 import nacl.signing
 from bitarray import bitarray
@@ -76,8 +75,7 @@ from contract import (
     WalletV1Blueprint,
     ton,
 )
-from pytoniq_core import Address, Builder, Cell, CurrencyCollection
-from pytoniq_core import StateInit as PyStateInit
+from pytoniq_core import Address, Cell, CurrencyCollection
 from tlb.hashmap import HashmapDict
 from tlb.object import (
     CellRefType,
@@ -672,51 +670,6 @@ def _collect_public_libraries(smcs: list[_SmcEntry]) -> HashmapDict[LibDescr]:
 
 
 # ---------------------------------------------------------------------------
-# SMC#3 (test tick-tock contract) — built manually, no blueprint
-# ---------------------------------------------------------------------------
-
-# Compiled from Fift assembler — regenerate with extract_contract_bocs.py
-SMC3_CODE = Cell.one_from_boc(
-    "B5EE9C72410104010087000114FF00F4A413F4BCF2C80B0102012002030002D200DFA5FFFF76A268698FE9FFE8E42C5267858F90E785FFE4F6AA6467C444FFB365FFC10802FAF0807D014035E7A064B87D804077E7857FC10803DFD2407D014035E7A064B86467CD8903A32B9BA4410803ADE68AFD014035E7A045EA432B6363796103BB7B9363210C678B64B87D807D804097FA0370"
-)
-SMC3_LIBRARY = Cell.one_from_boc(
-    "B5EE9C724101060100600002016201020142BF5A2EEF5056775F5B9572FF3AD63DD2A71D1FB281CA177A5E1C74730ECCB2E513030142BF412429205EA66D6F2004EDFA570F6F56B3E85E59BAA1BEFBC73B7DA5D55BDC6104000FABACABADABACABA80104123405000456789B1D76B1"
-)
-WALLET_LIBRARY = Cell.one_from_boc(
-    "B5EE9C724101060100600002016201020142BF5A2EEF5056775F5B9572FF3AD63DD2A71D1FB281CA177A5E1C74730ECCB2E513030142BF412429205EA66D6F2004EDFA570F6F56B3E85E59BAA1BEFBC73B7DA5D55BDC6004000FABACABADABACABA801041234050004567876607CBC"
-)
-
-
-def _register_smc3(zs: ZerostateBuilder, wallet_addr: int) -> Address:
-    """Register SMC#3 (tick-tock test contract) directly into the zerostate."""
-    assert SMC3_CODE is not None and SMC3_LIBRARY is not None
-    data = Builder().store_uint(0x11EF55AA, 32).store_uint(wallet_addr, 256).end_cell()
-    from pytoniq_core.tlb.account import TickTock
-
-    si = PyStateInit(
-        special=TickTock(tick=True, tock=True),
-        code=SMC3_CODE,
-        data=data,
-        library=SMC3_LIBRARY,
-    )
-    addr = Address((-1, si.serialize().hash))
-    zs.smcs.append(_SmcEntry(blueprint=_RawBlueprint(si, addr), balance=ton(1).grams))
-    return addr
-
-
-@dataclass
-class _RawBlueprint(ContractBlueprint[Never]):
-    """Minimal ContractBlueprint for contracts not backed by a Blueprint subclass."""
-
-    state_init: PyStateInit
-    address: Address
-
-    @override
-    def materialize(self, provider: Provider) -> Never:
-        raise NotImplementedError
-
-
-# ---------------------------------------------------------------------------
 # Zerostate result
 # ---------------------------------------------------------------------------
 
@@ -765,12 +718,7 @@ def create_zerostate(
 
     wallet_bp = WalletV1Blueprint(workchain=-1, private_key=wallet_key)
     wallet_bp.address = Address((-1, b"\x00" * 32))
-    # Add test library to wallet state_init (for Fift parity — will be removed later)
-    wallet_bp.state_init.library = WALLET_LIBRARY
     zs.deploy(wallet_bp, ton(4_999_990_000))
-
-    # --- SMC#3 (test tick-tock) ---
-    smc3_addr: Address | None = _register_smc3(zs, 0)  # wallet addr is AllOnes*0 = 0
 
     # --- Elector ---
     elector_bp = ElectorBlueprint()
@@ -858,7 +806,6 @@ def create_zerostate(
     special_dict: HashmapDict[None] = HashmapDict(256, UnitTypeInfo)
     special_dict[int.from_bytes(wallet_bp.address.hash_part, "big")] = None
     special_dict[int.from_bytes(elector_bp.address.hash_part, "big")] = None
-    special_dict[int.from_bytes(smc3_addr.hash_part, "big")] = None
     config_params.append(ConfigParam_31(fundamental_smc_addr=special_dict))
 
     # --- Rebuild config blueprint with all params and deploy ---
