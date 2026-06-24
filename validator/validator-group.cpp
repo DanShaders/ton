@@ -186,6 +186,17 @@ SessionInfo session_info(const Context &ctx, ShardIdFull shard, td::Ref<block::V
     }
   }
 
+  CollatorsByValidator collators_by_validator;
+  for (auto &n : validator_set->export_vector()) {
+    auto pub = PublicKey{pubkeys::Ed25519{n.key}};
+    auto id = pub.compute_short_id();
+    if (!ctx.collators_by_validator.contains(id)) {
+      collators_by_validator[id] = {};
+    } else {
+      collators_by_validator[id] = ctx.collators_by_validator.at(id);
+    }
+  }
+
   return {
       .shard = shard,
       .validator_set = validator_set,
@@ -193,7 +204,7 @@ SessionInfo session_info(const Context &ctx, ShardIdFull shard, td::Ref<block::V
       .config = config,
       .overlay_members = ctx.overlay_members.all,
       .identities = std::move(identities),
-      .collators_by_validator = ctx.collators_by_validator,
+      .collators_by_validator = collators_by_validator,
   };
 }
 
