@@ -133,4 +133,10 @@ struct DefaultCollatorSchedule {
   static void provide_for(td::actor::Runtime&);
 };
 
+// Collator/validator split: runs on a node serving as a collator. Receives consensus.pleaseCollate from a
+// leader, collates the window on its behalf, co-signs, and broadcasts the candidate as the leader's.
+struct CollatorProducer {
+  static void register_in(td::actor::Runtime&);
+};
+
 }  // namespace ton::validator::consensus::simplex

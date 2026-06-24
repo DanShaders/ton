@@ -2322,8 +2322,9 @@ void ValidatorManagerImpl::update_shards() {
       .quic = quic_,
       .db_root = db_root_,
       .validator_keys = validator_keys_,
+      .local_collator_adnl_ids = local_collator_adnl_ids_,
   };
-  network_state_->update(*last_masterchain_state_, ctx);
+  network_state_->update(last_masterchain_state_, ctx);
 
   if (last_masterchain_state_->rotated_all_shards()) {
     CHECK(last_masterchain_block_handle_->received_state());
@@ -3097,11 +3098,11 @@ void ValidatorManagerImpl::update_options(td::Ref<ValidatorManagerOptions> opts)
 }
 
 void ValidatorManagerImpl::add_collator(adnl::AdnlNodeIdShort id, ShardIdFull shard) {
-  LOG(ERROR) << "add_collator is not implemented";
+  local_collator_adnl_ids_.insert(id);
 }
 
 void ValidatorManagerImpl::del_collator(adnl::AdnlNodeIdShort id, ShardIdFull shard) {
-  LOG(ERROR) << "del_collator is not implemented";
+  local_collator_adnl_ids_.erase(id);
 }
 
 void ValidatorManagerImpl::get_collation_manager_stats(

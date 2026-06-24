@@ -29,10 +29,13 @@ namespace validator {
 
 class ValidatorManager;
 
+using CollatorsByValidator = std::map<PublicKeyHash, std::vector<adnl::AdnlNodeIdShort>>;
+
 struct GroupIdentity {
   adnl::AdnlNodeIdShort adnl_id;
   std::optional<PublicKeyHash> short_id;
   bool suffix_db = true;
+  bool is_dedicated_collator = false;
 
   std::strong_ordering operator<=>(const GroupIdentity&) const = default;
 
@@ -58,6 +61,7 @@ struct GroupParams {
   std::string db_root;
 
   std::vector<adnl::AdnlNodeIdShort> all_validators;
+  CollatorsByValidator collators_by_validator;
 };
 
 class IValidatorGroup : public td::actor::Actor {
@@ -82,6 +86,7 @@ struct ManagerContext {
   std::string db_root;
 
   std::set<PublicKeyHash> validator_keys;
+  std::set<adnl::AdnlNodeIdShort> local_collator_adnl_ids;
 };
 
 struct ValidatorGroupCount {
@@ -95,7 +100,7 @@ class NetworkState {
 
   static std::unique_ptr<NetworkState> create(BlockSeqno start_seqno);
 
-  virtual void update(const MasterchainState& state, ManagerContext ctx) = 0;
+  virtual void update(td::Ref<MasterchainState> state, ManagerContext ctx) = 0;
   virtual void update_options(td::Ref<ValidatorManagerOptions> opts) = 0;
 
   virtual ValidatorGroupCount validator_group_count() const = 0;

@@ -64,7 +64,33 @@ class BlockProducerImpl : public td::actor::SpawnsWith<Bus>, public td::actor::C
 
     current_leader_window_ = event->start_slot;
     cancellation_source_ = td::CancellationTokenSource();
+
+    auto& bus = *owning_bus();
+    auto it = bus.collators_by_validator.find(bus.local_id->short_id);
+    if (bus.config.collators_in_overlay() && it != bus.collators_by_validator.end() && !it->second.empty()) {
+      LOG(INFO) << "Collator/validator split: delegating window " << event->start_slot << " to collator "
+                << it->second.front();
+      delegate_window(event, it->second.front()).start().detach();
+      return;
+    }
+
     generate_candidates(event).start().detach();
+  }
+
+  td::actor::Task<> delegate_window(std::shared_ptr<const OurLeaderWindowStarted> event,
+                                    adnl::AdnlNodeIdShort collator) {
+    auto& bus = *owning_bus();
+    auto window =
+        create_serialize_tl_object<ton_api::consensus_collatorWindow>(static_cast<td::int32>(event->start_slot));
+    auto envelope = create_serialize_tl_object<ton_api::consensus_dataToSign>(bus.session_id, std::move(window));
+    auto signature = co_await td::actor::ask(bus.keyring, &keyring::Keyring::sign_message, bus.local_id->short_id,
+                                             std::move(envelope));
+    auto please = create_tl_object<ton_api::consensus_pleaseCollate>(
+        CandidateId::parent_id_to_tl(event->base), static_cast<td::int32>(event->start_slot),
+        static_cast<td::int32>(event->end_slot), std::move(signature));
+    owning_bus().publish<OutgoingProtocolMessage>(OutgoingProtocolMessage::SendToPeer{collator},
+                                                  ProtocolMessage{please});
+    co_return {};
   }
 
   template <>

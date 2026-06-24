@@ -51,6 +51,12 @@ struct CandidateGenerated {
   CandidateRef candidate;
   std::optional<adnl::AdnlNodeIdShort> collator_id;
 
+  // Collator/validator split: set when this candidate was produced by THIS node acting as a remote collator on
+  // a leader's behalf. `collator_pubkey` is our full ed25519 key; `delegation_signature` is the leader's
+  // signature over the window (forwarded from its pleaseCollate request). Both go into the broadcast extra.
+  std::optional<td::Bits256> collator_pubkey;
+  td::BufferSlice delegation_signature;
+
   std::string contents_to_string() const;
 };
 
@@ -88,8 +94,11 @@ struct OutgoingProtocolMessage {
   struct BroadcastToRandom {
     size_t count;
   };
+  struct SendToPeer {
+    adnl::AdnlNodeIdShort peer;
+  };
 
-  using Recipient = std::variant<BroadcastToAll, BroadcastToRandom>;
+  using Recipient = std::variant<BroadcastToAll, BroadcastToRandom, SendToPeer>;
 
   Recipient recipient;
   ProtocolMessage message;
@@ -199,7 +208,14 @@ class Bus : public td::actor::Bus {
   std::optional<PeerValidator> local_id;
 
   adnl::AdnlNodeIdShort local_adnl_id;
+  // Collator/validator split (protocol_version >= 2): set when this node joined the group as a dedicated collator
+  // rather than a validator. Its collator adnl id is then `local_adnl_id`.
+  bool is_dedicated_collator = false;
+
   std::vector<adnl::AdnlNodeIdShort> all_validators;
+  // Each authorizing validator (its public key hash) maps to the collator adnl ids it published in the on-chain
+  // registry.
+  std::map<PublicKeyHash, std::vector<adnl::AdnlNodeIdShort>> collators_by_validator;
 
   NewConsensusConfig config;
 

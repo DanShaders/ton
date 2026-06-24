@@ -137,6 +137,9 @@ class SimplexConsensusConfig:
     slots_per_leader_window: int = 4
     first_block_timeout_ms: int = 1000
     max_leader_window_desync: int = 2
+    # protocol_version > 0 selects simplex_config_v2 (param 30). >= 2 enables observers + the
+    # collator/validator split in the private overlay.
+    protocol_version: int = 0
 
 
 @dataclass
@@ -150,6 +153,7 @@ class NetworkConfig:
     mc_consensus: SimplexConsensusConfig | None = None
     shard_valgroup_lifetime: int = 250
     shard_consensus: SimplexConsensusConfig | None = None
+    max_collators_per_validator: int = 5
 
 
 @dataclass
@@ -268,6 +272,36 @@ def _build_shard_accounts(smcs: list[_SmcEntry], workchain_id: int) -> ShardAcco
 # ---------------------------------------------------------------------------
 # Config parameters
 # ---------------------------------------------------------------------------
+
+
+def _build_simplex_config(c: SimplexConsensusConfig) -> NewConsensusConfig:
+    """Build the param-30 NewConsensusConfig for one chain. protocol_version > 0 uses simplex_config_v2,
+    which carries protocol_version and moves the runtime knobs into the noncritical_params hashmap."""
+    if c.protocol_version == 0:
+        return simplex_config(
+            flags=0,
+            use_quic=True,
+            target_rate_ms=c.target_block_rate_ms,
+            slots_per_leader_window=c.slots_per_leader_window,
+            first_block_timeout_ms=c.first_block_timeout_ms,
+            max_leader_window_desync=c.max_leader_window_desync,
+        )
+    from block.generated import simplex_config_v2
+
+    # Keys mirror ENUMERATE_NONCRITICAL_PARAMS in ton/ton-types.h (0=target_rate, 1=first_block_timeout,
+    # 10=max_leader_window_desync). Omitted keys fall back to the C++ defaults.
+    noncritical: dict[int, int] = {
+        0: c.target_block_rate_ms,
+        1: c.first_block_timeout_ms,
+        10: c.max_leader_window_desync,
+    }
+    return simplex_config_v2(
+        flags=0,
+        protocol_version=c.protocol_version,
+        use_quic=True,
+        slots_per_leader_window=c.slots_per_leader_window,
+        noncritical_params=noncritical,
+    )
 
 
 def _build_config_params(
@@ -569,23 +603,9 @@ def _build_config_params(
     mc_ncp: NewConsensusConfig | None = None
     shard_ncp: NewConsensusConfig | None = None
     if isinstance(config.mc_consensus, SimplexConsensusConfig):
-        mc_ncp = simplex_config(
-            flags=0,
-            use_quic=True,
-            target_rate_ms=config.mc_consensus.target_block_rate_ms,
-            slots_per_leader_window=config.mc_consensus.slots_per_leader_window,
-            first_block_timeout_ms=config.mc_consensus.first_block_timeout_ms,
-            max_leader_window_desync=config.mc_consensus.max_leader_window_desync,
-        )
+        mc_ncp = _build_simplex_config(config.mc_consensus)
     if isinstance(config.shard_consensus, SimplexConsensusConfig):
-        shard_ncp = simplex_config(
-            flags=0,
-            use_quic=True,
-            target_rate_ms=config.shard_consensus.target_block_rate_ms,
-            slots_per_leader_window=config.shard_consensus.slots_per_leader_window,
-            first_block_timeout_ms=config.shard_consensus.first_block_timeout_ms,
-            max_leader_window_desync=config.shard_consensus.max_leader_window_desync,
-        )
+        shard_ncp = _build_simplex_config(config.shard_consensus)
     params.append(
         ConfigParam_30(
             field=new_consensus_config_all(
@@ -686,6 +706,29 @@ WALLET_LIBRARY = Cell.one_from_boc(
     "B5EE9C724101060100600002016201020142BF5A2EEF5056775F5B9572FF3AD63DD2A71D1FB281CA177A5E1C74730ECCB2E513030142BF412429205EA66D6F2004EDFA570F6F56B3E85E59BAA1BEFBC73B7DA5D55BDC6004000FABACABADABACABA801041234050004567876607CBC"
 )
 
+# ---------------------------------------------------------------------------
+# Validator registry (governance contract storing per-validator collator lists)
+# ---------------------------------------------------------------------------
+
+# Fixed masterchain address (mirrors gen-zerostate.fif: 0xABAB...AB).
+_REGISTRY_ADDR = int.from_bytes(b"\xab" * 32, "big")
+# Compiled from crypto/smartcont/validator-registry.fif via the built fift binary.
+REGISTRY_CODE = Cell.one_from_boc(
+    "B5EE9C7201020E010002D0000114FF00F4A413F4BCF2C80B0102012002030202D0040502F6F2D31F21821032B85A9BBAE30221821034BDAA6CBA8E4331D4D1802EF833206EF2D38FD0D72C21B008B1F4F2BF810120D721D3000193D70BFF92306DE2206EB39721F90021BAC3009170E2F2E390F82AF900BDF2E391FB04F800E0018210CDB9D286BAF2E3848308D71820C8CEF91601D72C27DEC15814F2BFD31F080902012006070069401F833206E9130E0D020D74A9130E1D74C208010F4866FA5908E1601D32731D70BFFC840148307F44351218010F47C6FA5E85F03800012000E5081BA44C383435CB09D5C164E93CAFFD0134C0C870427CB8E3886B9B04B5C04C74600BBE0CC81BBCB4E3F435CB086C022C7D3CAFF4FFCC75C2C7DC08A0C1FD219BE964238A80A914C0EEFCB8E14075CB08206C89293CAFF4C0C870427CB8E3886B9B04B5C04C745444E0C1FD1F1BE97A17C16001FE31D1ED44D0D72C24DE391544F2BFF404D31FD1F834016F125CB9F2E386F8006D802001F002802201F002802401F002238307F4866FA5327091028E3D53058307F47C6FA53253248307F40E6FA13191329950278307F45B305066E202A4208014A9088E14C8CF926F1C8AA25270F40026CF0B1FC9ED54F80FDFE810345F04C80A02FAD307D30FD31FF404D1F834016F1215BAF2E38722C020917F9522C022C300E2917F9522C024C300E2F2E388F823A67821BCF2E389F823BCF2E38A01F833206EF2D38BD020D74AC200F2E38BD74C8010F40EF2E38BD32731D70BFFED44D0D72C24DE391544F2BFF404D31FD153218307F40E6FA19330706DE30DF82358BE0C0D011689CF1612F400CB1FC9ED540B00089BC722A8001CD72C22BBB37764F2BFD31FF404D100BAF2E38C541563F910F2E38DF800F823A678C8CF915DD9BBB221CF0B1F16F40052228307F443C8CF926F1C8AA25210F40024CF0B1FC9ED54F80F22F001C8CF915DD9BBB215CB1F12F40040138307F443C8CF926F1C8AA2F400CB1FC9ED54"
+)
+
+
+def _register_validator_registry(zs: ZerostateBuilder) -> Address:
+    """Register the validator-registry special contract (mirrors gen-zerostate.fif)."""
+    # Storage: tag 0x9bc722a8 + empty registry HashmapE (1 bit) + last_cleanup_key_block_seqno:uint32
+    data = (
+        Builder().store_uint(0x9BC722A8, 32).store_uint(0, 1).store_uint(0, 32).end_cell()
+    )
+    si = PyStateInit(special=None, code=REGISTRY_CODE, data=data)
+    addr = Address((-1, _REGISTRY_ADDR.to_bytes(32, "big")))
+    zs.smcs.append(_SmcEntry(blueprint=_RawBlueprint(si, addr), balance=ton(10).grams))
+    return addr
+
 
 def _register_smc3(zs: ZerostateBuilder, wallet_addr: int) -> Address:
     """Register SMC#3 (tick-tock test contract) directly into the zerostate."""
@@ -776,6 +819,9 @@ def create_zerostate(
     elector_bp = ElectorBlueprint()
     zs.deploy(elector_bp, ton(10))
 
+    # --- Validator registry ---
+    registry_addr = _register_validator_registry(zs)
+
     # --- Config params (needs wallet addr for minter) ---
     wallet_addr_int = 0  # AllOnes * 0
     config_params = _build_config_params(config, validator_keys, now_time, wallet_addr_int)
@@ -859,7 +905,21 @@ def create_zerostate(
     special_dict[int.from_bytes(wallet_bp.address.hash_part, "big")] = None
     special_dict[int.from_bytes(elector_bp.address.hash_part, "big")] = None
     special_dict[int.from_bytes(smc3_addr.hash_part, "big")] = None
+    special_dict[int.from_bytes(registry_addr.hash_part, "big")] = None
     config_params.append(ConfigParam_31(fundamental_smc_addr=special_dict))
+
+    # --- Add param 46 (validator registry config) ---
+    from block.generated import ConfigParam_46, ValRegistryConfig
+
+    config_params.append(
+        ConfigParam_46(
+            field=ValRegistryConfig(
+                contract_address=_bits256_int(_REGISTRY_ADDR),
+                max_collators_per_validator=config.max_collators_per_validator,
+                new_code_hash=None,
+            )
+        )
+    )
 
     # --- Rebuild config blueprint with all params and deploy ---
     config_bp = ConfigBlueprint(config_params)

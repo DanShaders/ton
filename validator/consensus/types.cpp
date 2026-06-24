@@ -105,7 +105,8 @@ tl::CandidateHashDataRef CandidateHashData::to_tl() const {
 }
 
 td::Result<CandidateRef> Candidate::deserialize(td::Slice data, const Bus& bus, std::optional<PeerValidatorId> src,
-                                                std::optional<td::uint32> expected_slot) {
+                                                std::optional<td::uint32> expected_slot,
+                                                std::optional<PublicKey> collator_signer) {
   TRY_RESULT(broadcast, fetch_tl_object<tl::CandidateData>(data, true));
 
   struct ExtractedData {
@@ -193,7 +194,15 @@ td::Result<CandidateRef> Candidate::deserialize(td::Slice data, const Bus& bus, 
   auto id = parsed.hash_builder.build_id_with(parsed.slot);
 
   auto signed_data = serialize_tl_object(id.to_tl(), true);
-  if (!leader.check_signature(bus.session_id, signed_data, parsed.signature)) {
+  if (collator_signer.has_value()) {
+    // Collator/validator split: the candidate is co-signed by the remote collator (its authorization to act
+    // for this window was already verified by the caller). Verify against the collator's key.
+    auto envelope = create_serialize_tl_object<ton_api::consensus_dataToSign>(bus.session_id, signed_data.clone());
+    TRY_RESULT(encryptor, collator_signer.value().create_encryptor());
+    if (encryptor->check_signature(envelope, parsed.signature).is_error()) {
+      return td::Status::Error("Collator candidate broadcast co-signature is not valid");
+    }
+  } else if (!leader.check_signature(bus.session_id, signed_data, parsed.signature)) {
     return td::Status::Error("Candidate broadcast signature is not valid");
   }
 

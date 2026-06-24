@@ -76,7 +76,8 @@ class BlockSyncOverlayImpl : public td::actor::SpawnsWith<Bus>, public td::actor
 
   template <>
   void handle(BusHandle, std::shared_ptr<const CandidateGenerated> event) {
-    td::BufferSlice extra = create_serialize_tl_object<tl::broadcastExtra>(event->candidate->id.slot);
+    td::BufferSlice extra = create_serialize_tl_object<tl::broadcastExtra>(
+        event->candidate->id.slot, create_tl_object<ton_api::consensus_collatorDelegation_none>());
     td::actor::send_closure(overlays_, &overlay::Overlays::send_broadcast_fec_with_extra, local_adnl_id_, overlay_id_,
                             local_adnl_id_.pubkey_hash(), 0, event->candidate->serialize(), std::move(extra));
   }

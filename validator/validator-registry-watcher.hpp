@@ -34,6 +34,12 @@ class ValidatorRegistryWatcher : public td::actor::Actor {
 
   static std::vector<adnl::AdnlNodeIdShort> get_all_collators(Ref<MasterchainState> mc_state);
 
+  // Collators grouped by the validator (its public key hash) that published them, unioned over the
+  // prev/cur/next total validator sets of mc_state. Used both for private-overlay membership and for
+  // the consumer-side check "is this collator authorized by the validator that owns the window".
+  static std::map<PublicKeyHash, std::vector<adnl::AdnlNodeIdShort>> get_collators_by_validator(
+      Ref<MasterchainState> mc_state);
+
  private:
   PublicKeyHash key_hash_;
   td::actor::ActorId<ValidatorManager> manager_;

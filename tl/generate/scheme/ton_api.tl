@@ -1101,8 +1101,9 @@ consensus.block slot:int parent:consensus.CandidateParent candidate:bytes signat
 consensus.empty slot:int parent:consensus.CandidateId block:tonNode.blockIdExt signature:bytes = consensus.CandidateData;
 
 consensus.broadcastExtra slot:int = consensus.BroadcastExtra;
+consensus.delegatedBroadcastExtra slot:int signature:bytes = consensus.BroadcastExtra;
 
-consensus.requestError = consensus.RequestError;
+consensus.pleaseCollate start_slot:int signature:bytes = consensus.PleaseCollate;
 
 consensus.simplex.notarizeVote id:consensus.CandidateId = consensus.simplex.UnsignedVote;
 consensus.simplex.finalizeVote id:consensus.CandidateId = consensus.simplex.UnsignedVote;

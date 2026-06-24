@@ -21,6 +21,7 @@
 #include "ton/ton-types.h"
 
 #include "validator-group.hpp"
+#include "validator-registry-watcher.hpp"
 
 namespace ton::validator {
 
@@ -44,6 +45,7 @@ struct SessionInfo {
   NewConsensusConfig config;
   std::vector<adnl::AdnlNodeIdShort> overlay_members;
   std::vector<GroupIdentity> identities;
+  CollatorsByValidator collators_by_validator;
 
   CatchainSeqno cc_seqno() const {
     return validator_set->get_catchain_seqno();
@@ -83,9 +85,24 @@ struct Context {
   const ManagerContext &deps;
   const MasterchainState &state;
   OverlayMembers overlay_members;
+  const CollatorsByValidator &collators_by_validator;
   td::uint32 unsafe_rotate_id = 0;
   bool should_manage_groups = false;
 };
+
+// This node's own collator adnl ids that appear in `collators` (the registry collator set of the group).
+std::vector<adnl::AdnlNodeIdShort> local_collators_of(const Context &ctx, const CollatorsByValidator &collators) {
+  std::vector<adnl::AdnlNodeIdShort> result;
+  for (const auto &[_, ids] : collators) {
+    for (const auto &id : ids) {
+      if (ctx.deps.local_collator_adnl_ids.contains(id) &&
+          std::find(result.begin(), result.end(), id) == result.end()) {
+        result.push_back(id);
+      }
+    }
+  }
+  return result;
+}
 
 std::vector<GroupIdentity> identities_for(const Context &ctx, const td::Ref<block::ValidatorSet> &val_set,
                                           const NewConsensusConfig &config) {
@@ -149,6 +166,20 @@ SessionInfo session_info(const Context &ctx, ShardIdFull shard, td::Ref<block::V
     }
   }
 
+  CollatorsByValidator collators;
+  if (config.collators_in_overlay()) {
+    collators = ctx.collators_by_validator;
+    // Collator/validator split: this node may serve as a dedicated collator for one or more validators in the
+    // group. For each of our registered collator adnl ids, join the group under that id (as a non-validator
+    // identity) so it runs the bus actors needed to receive pleaseCollate and broadcast on the leader's behalf.
+    for (const auto &local_collator : local_collators_of(ctx, collators)) {
+      if (std::none_of(identities.begin(), identities.end(),
+                       [&](const GroupIdentity &id) { return id.adnl_id == local_collator; })) {
+        identities.push_back({.adnl_id = local_collator, .short_id = std::nullopt, .is_dedicated_collator = true});
+      }
+    }
+  }
+
   return {
       .shard = shard,
       .validator_set = validator_set,
@@ -156,6 +187,7 @@ SessionInfo session_info(const Context &ctx, ShardIdFull shard, td::Ref<block::V
       .config = config,
       .overlay_members = ctx.overlay_members.all,
       .identities = std::move(identities),
+      .collators_by_validator = std::move(collators),
   };
 }
 
@@ -174,6 +206,7 @@ td::actor::ActorOwn<IValidatorGroup> make_group(const Context &ctx, const Sessio
       .adnl_sender = ctx.deps.quic,
       .db_root = ctx.deps.db_root,
       .all_validators = info.overlay_members,
+      .collators_by_validator = info.collators_by_validator,
   };
   return IValidatorGroup::create_bridge(PSTRING() << "valgroup" << info.shard, params);
 }
@@ -548,12 +581,23 @@ class NetworkStateImpl final : public NetworkState {
       : start_seqno_(start_seqno), masterchain_(masterchainId), basechain_(basechainId) {
   }
 
-  void update(const MasterchainState &state, ManagerContext deps) override {
+  void update(td::Ref<MasterchainState> state_ref, ManagerContext deps) override {
+    const MasterchainState &state = *state_ref;
     if (state.rotated_all_shards()) {
       genesis_known_ = true;
     }
     if (!genesis_known_) {
       return;
+    }
+
+    // Collator/validator split: NetworkState observes every masterchain block in order, so it can pin the
+    // collator set to the *second-previous* rotated_all_shards block. We snapshot the registry-derived collator
+    // map at each rotation as it passes; groups then use the snapshot taken one rotation before the most recent
+    // one. Because all nodes replay the same block sequence (forward from the last key block, which is itself a
+    // rotation), every node ends up with an identical collator set — a hard requirement for overlay membership.
+    if (state.rotated_all_shards() && state.get_new_consensus_config(masterchainId).collators_in_overlay()) {
+      second_previous_rotation_collators_ = std::move(previous_rotation_collators_);
+      previous_rotation_collators_ = ValidatorRegistryWatcher::get_collators_by_validator(state_ref);
     }
 
     auto mc_val_set = state.get_validator_set(ShardIdFull{masterchainId});
@@ -562,6 +606,7 @@ class NetworkStateImpl final : public NetworkState {
         .deps = deps,
         .state = state,
         .overlay_members = overlay_members_of(state, deps.validator_keys),
+        .collators_by_validator = second_previous_rotation_collators_,
         .unsafe_rotate_id = rotate_id,
         .should_manage_groups = state.get_seqno() >= start_seqno_,
     };
@@ -588,6 +633,11 @@ class NetworkStateImpl final : public NetworkState {
  private:
   BlockSeqno start_seqno_;
   bool genesis_known_ = false;
+
+  // Collator/validator split: registry collator maps at the most recent and the second-previous
+  // rotated_all_shards blocks. Groups use `second_previous_rotation_collators_` (see update()).
+  CollatorsByValidator previous_rotation_collators_;
+  CollatorsByValidator second_previous_rotation_collators_;
 
   WorkchainState masterchain_;
   WorkchainState basechain_;

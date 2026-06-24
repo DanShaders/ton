@@ -63,8 +63,9 @@ static td::StringBuilder& operator<<(td::StringBuilder& sb, const OutgoingProtoc
   auto broadcast_to_random_fn = [&](const OutgoingProtocolMessage::BroadcastToRandom& r) {
     sb << "BroadcastToRandom{count=" << r.count << "}";
   };
+  auto send_to_peer_fn = [&](const OutgoingProtocolMessage::SendToPeer& s) { sb << "SendToPeer{" << s.peer << "}"; };
 
-  std::visit(td::overloaded(broadcast_to_all_fn, broadcast_to_random_fn), recipient);
+  std::visit(td::overloaded(broadcast_to_all_fn, broadcast_to_random_fn, send_to_peer_fn), recipient);
   return sb;
 }
 

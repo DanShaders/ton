@@ -18,6 +18,7 @@
 
 #include "block-auto.h"
 #include "block-parse.h"
+#include "interfaces/validator-full-id.h"
 #include "shard.hpp"
 #include "transaction.h"
 #include "validator-registry-watcher.hpp"
@@ -226,6 +227,42 @@ std::vector<adnl::AdnlNodeIdShort> ValidatorRegistryWatcher::get_all_collators(R
   LOG(DEBUG) << "Get collators from validator registry: got " << collators.size()
              << " collators from contract -1:" << config.contract_address.to_hex();
   return std::vector<adnl::AdnlNodeIdShort>{collators.begin(), collators.end()};
+}
+
+std::map<PublicKeyHash, std::vector<adnl::AdnlNodeIdShort>> ValidatorRegistryWatcher::get_collators_by_validator(
+    Ref<MasterchainState> mc_state) {
+  block::ValidatorRegistryConfig config;
+  auto r_data = get_contract_data(mc_state, config);
+  if (r_data.is_error()) {
+    LOG(DEBUG) << "Get collators by validator from validator registry: " << r_data.move_as_error();
+    return {};
+  }
+  auto contract_data = r_data.move_as_ok();
+
+  std::map<PublicKeyHash, std::vector<adnl::AdnlNodeIdShort>> result;
+  for (int next : {-1, 0, 1}) {
+    auto val_set = mc_state->get_total_validator_set(next);
+    if (val_set.is_null()) {
+      continue;
+    }
+    for (auto& val : val_set->export_vector()) {
+      PublicKeyHash short_id = ValidatorFullId{val.key}.compute_short_id();
+      if (result.contains(short_id)) {
+        continue;
+      }
+      auto r_entry = get_validator_entry(contract_data, val.key.as_bits256(), config);
+      if (r_entry.is_error()) {
+        LOG(WARNING) << "Get collators by validator from validator registry: failed to get entry for pubkey "
+                     << val.key.as_bits256().to_hex() << ": " << r_entry.move_as_error();
+        continue;
+      }
+      auto entry = r_entry.move_as_ok();
+      if (!entry.collators.empty()) {
+        result.emplace(short_id, std::move(entry.collators));
+      }
+    }
+  }
+  return result;
 }
 
 td::Result<Ref<vm::Cell>> ValidatorRegistryWatcher::get_contract_data(Ref<MasterchainState> mc_state,

@@ -225,6 +225,8 @@ class BridgeImpl final : public IValidatorGroup {
     bus->keyring = params_.keyring;
     bus->validator_opts = params_.validator_opts;
     bus->all_validators = params_.all_validators;
+    bus->collators_by_validator = params_.collators_by_validator;
+    bus->is_dedicated_collator = params_.identity.is_dedicated_collator;
 
     bool found = false;
     size_t idx = 0;
@@ -286,6 +288,8 @@ class BridgeImpl final : public IValidatorGroup {
     simplex::Db::register_in(runtime);
     simplex::Pool::register_in(runtime);
     simplex::StateResolver::register_in(runtime);
+
+    simplex::CollatorProducer::register_in(runtime);
 
     simplex::DefaultCollatorSchedule::provide_for(runtime);
 

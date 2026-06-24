@@ -102,6 +102,25 @@ Masterchain swap
 
 /*
  *
+ * SmartContract (validator registry)
+ *
+ */
+"validator-registry.fif" include   // code in separate source file
+<b x{9bc722a8} s, 0 33 u, b>  // data: storage tag + empty registry HashmapE + last_cleanup_key_block_seqno:uint32
+empty_cell  // libraries
+GR$10  // balance: 10 grams
+0 // split_depth
+0 // ticktock: none
+0xABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB // address
+6 // mode: create + setaddr
+register_smc
+dup make_special dup constant registry_addr
+Masterchain swap
+."validator registry smart contract address = " 2dup .addr cr 2dup 7 .Addr cr
+"validator-registry" +suffix +".addr" save-address-verbose
+
+/*
+ *
  * Configuration Parameters
  *
  */
@@ -121,6 +140,8 @@ AllOnes 5 * constant config_addr
 config_addr config.config_smc!
 // elector-addr
 elector_addr config.elector_smc!
+// validator registry config (param 46): contract_address, max_collators_per_validator, new_code_hash:nothing
+<b x{3601163e} s, registry_addr 256 u, 5 32 u, 0 1 u, b> 46 config!
 
 // 1 sg* 100 sg* 1000 sg* 1000000 sg* config.storage_prices!  // old values (too high)
 1 500 1000 500000 config.storage_prices!
